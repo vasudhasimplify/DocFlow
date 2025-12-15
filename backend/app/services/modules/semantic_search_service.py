@@ -205,13 +205,11 @@ class SemanticSearchService:
                     logger.info("✅ VECTOR SEARCH successful - using database-level vector operations")
                     return response.data
                 else:
-                    logger.warning("⚠️ VECTOR SEARCH returned no results, falling back to MANUAL SEARCH")
-                    return await self._manual_similarity_search(query_embedding, user_id, similarity_threshold, limit)
+                    logger.warning("⚠️ VECTOR SEARCH returned no results")
+                    return []
             except Exception as e:
-                logger.warning(f"❌ VECTOR SEARCH failed: {e}")
-                logger.warning("🔄 Falling back to MANUAL SEARCH (Python-based similarity calculation)")
-                # Fallback to manual similarity calculation
-                return await self._manual_similarity_search(query_embedding, user_id, similarity_threshold, limit)
+                logger.error(f"❌ VECTOR SEARCH failed: {e}")
+                return []
             
             if response.data:
                 logger.info(f"✅ Vector search returned {len(response.data)} results")

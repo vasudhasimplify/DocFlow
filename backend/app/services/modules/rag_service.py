@@ -168,20 +168,30 @@ class RAGService:
                 similarity_score = doc.get('similarity_score', 0.0)
                 analysis_result = doc.get('analysis_result', {})
                 
+                # Debug: Log ALL available keys in the document
+                logger.info(f"📋 Document {i} available keys: {list(doc.keys())}")
                 logger.debug(f"📋 Document {i} debug:")
                 logger.debug(f"   - ID: {doc.get('id', 'Unknown')}")
                 logger.debug(f"   - Name: {doc_name}")
+                logger.debug(f"   - Has chunk_text: {bool(doc.get('chunk_text'))}")
+                logger.debug(f"   - Has extracted_text: {bool(doc.get('extracted_text'))}")
                 logger.debug(f"   - Analysis result type: {type(analysis_result)}")
                 logger.debug(f"   - Analysis result content: {str(analysis_result)[:200]}...")
                 
                 # Add document header
                 context_parts.append(f"--- Document {i}: {doc_name} (Relevance: {similarity_score:.3f}) ---")
                 
-                # Extract fields from analysis result
+                # Extract fields from analysis result OR use chunk_text as fallback
                 logger.info(f"📋 Analysis result keys: {list(analysis_result.keys()) if analysis_result else 'None'}")
                 
-                # PRIMARY: Handle hierarchical_data structure (this is the main format)
-                if analysis_result and 'hierarchical_data' in analysis_result:
+                # PRIORITY 1: Use chunk_text if available (from document_chunks table)
+                chunk_text = doc.get('chunk_text', '')
+                if chunk_text and chunk_text.strip():
+                    logger.info(f"📋 Using chunk_text for document {i} ({len(chunk_text)} characters)")
+                    context_parts.append(chunk_text)
+                
+                # PRIORITY 2: Handle hierarchical_data structure (from analysis_result)
+                elif analysis_result and 'hierarchical_data' in analysis_result:
                     hierarchical_data = analysis_result['hierarchical_data']
                     logger.info(f"📋 Processing hierarchical_data with {len(hierarchical_data)} sections")
                     
@@ -203,7 +213,7 @@ class RAGService:
                                 field_name = section_key.replace('_', ' ').title()
                                 context_parts.append(f"{field_name}: {section_data}")
                 
-                # FALLBACK: Handle fields array
+                # PRIORITY 3: Handle fields array
                 elif analysis_result and 'fields' in analysis_result:
                     fields = analysis_result['fields']
                     logger.info(f"📋 Found {len(fields)} fields in document {i}")
@@ -231,9 +241,17 @@ class RAGService:
                             # Simple value
                             if field_value:
                                 context_parts.append(f"{field_name}: {field_value}")
+                
+                # PRIORITY 4: Use extracted_text as last resort
+                elif doc.get('extracted_text'):
+                    extracted_text = doc.get('extracted_text', '')
+                    if extracted_text.strip():
+                        logger.info(f"📋 Using extracted_text for document {i} ({len(extracted_text)} characters)")
+                        # Limit to first 2000 characters to avoid overwhelming context
+                        context_parts.append(extracted_text[:2000])
+                
                 else:
-                    logger.warning(f"⚠️ No hierarchical_data or fields found in analysis_result for document {i}")
-                    logger.debug(f"⚠️ Analysis result content: {str(analysis_result)[:200]}...")
+                    logger.warning(f"⚠️ No content found for document {i} (no chunk_text, analysis_result, or extracted_text)")
                 
                 context_parts.append("")  # Empty line between documents
             
