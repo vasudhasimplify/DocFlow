@@ -111,3 +111,6 @@ Thumbs.db
 *.bak
 *.swp
 *.swo
+
+# dotenv
+.env
