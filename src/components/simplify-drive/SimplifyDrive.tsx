@@ -70,10 +70,28 @@ export function SimplifyDrive() {
   }, []);
 
   const handleDownloadDocument = useCallback((doc: Document) => {
-    if (doc.storage_path) {
-      window.open(doc.storage_path, '_blank');
+    const downloadUrl = doc.storage_url || doc.storage_path;
+    if (downloadUrl) {
+      // Create a temporary anchor element to trigger download
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = doc.file_name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      toast({
+        title: "Download started",
+        description: `Downloading ${doc.file_name}`,
+      });
+    } else {
+      toast({
+        title: "Download failed",
+        description: "No storage URL found for this document",
+        variant: "destructive",
+      });
     }
-  }, []);
+  }, [toast]);
 
   const handleCreateShortcut = useCallback((doc: Document) => {
     setShortcutDocument(doc);

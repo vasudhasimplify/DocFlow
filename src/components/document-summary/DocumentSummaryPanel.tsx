@@ -44,9 +44,8 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
-
-type SummaryType = 'brief' | 'detailed' | 'executive' | 'bullet' | 'action-items';
+import { generateDocumentSummary } from '@/services/documentSummary';
+import type { SummaryType } from '@/services/documentSummary';
 
 interface SummaryTypeOption {
   id: SummaryType;
@@ -117,6 +116,7 @@ interface DocumentSummary {
 
 interface DocumentSummaryPanelProps {
   documentName: string;
+  documentId: string;
   documentText: string;
   onClose?: () => void;
   initialSummary?: DocumentSummary | null;
@@ -124,6 +124,7 @@ interface DocumentSummaryPanelProps {
 
 export function DocumentSummaryPanel({
   documentName,
+  documentId,
   documentText,
   onClose,
   initialSummary,
@@ -141,44 +142,33 @@ export function DocumentSummaryPanel({
   const [error, setError] = useState<string | null>(null);
 
   const generateSummary = useCallback(async (type: SummaryType) => {
-    if (!documentText || documentText.trim().length === 0) {
-      toast.error('No document text available. The document may need to be processed first.');
-      setError('No document text available. Please ensure the document has been processed and text has been extracted.');
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
 
     try {
-      console.log('Generating summary for:', documentName, 'Type:', type, 'Text length:', documentText.length);
+      console.log('Generating summary for:', documentName, 'Type:', type, 'Document ID:', documentId);
       
-      const { data, error: fnError } = await supabase.functions.invoke('document-summary', {
-        body: {
-          documentText,
-          documentName,
-          summaryType: type,
-          language: selectedLanguage,
-        },
-      });
+      const result = await generateDocumentSummary(documentId, type, selectedLanguage);
 
-      if (fnError) {
-        console.error('Function error:', fnError);
-        throw new Error(fnError.message);
-      }
-
-      if (!data) {
-        throw new Error('No response from AI service');
-      }
-
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to generate summary');
+      // Check if the result contains an error or warning
+      if (result.summary.startsWith('⚠️')) {
+        setError(result.summary);
+        toast.error('Unable to generate summary', {
+          description: result.metadata.error || 'Please check the document status',
+        });
+        return;
       }
 
       const newSummary: DocumentSummary = {
-        summary: data.summary,
+        summary: result.summary,
         summaryType: type,
-        metadata: data.metadata,
+        metadata: {
+          documentName,
+          wordCount: result.metadata.wordCount || 0,
+          charCount: result.metadata.charCount || 0,
+          estimatedReadTime: result.metadata.estimatedReadTime || 1,
+          generatedAt: result.metadata.generatedAt || new Date().toISOString(),
+        },
       };
 
       setSummaries(prev => ({
@@ -191,11 +181,13 @@ export function DocumentSummaryPanel({
       console.error('Summary generation error:', err);
       const message = err instanceof Error ? err.message : 'Failed to generate summary';
       setError(message);
-      toast.error(message);
+      toast.error('Failed to generate summary', {
+        description: message,
+      });
     } finally {
       setIsLoading(false);
     }
-  }, [documentText, documentName, selectedLanguage]);
+  }, [documentId, documentName, documentText, selectedLanguage]);
 
   const copyToClipboard = useCallback((text: string) => {
     navigator.clipboard.writeText(text);
