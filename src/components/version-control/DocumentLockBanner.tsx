@@ -1,8 +1,18 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { Lock, Unlock, Clock, AlertTriangle, Bell, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Alert,
   AlertDescription,
@@ -15,6 +25,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { useLockNotifications } from '@/hooks/useLockNotifications';
 import type { DocumentLock, LockNotification } from '@/types/versionControl';
 
 interface DocumentLockBannerProps {
@@ -24,9 +35,9 @@ interface DocumentLockBannerProps {
   notifications: LockNotification[];
   onLock: () => void;
   onUnlock: () => void;
-  onRequestAccess: () => void;
   onDismissNotification: (id: string) => void;
   isLoading?: boolean;
+  documentId: string;
 }
 
 export function DocumentLockBanner({
@@ -36,10 +47,13 @@ export function DocumentLockBanner({
   notifications,
   onLock,
   onUnlock,
-  onRequestAccess,
   onDismissNotification,
   isLoading,
+  documentId,
 }: DocumentLockBannerProps) {
+  const { requestAccess } = useLockNotifications();
+  const [showRequestDialog, setShowRequestDialog] = useState(false);
+  const [requestMessage, setRequestMessage] = useState('');
   const isLocked = !!lock?.is_active;
   const expiresAt = lock?.expires_at ? new Date(lock.expires_at) : null;
   const isExpiringSoon = expiresAt && (expiresAt.getTime() - Date.now()) < 10 * 60 * 1000; // 10 minutes
@@ -104,11 +118,11 @@ export function DocumentLockBanner({
                   <Clock className="h-3 w-3" />
                   {isExpiringSoon ? (
                     <span className="text-amber-500">
-                      Lock expires {formatDistanceToNow(expiresAt, { addSuffix: true })}
+                      Lock {expiresAt.getTime() > Date.now() ? 'expires' : 'expired'} {formatDistanceToNow(expiresAt, { addSuffix: true })}
                     </span>
                   ) : (
                     <span>
-                      Lock expires at {format(expiresAt, 'HH:mm')}
+                      Lock {expiresAt.getTime() > Date.now() ? 'expires' : 'expired'} at {format(expiresAt, 'HH:mm')}
                     </span>
                   )}
                 </p>
@@ -192,14 +206,14 @@ export function DocumentLockBanner({
               {expiresAt && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                   <Clock className="h-3 w-3" />
-                  Available {formatDistanceToNow(expiresAt, { addSuffix: true })}
+                  {expiresAt.getTime() > Date.now() ? 'Available' : 'Was locked until'} {formatDistanceToNow(expiresAt, { addSuffix: true })}
                 </p>
               )}
             </div>
             <Button
               variant="outline"
               size="sm"
-              onClick={onRequestAccess}
+              onClick={() => setShowRequestDialog(true)}
               disabled={isLoading}
             >
               <Bell className="h-4 w-4 mr-2" />
@@ -211,5 +225,47 @@ export function DocumentLockBanner({
     );
   }
 
-  return null;
+  const handleRequestAccess = async () => {
+    const success = await requestAccess(documentId, requestMessage || undefined);
+    if (success) {
+      setShowRequestDialog(false);
+      setRequestMessage('');
+    }
+  };
+
+  return (
+    <>
+      {/* Request Access Dialog */}
+      <Dialog open={showRequestDialog} onOpenChange={setShowRequestDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request Document Access</DialogTitle>
+            <DialogDescription>
+              Send a request to the document owner to release the lock
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Message (Optional)</label>
+              <Textarea
+                placeholder="Explain why you need access..."
+                value={requestMessage}
+                onChange={(e) => setRequestMessage(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRequestDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleRequestAccess}>
+              <Bell className="h-4 w-4 mr-2" />
+              Send Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }

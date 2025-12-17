@@ -51,7 +51,7 @@ export const CheckOutDialog: React.FC<CheckOutDialogProps> = ({
 
     setIsLoading(true);
     try {
-      // Check if document is already locked
+      // Check if document is already locked and not expired
       const { data: existingLock } = await supabase
         .from('document_locks')
         .select('*')
@@ -60,12 +60,32 @@ export const CheckOutDialog: React.FC<CheckOutDialogProps> = ({
         .maybeSingle();
 
       if (existingLock) {
-        toast({
-          title: 'Document Already Checked Out',
-          description: 'This document is currently being edited by another user.',
-          variant: 'destructive'
-        });
-        return;
+        // Check if lock is actually expired
+        const isExpired = existingLock.expires_at && new Date(existingLock.expires_at) < new Date();
+        
+        if (isExpired) {
+          // Lock is expired, mark it as inactive and allow new checkout
+          await supabase
+            .from('document_locks')
+            .update({ is_active: false })
+            .eq('id', existingLock.id);
+          // Continue with creating new lock
+        } else {
+          // Lock is still active
+          const isLockedByCurrentUser = existingLock.locked_by === user.id;
+          
+          toast({
+            title: isLockedByCurrentUser ? 'Already Checked Out' : 'Document Locked',
+            description: isLockedByCurrentUser 
+              ? 'You have already checked out this document. Go to Check In/Out tab to manage it.'
+              : 'This document is currently checked out by another user.',
+            variant: 'destructive'
+          });
+          
+          // Close the dialog
+          onOpenChange(false);
+          return;
+        }
       }
 
       // Calculate expiration
@@ -77,15 +97,23 @@ export const CheckOutDialog: React.FC<CheckOutDialogProps> = ({
       }
 
       // Create lock
+      const lockData: any = {
+        document_id: documentId,
+        locked_by: user.id,
+        is_active: true
+      };
+      
+      if (reason && reason.trim()) {
+        lockData.lock_reason = reason.trim();
+      }
+      
+      if (expiresAt) {
+        lockData.expires_at = expiresAt;
+      }
+
       const { error } = await supabase
         .from('document_locks')
-        .insert({
-          document_id: documentId,
-          locked_by: user.id,
-          lock_reason: reason || 'Editing document',
-          expires_at: expiresAt,
-          is_active: true
-        });
+        .insert(lockData);
 
       if (error) throw error;
 

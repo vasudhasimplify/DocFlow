@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { supabase } from '@/integrations/supabase/client';
 import { 
   FileText, 
   Eye, 
@@ -14,7 +15,9 @@ import {
   Tag,
   Folder,
   Sparkles,
-  Pin
+  Pin,
+  Lock,
+  UserMinus
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -26,6 +29,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CheckOutDialog } from '@/components/checkinout/CheckOutDialog';
+import { TransferOwnershipDialog } from '@/components/ownership/TransferOwnershipDialog';
 
 interface Document {
   id: string;
@@ -78,6 +83,11 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 }) => {
   const { toast } = useToast();
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();
+  
+  // Check Out and Transfer Dialog states
+  const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
 
   const handleView = (document: Document) => {
     // Trigger the parent click handler which opens the modal viewer
@@ -161,7 +171,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
       {documents.map(document => (
         <Card 
           key={document.id} 
-          className="group hover:shadow-lg transition-all duration-200 cursor-pointer border hover:border-primary/20"
+          className="group hover:shadow-lg transition-all duration-200 cursor-pointer border hover:border-primary/50 bg-white"
           onClick={() => onDocumentClick(document)}
         >
           <CardContent className="p-4">
@@ -316,40 +326,73 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
               )}
             </div>
 
-            {/* Quick Actions */}
-            <div className="flex items-center gap-1 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+            {/* Primary Actions */}
+            <div className="flex gap-1.5 mt-3">
               <Button 
                 variant="ghost" 
                 size="sm"
+                className="flex-1 h-8 text-xs px-2 hover:bg-gray-100"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleView(document);
                 }}
               >
-                <Eye className="w-3 h-3 mr-1" />
-                View
+                <Eye className="w-3.5 h-3.5 mr-1" />
+                <span className="hidden sm:inline">View</span>
               </Button>
               <Button 
                 variant="ghost" 
                 size="sm"
+                className="flex-1 h-8 text-xs px-2 hover:bg-gray-100"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDownload(document);
                 }}
               >
-                <Download className="w-3 h-3 mr-1" />
-                Download
+                <Download className="w-3.5 h-3.5 mr-1" />
+                <span className="hidden sm:inline">Download</span>
               </Button>
               <Button 
                 variant="ghost" 
                 size="sm"
+                className="flex-1 h-8 text-xs px-2 hover:bg-gray-100"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleShare(document);
                 }}
               >
-                <Share className="w-3 h-3 mr-1" />
-                Share
+                <Share className="w-3.5 h-3.5 mr-1" />
+                <span className="hidden sm:inline">Share</span>
+              </Button>
+            </div>
+            
+            {/* Document Management Actions */}
+            <div className="flex gap-1.5 mt-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                className="flex-1 h-8 text-xs px-2 bg-blue-50/50 hover:bg-blue-50 border-blue-200/60 text-blue-600 hover:text-blue-700"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedDocument(document);
+                  setShowCheckOutDialog(true);
+                }}
+              >
+                <Lock className="w-3.5 h-3.5 mr-1" />
+                Check Out
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm"
+                className="flex-1 h-8 text-xs px-2 bg-purple-50/50 hover:bg-purple-50 border-purple-200/60 text-purple-600 hover:text-purple-700"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedDocument(document);
+                  setShowTransferDialog(true);
+                }}
+              >
+                <UserMinus className="w-3.5 h-3.5 mr-1" />
+                Transfer
               </Button>
             </div>
 
@@ -373,6 +416,37 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
           </CardContent>
         </Card>
       ))}
+      
+      {/* Dialogs */}
+      {selectedDocument && (
+        <>
+          <CheckOutDialog
+            open={showCheckOutDialog}
+            onOpenChange={setShowCheckOutDialog}
+            documentId={selectedDocument.id}
+            documentName={selectedDocument.file_name}
+            onCheckOutComplete={() => {
+              toast({
+                title: "Document checked out",
+                description: "You can now work on this document exclusively.",
+              });
+            }}
+          />
+          
+          <TransferOwnershipDialog
+            open={showTransferDialog}
+            onOpenChange={setShowTransferDialog}
+            documentId={selectedDocument.id}
+            documentName={selectedDocument.file_name}
+            onSuccess={() => {
+              toast({
+                title: "Transfer initiated",
+                description: "The recipient will be notified to accept or reject the transfer.",
+              });
+            }}
+          />
+        </>
+      )}
     </div>
   );
 };

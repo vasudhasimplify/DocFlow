@@ -17,6 +17,8 @@ if env_file_path.exists():
 
 from .api.routes import analyze_router
 from .api.quick_access import router as quick_access_router
+from .api.checkinout import router as checkinout_router
+from .api.ownership_transfers import router as ownership_transfers_router
 from .core.config import settings
 
 # Configure logging with both console and file handlers
@@ -139,6 +141,8 @@ app.add_middleware(
 # Include routers
 app.include_router(analyze_router, prefix="/api/v1")
 app.include_router(quick_access_router, prefix="/api/v1")
+app.include_router(checkinout_router)
+app.include_router(ownership_transfers_router)
 
 @app.on_event("shutdown")
 async def shutdown_event():

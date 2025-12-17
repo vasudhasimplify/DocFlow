@@ -67,6 +67,7 @@ class DocumentSummaryRequest(BaseModel):
     documentId: str
     userId: str
     summary_type: Optional[str] = "brief"  # brief, detailed, key_points
+    language: Optional[str] = "en"  # en, es, fr, de, pt, it, zh, ja, ko, ar, hi, id
 
 class DocumentSummaryResponse(BaseModel):
     summary: str
@@ -640,7 +641,8 @@ async def get_document_summary(request: DocumentSummaryRequest):
         result = await rag_service.get_document_summary(
             document_id=request.documentId,
             user_id=request.userId,
-            summary_type=request.summary_type
+            summary_type=request.summary_type,
+            language=request.language
         )
         
         logger.info(f"✅ Document summary generated")

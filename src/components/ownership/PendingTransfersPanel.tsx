@@ -19,10 +19,12 @@ import { formatDistanceToNow } from 'date-fns';
 export function PendingTransfersPanel() {
   const {
     pendingIncoming,
+    pendingOutgoing,
     transfers,
     isLoading,
     acceptTransfer,
     rejectTransfer,
+    cancelTransfer,
   } = useOwnershipTransfer();
 
   if (isLoading) {
@@ -57,6 +59,68 @@ export function PendingTransfersPanel() {
 
   return (
     <div className="space-y-4">
+      {/* Pending Outgoing Transfers */}
+      {pendingOutgoing.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-800">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Mail className="h-4 w-4 text-amber-600" />
+              Pending Outgoing Transfers
+              <Badge variant="secondary">{pendingOutgoing.length}</Badge>
+            </CardTitle>
+            <CardDescription>
+              Transfers you initiated waiting for acceptance
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="max-h-[300px]">
+              <div className="space-y-3">
+                {pendingOutgoing.map((transfer) => (
+                  <div
+                    key={transfer.id}
+                    className="p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="p-2 rounded-lg bg-amber-500/10">
+                          <FileText className="h-4 w-4 text-amber-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{transfer.document?.file_name || 'Document Transfer'}</p>
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Mail className="h-3 w-3" />
+                            <span>To: {transfer.to_user_email}</span>
+                          </div>
+                          {transfer.message && (
+                            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                              "{transfer.message}"
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {formatDistanceToNow(new Date(transfer.created_at), { addSuffix: true })}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 mt-3">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => cancelTransfer(transfer.id)}
+                      >
+                        <X className="h-4 w-4 mr-1" />
+                        Cancel Transfer
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Pending Incoming Transfers */}
       {pendingIncoming.length > 0 && (
         <Card className="border-primary/30 bg-primary/5">
@@ -84,10 +148,10 @@ export function PendingTransfersPanel() {
                           <FileText className="h-4 w-4 text-primary" />
                         </div>
                         <div className="min-w-0">
-                          <p className="font-medium truncate">Document Transfer</p>
+                          <p className="font-medium truncate">{transfer.document?.file_name || 'Document Transfer'}</p>
                           <div className="flex items-center gap-1 text-xs text-muted-foreground">
                             <Mail className="h-3 w-3" />
-                            <span>From: {transfer.to_user_email}</span>
+                            <span>From: {transfer.from_user_email || 'Unknown User'}</span>
                           </div>
                           {transfer.message && (
                             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
@@ -147,20 +211,25 @@ export function PendingTransfersPanel() {
                 {transfers.slice(0, 10).map((transfer) => (
                   <div
                     key={transfer.id}
-                    className="flex items-center justify-between p-3 rounded-lg border"
+                    className="flex items-start justify-between gap-3 p-3 rounded-lg border"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-sm truncate">
-                          Transfer to {transfer.to_user_email}
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">
+                          {transfer.document?.file_name || 'Document'}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          To: {transfer.to_user_email}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {formatDistanceToNow(new Date(transfer.created_at), { addSuffix: true })}
                         </p>
                       </div>
                     </div>
-                    {getStatusBadge(transfer.status)}
+                    <div className="shrink-0">
+                      {getStatusBadge(transfer.status)}
+                    </div>
                   </div>
                 ))}
               </div>

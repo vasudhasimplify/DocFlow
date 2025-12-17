@@ -22,6 +22,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "@/hooks/use-toast";
 import { BackendIndicator } from "./BackendIndicator";
+import { LockNotificationsList } from "@/components/notifications/LockNotificationsList";
 import simplifyLogo from "@/assets/simplify-logo.png";
 
 export const Navigation = () => {
@@ -139,6 +140,7 @@ export const Navigation = () => {
 
           {/* User Menu */}
           <div className="hidden md:flex items-center gap-3 flex-shrink-0">
+            <LockNotificationsList />
             <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-accent/50">
               <BackendIndicator />
               <span className="text-sm text-muted-foreground">{user?.email}</span>
@@ -180,6 +182,9 @@ export const Navigation = () => {
               ))}
               <div className="pt-3 mt-3 border-t border-border">
                 <div className="text-sm text-muted-foreground mb-2">{user?.email}</div>
+                <div className="mb-2">
+                  <LockNotificationsList />
+                </div>
                 <Button 
                   variant="ghost" 
                   size="sm" 

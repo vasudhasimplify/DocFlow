@@ -63,7 +63,7 @@ export function SummaryDashboard({ documents = [] }: SummaryDashboardProps) {
 
   const processedDocuments = useMemo(() => {
     return documents.filter(doc => 
-      doc.processing_status === 'completed' && doc.extracted_text
+      doc.processing_status === 'completed'
     );
   }, [documents]);
 
@@ -177,7 +177,7 @@ export function SummaryDashboard({ documents = [] }: SummaryDashboardProps) {
             ) : (
               <div className="space-y-2">
                 {filteredDocuments.map((doc) => {
-                  const isProcessed = doc.processing_status === 'completed' && doc.extracted_text;
+                  const isProcessed = doc.processing_status === 'completed';
                   return (
                     <button
                       key={doc.id}

@@ -542,7 +542,8 @@ ANSWER:"""
         self,
         document_id: str,
         user_id: str,
-        summary_type: str = "brief"
+        summary_type: str = "brief",
+        language: str = "en"
     ) -> Dict[str, Any]:
         """
         Generate a summary of a specific document.
@@ -551,6 +552,7 @@ ANSWER:"""
             document_id: ID of the document to summarize
             user_id: User ID for access control
             summary_type: Type of summary ("brief", "detailed", "key_points")
+            language: Language code for summary (en, es, fr, de, pt, it, zh, ja, ko, ar, hi, id)
             
         Returns:
             Dictionary containing summary and metadata
@@ -614,14 +616,33 @@ ANSWER:"""
                     }
                 }
             
+            # Map language codes to names
+            language_names = {
+                "en": "English",
+                "es": "Spanish",
+                "fr": "French",
+                "de": "German",
+                "pt": "Portuguese",
+                "it": "Italian",
+                "zh": "Chinese",
+                "ja": "Japanese",
+                "ko": "Korean",
+                "ar": "Arabic",
+                "hi": "Hindi",
+                "id": "Indonesian"
+            }
+            
+            target_language = language_names.get(language, "English")
+            language_instruction = f" IMPORTANT: Write the summary in {target_language}." if language != "en" else ""
+            
             # Generate summary based on type
             summary_prompts = {
-                "brief": f"Provide a brief 2-3 sentence summary of this document that captures the main idea:\n\n{context}",
-                "detailed": f"Provide a comprehensive and detailed summary of this document, including all key information, main points, and important details:\n\n{context}",
-                "executive": f"Provide an executive summary for decision makers. Focus on key insights, strategic implications, and actionable recommendations. Format it professionally:\n\n{context}",
-                "bullet": f"Extract and present the key points from this document in bullet point format. Use clear, concise bullet points:\n\n{context}",
-                "action-items": f"Identify all action items, tasks, deadlines, and responsibilities mentioned in this document. Present them in a structured format with due dates if available:\n\n{context}",
-                "key_points": f"Extract the key points from this document in bullet format:\n\n{context}"
+                "brief": f"Provide a brief 2-3 sentence summary of this document that captures the main idea.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
+                "detailed": f"Provide a comprehensive and detailed summary of this document, including all key information, main points, and important details.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
+                "executive": f"Provide an executive summary for decision makers. Focus on key insights, strategic implications, and actionable recommendations. Format it professionally.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
+                "bullet": f"Extract and present the key points from this document in bullet point format. Use clear, concise bullet points.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
+                "action-items": f"Identify all action items, tasks, deadlines, and responsibilities mentioned in this document. Present them in a structured format with due dates if available.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
+                "key_points": f"Extract the key points from this document in bullet format.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}"
             }
             
             prompt = summary_prompts.get(summary_type, f"Summarize this document:\n\n{context}")

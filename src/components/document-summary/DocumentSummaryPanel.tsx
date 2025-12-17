@@ -1,4 +1,6 @@
 import React, { useState, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Sparkles,
   FileText,
@@ -52,6 +54,7 @@ interface SummaryTypeOption {
   label: string;
   description: string;
   icon: React.ElementType;
+  color?: string;
 }
 
 const summaryTypes: SummaryTypeOption[] = [
@@ -60,30 +63,35 @@ const summaryTypes: SummaryTypeOption[] = [
     label: 'Brief',
     description: '2-3 sentence overview',
     icon: BookOpen,
+    color: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
   },
   {
     id: 'detailed',
     label: 'Detailed',
     description: 'Comprehensive analysis',
     icon: FileText,
+    color: 'bg-green-500/10 text-green-600 dark:text-green-400',
   },
   {
     id: 'executive',
     label: 'Executive',
     description: 'For decision makers',
     icon: Briefcase,
+    color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400',
   },
   {
     id: 'bullet',
     label: 'Bullet Points',
     description: 'Scannable format',
     icon: List,
+    color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
   },
   {
     id: 'action-items',
     label: 'Action Items',
     description: 'Tasks & deadlines',
     icon: ClipboardList,
+    color: 'bg-red-500/10 text-red-600 dark:text-red-400',
   },
 ];
 
@@ -272,7 +280,11 @@ ${summary.summary}
                     <TooltipTrigger asChild>
                       <TabsTrigger
                         value={type.id}
-                        className="flex-col gap-1 py-2 px-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground relative"
+                        className={cn(
+                          "flex-col gap-1 py-2 px-1 relative transition-colors",
+                          "data-[state=active]:bg-primary data-[state=active]:text-primary-foreground",
+                          type.color && "data-[state=inactive]:" + type.color
+                        )}
                       >
                         <Icon className="h-4 w-4" />
                         <span className="text-[10px] font-medium truncate max-w-full">
@@ -297,7 +309,7 @@ ${summary.summary}
         {/* Generate Button */}
         <Button
           onClick={() => generateSummary(selectedType)}
-          disabled={isLoading || !documentText}
+          disabled={isLoading}
           className="w-full gap-2"
         >
           {isLoading ? (
@@ -348,8 +360,10 @@ ${summary.summary}
 
               {/* Summary Text */}
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <div className="p-4 rounded-lg bg-muted/50 border whitespace-pre-wrap text-sm leading-relaxed">
-                  {currentSummary.summary}
+                <div className="p-4 rounded-lg bg-muted/50 border text-sm leading-relaxed">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {currentSummary.summary}
+                  </ReactMarkdown>
                 </div>
               </div>
 

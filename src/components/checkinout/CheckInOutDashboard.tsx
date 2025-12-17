@@ -40,6 +40,7 @@ interface CheckedOutDocument {
   lock_reason?: string;
   expires_at?: string;
   is_active: boolean;
+  document_owner_id?: string;
 }
 
 interface CheckInOutHistory {
@@ -73,6 +74,41 @@ export const CheckInOutDashboard: React.FC = () => {
     if (user) {
       fetchData();
     }
+  }, [user]);
+
+  // Auto-release expired locks
+  useEffect(() => {
+    const releaseExpiredLocks = async () => {
+      if (!user) return;
+
+      const { data: expiredLocks } = await supabase
+        .from('document_locks')
+        .select('id, document_id, expires_at')
+        .eq('is_active', true)
+        .not('expires_at', 'is', null);
+
+      if (expiredLocks && expiredLocks.length > 0) {
+        const now = Date.now();
+        const expiredLockIds = expiredLocks
+          .filter(lock => new Date(lock.expires_at!).getTime() < now)
+          .map(lock => lock.id);
+
+        if (expiredLockIds.length > 0) {
+          await supabase
+            .from('document_locks')
+            .update({ is_active: false })
+            .in('id', expiredLockIds);
+
+          // Refresh data to show updated status
+          fetchData();
+        }
+      }
+    };
+
+    releaseExpiredLocks();
+    // Check every 30 seconds for expired locks
+    const interval = setInterval(releaseExpiredLocks, 30000);
+    return () => clearInterval(interval);
   }, [user]);
 
   const fetchData = async () => {
@@ -116,20 +152,29 @@ export const CheckInOutDashboard: React.FC = () => {
     let documentsMap: Record<string, string> = {};
     
     if (documentIds.length > 0) {
-      const { data: docs } = await supabase
+      const { data: docs, error: docsError } = await supabase
         .from('documents')
-        .select('id, name')
+        .select('id, file_name')
         .in('id', documentIds);
       
+      if (docsError) {
+        console.error('❌ Error fetching documents for My Checkouts:', docsError);
+      } else {
+        console.log('📄 Documents fetched for My Checkouts:', docs);
+      }
+      
       documentsMap = (docs || []).reduce((acc, doc) => {
-        acc[doc.id] = doc.name;
+        acc[doc.id] = doc.file_name;
         return acc;
       }, {} as Record<string, string>);
+      
+      console.log('📋 Documents map (My Checkouts):', documentsMap);
     }
 
     const checkouts: CheckedOutDocument[] = (data || []).map(lock => ({
       ...lock,
-      document_name: documentsMap[lock.document_id] || 'Unknown Document'
+      document_name: documentsMap[lock.document_id] || 'Unknown Document',
+      locker_email: user?.email || 'Unknown User'
     }));
 
     setMyCheckouts(checkouts);
@@ -165,25 +210,53 @@ export const CheckInOutDashboard: React.FC = () => {
       return;
     }
 
-    // Fetch document names
+    // Fetch document names and owners
     const documentIds = data?.map(d => d.document_id) || [];
     let documentsMap: Record<string, string> = {};
+    let documentOwnersMap: Record<string, string> = {};
     
     if (documentIds.length > 0) {
-      const { data: docs } = await supabase
+      const { data: docs, error: docsError } = await supabase
         .from('documents')
-        .select('id, name')
+        .select('id, file_name, user_id')
         .in('id', documentIds);
       
+      if (docsError) {
+        console.error('❌ Error fetching documents for All Checkouts:', docsError);
+      } else {
+        console.log('📄 Documents fetched for All Checkouts:', docs);
+      }
+      
       documentsMap = (docs || []).reduce((acc, doc) => {
-        acc[doc.id] = doc.name;
+        acc[doc.id] = doc.file_name;
         return acc;
       }, {} as Record<string, string>);
+      
+      documentOwnersMap = (docs || []).reduce((acc, doc) => {
+        acc[doc.id] = doc.user_id;
+        return acc;
+      }, {} as Record<string, string>);
+      
+      console.log('📋 Documents map (All Checkouts):', documentsMap);
+      console.log('👤 Document owners map:', documentOwnersMap);
+    }
+
+    // Fetch user emails for locked_by users
+    const userIds = [...new Set(data?.map(d => d.locked_by) || [])];
+    const userEmailsMap: Record<string, string> = {};
+    
+    for (const userId of userIds) {
+      const { data: email } = await supabase.rpc('get_user_email_by_id', { user_id: userId });
+      if (email) {
+        userEmailsMap[userId] = email;
+      }
     }
 
     const checkouts: CheckedOutDocument[] = (data || []).map(lock => ({
       ...lock,
-      document_name: documentsMap[lock.document_id] || 'Unknown Document'
+      document_name: documentsMap[lock.document_id] || 'Unknown Document',
+      locker_email: userEmailsMap[lock.locked_by] || 'Unknown User',
+      document_owner_id: documentOwnersMap[lock.document_id]
     }));
 
     setAllCheckouts(checkouts);
@@ -498,7 +571,7 @@ export const CheckInOutDashboard: React.FC = () => {
                         onCheckIn={() => handleCheckIn(checkout.id, checkout.document_id)}
                         onExtend={() => handleExtendLock(checkout.id)}
                         onForceUnlock={() => handleForceUnlock(checkout.id, checkout.document_id)}
-                        showForceUnlock={checkout.locked_by !== user?.id}
+                        showForceUnlock={checkout.document_owner_id === user?.id}
                       />
                     ))}
                   </div>
@@ -635,7 +708,10 @@ const CheckoutCard: React.FC<CheckoutCardProps> = ({
           {checkout.expires_at && (
             <span className="flex items-center gap-1">
               <Timer className="h-3 w-3" />
-              Expires {formatDistanceToNow(new Date(checkout.expires_at), { addSuffix: true })}
+              {new Date(checkout.expires_at).getTime() > Date.now() 
+                ? `Expires ${formatDistanceToNow(new Date(checkout.expires_at), { addSuffix: true })}`
+                : `Expired ${formatDistanceToNow(new Date(checkout.expires_at), { addSuffix: true })}`
+              }
             </span>
           )}
         </div>
@@ -647,9 +723,9 @@ const CheckoutCard: React.FC<CheckoutCardProps> = ({
       </div>
 
       <div className="flex items-center gap-2">
-        {isOwner && (
+        {isOwner && !isExpired && (
           <>
-            {(isExpiringSoon || isExpired) && (
+            {isExpiringSoon && (
               <Button variant="outline" size="sm" onClick={onExtend}>
                 <Timer className="h-4 w-4 mr-1" />
                 Extend
@@ -660,6 +736,11 @@ const CheckoutCard: React.FC<CheckoutCardProps> = ({
               Check In
             </Button>
           </>
+        )}
+        {isOwner && isExpired && (
+          <Badge variant="outline" className="text-xs text-muted-foreground">
+            Auto-releasing...
+          </Badge>
         )}
         {showForceUnlock && onForceUnlock && (
           <Button variant="destructive" size="sm" onClick={onForceUnlock}>

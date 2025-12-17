@@ -8,37 +8,62 @@ export interface OwnershipTransfer {
   from_user_id: string;
   to_user_id: string;
   to_user_email: string;
+  from_user_email?: string;
   status: 'pending' | 'accepted' | 'rejected' | 'cancelled';
   message: string | null;
   transferred_at: string | null;
   created_at: string;
   updated_at: string;
+  document?: {
+    id: string;
+    file_name: string;
+  };
 }
 
 export function useOwnershipTransfer() {
   const [transfers, setTransfers] = useState<OwnershipTransfer[]>([]);
   const [pendingIncoming, setPendingIncoming] = useState<OwnershipTransfer[]>([]);
+  const [pendingOutgoing, setPendingOutgoing] = useState<OwnershipTransfer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
   const fetchTransfers = useCallback(async () => {
     try {
       const { data: user } = await supabase.auth.getUser();
-      if (!user.user) return;
+      if (!user.user) {
+        console.log('📧 No user logged in');
+        return;
+      }
+
+      console.log('📧 Fetching transfers for user:', user.user.id, user.user.email);
 
       const { data, error } = await (supabase
         .from('document_ownership_transfers')
-        .select('*')
+        .select(`
+          *,
+          document:documents(id, file_name)
+        `)
         .or(`from_user_id.eq.${user.user.id},to_user_id.eq.${user.user.id}`)
         .order('created_at', { ascending: false }) as any);
 
-      if (error) throw error;
+      if (error) {
+        console.error('📧 Error fetching transfers:', error);
+        throw error;
+      }
+
+      console.log('📧 All transfers fetched:', data?.length || 0, data);
 
       const allTransfers = (data || []) as OwnershipTransfer[];
       setTransfers(allTransfers);
-      setPendingIncoming(
-        allTransfers.filter(t => t.to_user_id === user.user!.id && t.status === 'pending')
-      );
+      
+      const incoming = allTransfers.filter(t => t.to_user_id === user.user!.id && t.status === 'pending');
+      console.log('📧 Pending incoming transfers:', incoming.length, incoming);
+      
+      const outgoing = allTransfers.filter(t => t.from_user_id === user.user!.id && t.status === 'pending');
+      console.log('📧 Pending outgoing transfers:', outgoing.length, outgoing);
+      
+      setPendingIncoming(incoming);
+      setPendingOutgoing(outgoing);
     } catch (error) {
       console.error('Error fetching transfers:', error);
     } finally {
@@ -59,29 +84,57 @@ export function useOwnershipTransfer() {
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) throw new Error('Not authenticated');
 
-      // Look up user by email (simplified - in production use a proper user lookup)
-      const { data: targetUsers } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', toEmail)
-        .single();
+      console.log('📧 Initiating transfer from:', user.user.email, 'to:', toEmail);
 
-      const toUserId = targetUsers?.id || user.user.id; // Fallback for demo
+      // Prevent self-transfer
+      if (toEmail.toLowerCase() === user.user.email?.toLowerCase()) {
+        toast({
+          title: 'Invalid Transfer',
+          description: 'You cannot transfer a document to yourself',
+          variant: 'destructive',
+        });
+        return null;
+      }
+
+      // Use RPC function to look up user by email
+      const { data: targetUserId, error: lookupError } = await supabase
+        .rpc('get_user_id_by_email', { user_email: toEmail });
+
+      if (lookupError || !targetUserId) {
+        toast({
+          title: 'User not found',
+          description: `No user found with email: ${toEmail}. They may need to sign up first.`,
+          variant: 'destructive',
+        });
+        console.error('📧 Target user not found:', toEmail, lookupError);
+        return null;
+      }
+
+      console.log('📧 Target user found:', targetUserId);
+
+      const transferData = {
+        document_id: documentId,
+        from_user_id: user.user.id,
+        to_user_id: targetUserId,
+        to_user_email: toEmail,
+        message,
+        status: 'pending' as const,
+      };
+
+      console.log('📧 Creating transfer:', transferData);
 
       const { data, error } = await supabase
         .from('document_ownership_transfers')
-        .insert({
-          document_id: documentId,
-          from_user_id: user.user.id,
-          to_user_id: toUserId,
-          to_user_email: toEmail,
-          message,
-          status: 'pending',
-        })
+        .insert(transferData)
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('📧 Transfer creation error:', error);
+        throw error;
+      }
+
+      console.log('📧 Transfer created successfully:', data);
 
       toast({
         title: 'Transfer initiated',
@@ -103,19 +156,55 @@ export function useOwnershipTransfer() {
 
   const acceptTransfer = useCallback(async (transferId: string) => {
     try {
-      const { error } = await supabase
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) throw new Error('Not authenticated');
+
+      // Get the transfer to validate
+      const { data: transfer } = await supabase
         .from('document_ownership_transfers')
-        .update({
-          status: 'accepted',
-          transferred_at: new Date().toISOString(),
-        })
-        .eq('id', transferId);
+        .select('*')
+        .eq('id', transferId)
+        .single();
+
+      if (!transfer) {
+        toast({
+          title: 'Error',
+          description: 'Transfer not found',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Prevent accepting your own transfer
+      if (transfer.from_user_id === user.user.id) {
+        toast({
+          title: 'Cannot accept',
+          description: 'You cannot accept a transfer you initiated',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Ensure current user is the recipient
+      if (transfer.to_user_id !== user.user.id) {
+        toast({
+          title: 'Not authorized',
+          description: 'You are not the recipient of this transfer',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Call the database function to handle ownership transfer atomically
+      const { error } = await supabase.rpc('accept_ownership_transfer', {
+        transfer_id: transferId
+      });
 
       if (error) throw error;
 
       toast({
         title: 'Transfer accepted',
-        description: 'You are now the owner of this document',
+        description: 'You are now the owner of this document. The previous owner no longer has access.',
       });
 
       fetchTransfers();
@@ -131,10 +220,9 @@ export function useOwnershipTransfer() {
 
   const rejectTransfer = useCallback(async (transferId: string) => {
     try {
-      const { error } = await supabase
-        .from('document_ownership_transfers')
-        .update({ status: 'rejected' })
-        .eq('id', transferId);
+      const { error } = await supabase.rpc('reject_ownership_transfer', {
+        transfer_id: transferId
+      });
 
       if (error) throw error;
 
@@ -156,10 +244,9 @@ export function useOwnershipTransfer() {
 
   const cancelTransfer = useCallback(async (transferId: string) => {
     try {
-      const { error } = await supabase
-        .from('document_ownership_transfers')
-        .update({ status: 'cancelled' })
-        .eq('id', transferId);
+      const { error } = await supabase.rpc('cancel_ownership_transfer', {
+        transfer_id: transferId
+      });
 
       if (error) throw error;
 
@@ -182,6 +269,7 @@ export function useOwnershipTransfer() {
   return {
     transfers,
     pendingIncoming,
+    pendingOutgoing,
     isLoading,
     initiateTransfer,
     acceptTransfer,

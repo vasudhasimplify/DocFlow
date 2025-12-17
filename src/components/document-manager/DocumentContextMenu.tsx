@@ -26,6 +26,7 @@ import {
   Shield,
   Pin,
   Link2,
+  UserMinus,
 } from 'lucide-react';
 
 interface Document {
@@ -48,6 +49,7 @@ interface DocumentContextMenuProps {
   onCompare?: () => void;
   onVersionHistory?: () => void;
   onCheckOut?: () => void;
+  onTransferOwnership?: () => void;
   onCompliance?: () => void;
   onCreateShortcut?: () => void;
   onPinToQuickAccess?: () => void;
@@ -68,6 +70,7 @@ export const DocumentContextMenu: React.FC<DocumentContextMenuProps> = ({
   onCompare,
   onVersionHistory,
   onCheckOut,
+  onTransferOwnership,
   onCompliance,
   onCreateShortcut,
   onPinToQuickAccess,
@@ -165,6 +168,12 @@ export const DocumentContextMenu: React.FC<DocumentContextMenuProps> = ({
           <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onCheckOut(); }}>
             <Lock className="w-4 h-4 mr-3" />
             Check out
+          </DropdownMenuItem>
+        )}
+        {onTransferOwnership && (
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onTransferOwnership(); }}>
+            <UserMinus className="w-4 h-4 mr-3" />
+            Transfer Ownership
           </DropdownMenuItem>
         )}
         {onCompliance && (

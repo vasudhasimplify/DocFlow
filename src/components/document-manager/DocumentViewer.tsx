@@ -6,13 +6,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Download, ExternalLink, X, Tags, ChevronRight, ChevronLeft, CloudOff } from 'lucide-react';
+import { Download, ExternalLink, X, Tags, ChevronRight, ChevronLeft, CloudOff, ShieldAlert } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { DocumentMetadataEditor } from '@/components/metadata';
 import { useContentAccessRules } from '@/hooks/useContentAccessRules';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { ShieldAlert } from 'lucide-react';
 import { initOfflineDB } from '@/services/offlineStorage';
+import { useDocumentLock } from '@/hooks/useDocumentLock';
+import { DocumentLockBanner } from '@/components/version-control/DocumentLockBanner';
 
 interface Document {
   id: string;
@@ -39,6 +40,22 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [isLoadingUrl, setIsLoadingUrl] = React.useState(false);
   const [showMetadata, setShowMetadata] = React.useState(false);
   const [isOfflineDocument, setIsOfflineDocument] = React.useState(false);
+
+  // Use document lock hook
+  const {
+    lock,
+    isLockedByCurrentUser,
+    canEdit,
+    notifications,
+    isLoading: isLockLoading,
+    lockDocument,
+    unlockDocument,
+    markNotificationRead,
+    refreshLock
+  } = useDocumentLock({
+    documentId: document?.id || '',
+    autoRefresh: true
+  });
 
   // Check file type more accurately - prioritize file extension
   const fileName = (document?.file_name || '').toLowerCase();
@@ -285,6 +302,30 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </div>
           </div>
         </DialogHeader>
+
+        {/* Lock Status Banner */}
+        <div className="px-6">
+          <DocumentLockBanner
+            lock={lock}
+            isLockedByCurrentUser={isLockedByCurrentUser}
+            canEdit={canEdit}
+            notifications={notifications || []}
+            onLock={async () => {
+              await lockDocument({
+                document_id: document.id,
+                expires_in_minutes: 30
+              });
+              refreshLock();
+            }}
+            onUnlock={async () => {
+              await unlockDocument();
+              refreshLock();
+            }}
+            onDismissNotification={markNotificationRead}
+            isLoading={isLockLoading}
+            documentId={document.id}
+          />
+        </div>
 
         {/* Restrictions Banner */}
         {(restrictions.download || restrictions.print || restrictions.share) && (

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { supabase } from '@/integrations/supabase/client';
 import { 
   FileText, 
   Eye, 
@@ -14,7 +15,9 @@ import {
   Tag,
   Folder,
   Sparkles,
-  Pin
+  Pin,
+  Lock,
+  UserMinus
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -26,6 +29,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CheckOutDialog } from '@/components/checkinout/CheckOutDialog';
+import { TransferOwnershipDialog } from '@/components/ownership/TransferOwnershipDialog';
 
 interface Document {
   id: string;
@@ -78,6 +83,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 }) => {
   const { toast } = useToast();
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();
+  
+  // Check Out and Transfer Dialog states
+  const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
 
   const handleView = (document: Document) => {
     // Trigger the parent click handler which opens the modal viewer
@@ -160,7 +170,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       {documents.map(document => (
         <Card 
           key={document.id} 
-          className="group hover:shadow-md transition-all duration-200 cursor-pointer border hover:border-primary/20"
+          className="group hover:shadow-md transition-all duration-200 cursor-pointer border hover:border-primary/50 bg-white"
           onClick={() => onDocumentClick(document)}
         >
           <CardContent className="p-4">
@@ -310,41 +320,108 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                         </Tooltip>
                       </TooltipProvider>
                       
-                      {/* Other actions - show on hover */}
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleView(document);
-                          }}
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDownload(document);
-                          }}
-                        >
-                          <Download className="w-4 h-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleShare(document);
-                          }}
-                        >
-                          <Share className="w-4 h-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
+                      {/* Action Buttons - Always visible */}
+                      <div className="flex items-center gap-1">
+                        {/* Primary Actions */}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                className="h-8 w-8 p-0 hover:bg-gray-100"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleView(document);
+                                }}
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>View</p></TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                className="h-8 w-8 p-0 hover:bg-gray-100"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownload(document);
+                                }}
+                              >
+                                <Download className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Download</p></TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                className="h-8 w-8 p-0 hover:bg-gray-100"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleShare(document);
+                                }}
+                              >
+                                <Share className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Share</p></TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        
+                        <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                        
+                        {/* Document Management */}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedDocument(document);
+                                  setShowCheckOutDialog(true);
+                                }}
+                              >
+                                <Lock className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Check Out</p></TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                className="h-8 w-8 p-0 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedDocument(document);
+                                  setShowTransferDialog(true);
+                                }}
+                              >
+                                <UserMinus className="w-4 h-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Transfer</p></TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </div>
                     </div>
                   </div>
@@ -372,6 +449,37 @@ export const DocumentList: React.FC<DocumentListProps> = ({
           </CardContent>
         </Card>
       ))}
+      
+      {/* Dialogs */}
+      {selectedDocument && (
+        <>
+          <CheckOutDialog
+            open={showCheckOutDialog}
+            onOpenChange={setShowCheckOutDialog}
+            documentId={selectedDocument.id}
+            documentName={selectedDocument.file_name}
+            onCheckOutComplete={() => {
+              toast({
+                title: "Document checked out",
+                description: "You can now work on this document exclusively.",
+              });
+            }}
+          />
+          
+          <TransferOwnershipDialog
+            open={showTransferDialog}
+            onOpenChange={setShowTransferDialog}
+            documentId={selectedDocument.id}
+            documentName={selectedDocument.file_name}
+            onSuccess={() => {
+              toast({
+                title: "Transfer initiated",
+                description: "The recipient will be notified to accept or reject the transfer.",
+              });
+            }}
+          />
+        </>
+      )}
     </div>
   );
 };
