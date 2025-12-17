@@ -138,6 +138,14 @@ app.add_middleware(
 # Include routers
 app.include_router(analyze_router, prefix="/api/v1")
 
+# Import and include offline router
+from .api.offline_routes import offline_router
+app.include_router(offline_router, prefix="/api/v1")
+
+# Import and include scanner router
+from .api.scanner_routes import router as scanner_router
+app.include_router(scanner_router)
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """
