@@ -21,7 +21,7 @@ multidict==6.7.0
 numpy==2.2.6
 opencv-python-headless>=4.6.0
 packaging==25.0
-pillow==10.1.0
+pillow>=10.2.0
 
 # YOLO Support (OPTIONAL - disabled by default)
 # ultralytics requires PyTorch which adds ~5GB with CUDA
@@ -43,7 +43,10 @@ pycparser==2.23
 pydantic-core==2.41.5
 pydantic-settings==2.1.0
 pydantic==2.12.4
-pymupdf==1.23.14
+email-validator>=2.0.0
+pymupdf
+PyJWT
+pymupdf
 python-dotenv==1.0.0
 python-multipart==0.0.6
 pyyaml==6.0.3

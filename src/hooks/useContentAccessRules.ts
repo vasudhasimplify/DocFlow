@@ -65,6 +65,7 @@ export interface CreateRuleParams {
   notify_on_match?: boolean;
   is_active?: boolean;
   priority?: number;
+  document_ids?: string[];
 }
 
 export function useContentAccessRules() {
@@ -76,16 +77,18 @@ export function useContentAccessRules() {
   const fetchRules = useCallback(async () => {
     try {
       setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
 
-      const { data, error } = await (supabase
-        .from('content_access_rules')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('priority', { ascending: true }) as any);
+      const response = await fetch('/api/rules/', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      });
 
-      if (error) throw error;
+      if (!response.ok) throw new Error('Failed to fetch rules');
+
+      const data = await response.json();
       setRules(data || []);
     } catch (error) {
       console.error('Error fetching content access rules:', error);
@@ -94,52 +97,121 @@ export function useContentAccessRules() {
     }
   }, []);
 
-  const fetchApplications = useCallback(async (ruleId?: string) => {
-    try {
-      let query = supabase
-        .from('content_rule_applications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (ruleId) {
-        query = query.eq('rule_id', ruleId) as any;
-      }
-
-      const { data, error } = await (query as any);
-
-      if (error) throw error;
-      setApplications(data || []);
-    } catch (error) {
-      console.error('Error fetching rule applications:', error);
-    }
-  }, []);
-
   const createRule = useCallback(async (params: CreateRuleParams): Promise<ContentAccessRule | null> => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated');
 
-      const { data, error } = await (supabase
-        .from('content_access_rules')
-        .insert({
-          user_id: user.id,
-          ...params,
-          is_active: params.is_active ?? true,
-          priority: params.priority ?? 100,
-        } as any)
-        .select()
-        .single() as any);
+      // Extract document_ids but don't send to backend
+      const { document_ids, ...ruleParams } = params;
 
-      if (error) throw error;
+      const response = await fetch('/api/rules/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(ruleParams)
+      });
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to create rule';
+        try {
+          const text = await response.text();
+          try {
+            const err = JSON.parse(text);
+            errorMessage = err.detail || errorMessage;
+          } catch {
+            if (text) errorMessage = text;
+          }
+        } catch (e) {
+          console.error("Error reading error response", e);
+        }
+        throw new Error(`[${response.status} ${response.statusText}] ${errorMessage}`);
+      }
+
+      const newRule = await response.json() as ContentAccessRule;
+
+      // Apply restrictions to selected documents
+      if (document_ids && document_ids.length > 0) {
+        console.log('[Rules] Applying to document_ids:', document_ids);
+
+        const { data: docs, error: fetchError } = await supabase
+          .from('documents')
+          .select('id, file_name, file_type, file_size, extracted_text')
+          .in('id', document_ids);
+
+        console.log('[Rules] Fetched docs:', docs?.length, 'Error:', fetchError);
+
+        if (docs) {
+          for (const doc of docs) {
+            console.log('[Rules] Checking doc:', doc.file_name, 'type:', doc.file_type);
+
+            // Inline matching logic
+            const hasCriteria =
+              (ruleParams.file_types?.length || 0) > 0 ||
+              (ruleParams.name_patterns?.length || 0) > 0 ||
+              (ruleParams.content_keywords?.length || 0) > 0;
+
+            console.log('[Rules] hasCriteria:', hasCriteria, 'file_types:', ruleParams.file_types, 'name_patterns:', ruleParams.name_patterns);
+
+            let ruleMatched = !hasCriteria; // No criteria = apply to all
+
+            if (hasCriteria) {
+              // Check file type
+              if (ruleParams.file_types?.length) {
+                ruleMatched = ruleParams.file_types.some(t =>
+                  doc.file_type?.toLowerCase().includes(t.toLowerCase())
+                );
+                console.log('[Rules] File type match:', ruleMatched);
+              }
+              // Check name patterns
+              if (!ruleMatched && ruleParams.name_patterns?.length) {
+                ruleMatched = ruleParams.name_patterns.some(p => {
+                  try { return new RegExp(p, 'i').test(doc.file_name || ''); }
+                  catch { return false; }
+                });
+                console.log('[Rules] Name pattern match:', ruleMatched);
+              }
+              // Check keywords
+              if (!ruleMatched && ruleParams.content_keywords?.length) {
+                const text = doc.extracted_text || '';
+                ruleMatched = ruleParams.content_keywords.some(k =>
+                  text.toLowerCase().includes(k.toLowerCase())
+                );
+                console.log('[Rules] Keyword match:', ruleMatched, 'text length:', text.length);
+              }
+            }
+
+            console.log('[Rules] Final ruleMatched:', ruleMatched);
+
+            if (ruleMatched) {
+              const { error: insertError } = await supabase.from('content_rule_applications').insert({
+                rule_id: newRule.id,
+                document_id: doc.id,
+                matched_criteria: { match_source: 'manual-selection' },
+                actions_applied: {
+                  restrict_download: newRule.restrict_download,
+                  restrict_print: newRule.restrict_print,
+                  restrict_share: newRule.restrict_share,
+                  restrict_external_share: newRule.restrict_external_share,
+                  watermark_required: newRule.watermark_required,
+                  notify_on_match: newRule.notify_on_match
+                }
+              });
+              console.log('[Rules] Insert result - Error:', insertError);
+            }
+          }
+        }
+      }
 
       toast({
         title: "Rule created",
-        description: `Content access rule "${params.name}" created successfully.`,
+        description: `Content access rule "${params.name}" created and applied to ${document_ids?.length || 0} document(s).`,
       });
 
       await fetchRules();
-      return data as ContentAccessRule;
+      return newRule;
     } catch (error: any) {
       toast({
         title: "Error creating rule",
@@ -152,12 +224,19 @@ export function useContentAccessRules() {
 
   const updateRule = useCallback(async (ruleId: string, updates: Partial<ContentAccessRule>) => {
     try {
-      const { error } = await (supabase
-        .from('content_access_rules')
-        .update({ ...updates, updated_at: new Date().toISOString() } as any)
-        .eq('id', ruleId) as any);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated');
 
-      if (error) throw error;
+      const response = await fetch(`/api/rules/${ruleId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(updates)
+      });
+
+      if (!response.ok) throw new Error('Failed to update rule');
 
       toast({
         title: "Rule updated",
@@ -176,12 +255,17 @@ export function useContentAccessRules() {
 
   const deleteRule = useCallback(async (ruleId: string) => {
     try {
-      const { error } = await (supabase
-        .from('content_access_rules')
-        .delete()
-        .eq('id', ruleId) as any);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated');
 
-      if (error) throw error;
+      const response = await fetch(`/api/rules/${ruleId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to delete rule');
 
       toast({
         title: "Rule deleted",
@@ -204,27 +288,41 @@ export function useContentAccessRules() {
 
   const reorderRules = useCallback(async (ruleIds: string[]) => {
     try {
-      const updates = ruleIds.map((id, index) => ({
-        id,
-        priority: index + 1,
-      }));
+      const updates = ruleIds.map((id, index) => updateRule(id, { priority: index + 1 }));
+      await Promise.all(updates);
+    } catch (error) {
+      console.error("Failed to reorder rules", error);
+    }
+  }, [updateRule]);
 
-      for (const update of updates) {
-        await (supabase
-          .from('content_access_rules')
-          .update({ priority: update.priority } as any)
-          .eq('id', update.id) as any);
+  const fetchApplications = useCallback(async (params?: { ruleId?: string; documentId?: string }) => {
+    try {
+      console.log('[Rules] fetchApplications called with params:', params);
+
+      let query = supabase
+        .from('content_rule_applications')
+        .select('*, document:documents(file_name)')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (params?.ruleId) {
+        query = query.eq('rule_id', params.ruleId) as any;
       }
 
-      await fetchRules();
-    } catch (error: any) {
-      toast({
-        title: "Error reordering rules",
-        description: error.message,
-        variant: "destructive",
-      });
+      if (params?.documentId) {
+        query = query.eq('document_id', params.documentId) as any;
+      }
+
+      const { data, error } = await (query as any);
+
+      console.log('[Rules] fetchApplications result:', data?.length, 'applications, error:', error);
+
+      if (error) throw error;
+      setApplications(data || []);
+    } catch (error) {
+      console.error('Error fetching rule applications:', error);
     }
-  }, [toast, fetchRules]);
+  }, []);
 
   const evaluateDocument = useCallback(async (documentId: string, documentData: {
     name?: string;
@@ -239,47 +337,61 @@ export function useContentAccessRules() {
     for (const rule of rules) {
       if (!rule.is_active) continue;
 
-      let matched = false;
+      let isMatch = true;
 
-      // Check file types
-      if (rule.file_types?.length && documentData.file_type) {
-        matched = rule.file_types.some(t => 
+      // Check file types (AND logic - if rule has types, doc must match one)
+      if (rule.file_types?.length && rule.file_types.length > 0) {
+        const typeMatch = documentData.file_type && rule.file_types.some(t =>
           documentData.file_type?.toLowerCase().includes(t.toLowerCase())
         );
+        if (!typeMatch) isMatch = false;
       }
 
-      // Check name patterns
-      if (rule.name_patterns?.length && documentData.name) {
-        matched = matched || rule.name_patterns.some(pattern => {
-          const regex = new RegExp(pattern, 'i');
-          return regex.test(documentData.name || '');
+      // Check name patterns (AND logic)
+      if (isMatch && rule.name_patterns?.length && rule.name_patterns.length > 0) {
+        const nameMatch = documentData.name && rule.name_patterns.some(pattern => {
+          try {
+            const regex = new RegExp(pattern, 'i');
+            return regex.test(documentData.name || '');
+          } catch (e) {
+            return false;
+          }
         });
+        if (!nameMatch) isMatch = false;
       }
 
-      // Check content keywords
-      if (rule.content_keywords?.length && documentData.content) {
-        matched = matched || rule.content_keywords.some(keyword => 
+      // Check content keywords (AND logic)
+      if (isMatch && rule.content_keywords?.length && rule.content_keywords.length > 0) {
+        const contentMatch = documentData.content && rule.content_keywords.some(keyword =>
           documentData.content?.toLowerCase().includes(keyword.toLowerCase())
         );
+        if (!contentMatch) isMatch = false;
       }
 
-      // Check folder
-      if (rule.folder_ids?.length && documentData.folder_id) {
-        matched = matched || rule.folder_ids.includes(documentData.folder_id);
+      // Check folder (AND logic)
+      if (isMatch && rule.folder_ids?.length && rule.folder_ids.length > 0) {
+        const folderMatch = documentData.folder_id && rule.folder_ids.includes(documentData.folder_id);
+        if (!folderMatch) isMatch = false;
       }
 
-      // Check size range
-      if (documentData.file_size !== undefined) {
-        const sizeMatch = 
+      // Check size range (AND logic)
+      if (isMatch && (rule.size_min_bytes || rule.size_max_bytes) && documentData.file_size !== undefined) {
+        const sizeMatch =
           (!rule.size_min_bytes || documentData.file_size >= rule.size_min_bytes) &&
           (!rule.size_max_bytes || documentData.file_size <= rule.size_max_bytes);
-        
-        if (rule.size_min_bytes || rule.size_max_bytes) {
-          matched = matched || sizeMatch;
-        }
+        if (!sizeMatch) isMatch = false;
       }
 
-      if (matched) {
+      // Special case: If rule has NO criteria at all, it shouldn't match everything automatically unless intended.
+      // Usually "Empty Rule" matches nothing or everything. Let's assume matches nothing if no criteria defined to be safe.
+      const hasCriteria =
+        (rule.file_types?.length || 0) > 0 ||
+        (rule.name_patterns?.length || 0) > 0 ||
+        (rule.content_keywords?.length || 0) > 0 ||
+        (rule.folder_ids?.length || 0) > 0 ||
+        (rule.size_min_bytes || rule.size_max_bytes);
+
+      if (isMatch && hasCriteria) {
         matchedRules.push(rule);
       }
     }
@@ -287,17 +399,77 @@ export function useContentAccessRules() {
     return matchedRules.sort((a, b) => a.priority - b.priority);
   }, [rules]);
 
-  const getRuleStats = useCallback(() => {
-    const active = rules.filter(r => r.is_active).length;
-    const withRestrictions = rules.filter(r => 
-      r.restrict_download || r.restrict_print || r.restrict_share
-    ).length;
-    const withAutoActions = rules.filter(r => 
-      r.auto_move_to_folder || r.auto_apply_tags?.length
-    ).length;
+  const applyRulesToDocument = useCallback(async (documentId: string, documentData: Parameters<typeof evaluateDocument>[1]) => {
+    const matchedRules = await evaluateDocument(documentId, documentData);
 
-    return { total: rules.length, active, withRestrictions, withAutoActions };
-  }, [rules]);
+    // Always clean up old applications first to avoid duplicates or stale rules
+    await supabase.from('content_rule_applications').delete().eq('document_id', documentId);
+
+    if (matchedRules.length === 0) return [];
+
+    const applications = matchedRules.map(rule => ({
+      rule_id: rule.id,
+      document_id: documentId,
+      matched_criteria: {
+        match_source: 'auto-evaluation'
+      },
+      actions_applied: {
+        restrict_download: rule.restrict_download,
+        restrict_print: rule.restrict_print,
+        restrict_share: rule.restrict_share,
+        restrict_external_share: rule.restrict_external_share,
+        watermark_required: rule.watermark_required,
+        notify_on_match: rule.notify_on_match
+      }
+    }));
+
+    const { error } = await supabase
+      .from('content_rule_applications')
+      .insert(applications);
+
+    if (error) {
+      console.error("Failed to save rule applications", error);
+      toast({ title: "Rule Application Failed", description: error.message, variant: "destructive" });
+    } else {
+      // If there are matches and notify_on_match is true, we could trigger notifications here
+      // For now just console log
+      console.log(`Applied ${matchedRules.length} rules to document ${documentId}`);
+    }
+
+    return matchedRules;
+  }, [evaluateDocument, toast]);
+
+  // Use a ref or state for stats to be persistent/async
+  const [stats, setStats] = useState({ total: 0, active: 0, withRestrictions: 0, withAutoActions: 0 });
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+
+      const response = await fetch('/api/rules/stats', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStats();
+  }, [rules, fetchStats]); // Refresh stats when rules change
+
+  const getRuleStats = useCallback(() => {
+    return stats;
+  }, [stats]);
+
 
   useEffect(() => {
     fetchRules();
@@ -314,6 +486,7 @@ export function useContentAccessRules() {
     reorderRules,
     fetchApplications,
     evaluateDocument,
+    applyRulesToDocument,
     getRuleStats,
     refetch: fetchRules,
   };

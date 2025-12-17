@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 import type {
   SignatureRequest,
   SignatureSigner,
@@ -12,29 +13,81 @@ import type {
   SignatureType,
 } from '@/types/signature';
 
-// Simplified hook with mock data - database schema needs alignment
 export const useElectronicSignatures = () => {
   const { toast } = useToast();
   const [requests, setRequests] = useState<SignatureRequest[]>([]);
+  const [activeRequest, setActiveRequest] = useState<SignatureRequest | null>(null);
   const [userSignatures, setUserSignatures] = useState<UserSignature[]>([]);
   const [templates] = useState<SignatureTemplate[]>([]);
-  const [stats] = useState<SignatureStats>({
+  const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState<SignatureStats>({
     total_requests: 0,
     pending: 0,
     completed: 0,
     declined: 0,
     expired: 0,
-    awaiting_my_signature: 0,
+    awaiting_my_signature: 0, // Not fully implemented yet
     completion_rate: 0,
   });
-  const [isLoading, setIsLoading] = useState(false);
-  const [activeRequest, setActiveRequest] = useState<SignatureRequest | null>(null);
 
   const fetchData = useCallback(async () => {
-    setIsLoading(true);
-    // Placeholder - would fetch from database once schema is aligned
-    setIsLoading(false);
-  }, []);
+    try {
+      setIsLoading(true);
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) return;
+
+      // Fetch requests
+      const { data: requestData, error: requestError } = await supabase
+        .from('signature_requests')
+        .select(`
+          *,
+          signers:signature_signers(*)
+        `)
+        .eq('user_id', user.user.id)
+        .order('created_at', { ascending: false });
+
+      if (requestError) throw requestError;
+
+      const typedRequests = (requestData || []).map((r: any) => ({
+        ...r,
+        signers: r.signers.sort((a: any, b: any) => a.signing_order - b.signing_order)
+      })) as SignatureRequest[];
+
+      setRequests(typedRequests);
+
+      // Calculate stats
+      const total = typedRequests.length;
+      const pending = typedRequests.filter(r => r.status === 'pending').length;
+      const completed = typedRequests.filter(r => r.status === 'completed').length;
+      const declined = typedRequests.filter(r => r.status === 'declined').length;
+      const expired = typedRequests.filter(r => r.status === 'expired').length;
+
+      setStats({
+        total_requests: total,
+        pending,
+        completed,
+        declined,
+        expired,
+        awaiting_my_signature: 0,
+        completion_rate: total > 0 ? Math.round((completed / total) * 100) : 0,
+      });
+
+    } catch (error) {
+      console.error('Error fetching signatures:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load signature requests',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [toast]);
+
+  // Initial fetch
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const createRequest = async (data: {
     title: string;
@@ -45,102 +98,104 @@ export const useElectronicSignatures = () => {
     expires_at?: string;
     signers: Array<{ name: string; email: string; role?: SignerRole; signing_order?: number }>;
   }) => {
-    const newRequest: SignatureRequest = {
-      id: crypto.randomUUID(),
-      user_id: 'current-user',
-      title: data.title,
-      message: data.message,
-      document_name: data.document_name,
-      document_url: data.document_url,
-      status: 'draft',
-      signing_order: data.signing_order || 'parallel',
-      current_signer_index: 0,
-      expires_at: data.expires_at,
-      reminder_frequency_days: 3,
-      is_template: false,
-      metadata: {},
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      signers: data.signers.map((s, i) => ({
-        id: crypto.randomUUID(),
-        request_id: '',
-        name: s.name,
-        email: s.email,
-        role: s.role || 'signer',
-        signing_order: s.signing_order ?? i,
-        status: 'pending',
-        access_token: crypto.randomUUID(),
-        metadata: {},
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })),
-    };
-    setRequests(prev => [newRequest, ...prev]);
-    toast({ title: 'Success', description: 'Signature request created' });
-    return newRequest;
+    try {
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) throw new Error('Not authenticated');
+
+      // 1. Create Request
+      const { data: newRequest, error: reqError } = await supabase
+        .from('signature_requests')
+        .insert({
+          user_id: user.user.id,
+          title: data.title,
+          message: data.message,
+          document_name: data.document_name,
+          document_url: data.document_url,
+          status: 'draft',
+          signing_order: data.signing_order || 'parallel',
+          expires_at: data.expires_at,
+        })
+        .select()
+        .single();
+
+      if (reqError) throw reqError;
+
+      // 2. Create Signers
+      if (data.signers.length > 0) {
+        const signersToInsert = data.signers.map((s, i) => ({
+          request_id: newRequest.id,
+          name: s.name,
+          email: s.email,
+          role: s.role || 'signer',
+          signing_order: s.signing_order ?? i,
+          status: 'pending',
+        }));
+
+        const { error: signerError } = await supabase
+          .from('signature_signers')
+          .insert(signersToInsert);
+
+        if (signerError) throw signerError;
+      }
+
+      toast({ title: 'Success', description: 'Signature request created' });
+      fetchData(); // Refresh list
+      return newRequest;
+
+    } catch (error) {
+      console.error('Error creating request:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to create signature request',
+        variant: 'destructive',
+      });
+      return null;
+    }
   };
 
   const sendRequest = async (requestId: string) => {
-    setRequests(prev => prev.map(r => 
-      r.id === requestId ? { ...r, status: 'pending' as const } : r
-    ));
-    toast({ title: 'Success', description: 'Signature request sent' });
+    try {
+      const { error } = await supabase
+        .from('signature_requests')
+        .update({ status: 'pending' })
+        .eq('id', requestId);
+
+      if (error) throw error;
+
+      toast({ title: 'Success', description: 'Signature request sent' });
+      fetchData();
+    } catch (error) {
+      console.error('Error sending request:', error);
+      toast({ title: 'Error', description: 'Failed to update status', variant: 'destructive' });
+    }
   };
 
   const cancelRequest = async (requestId: string) => {
-    setRequests(prev => prev.map(r => 
-      r.id === requestId ? { ...r, status: 'cancelled' as const } : r
-    ));
-    toast({ title: 'Success', description: 'Request cancelled' });
+    try {
+      const { error } = await supabase
+        .from('signature_requests')
+        .update({ status: 'cancelled' })
+        .eq('id', requestId);
+
+      if (error) throw error;
+
+      toast({ title: 'Success', description: 'Request cancelled' });
+      fetchData();
+    } catch (error) {
+      console.error('Error cancelling request:', error);
+      toast({ title: 'Error', description: 'Failed to cancel request', variant: 'destructive' });
+    }
   };
 
-  const addField = async (field: Omit<SignatureField, 'id' | 'created_at' | 'metadata'>) => {
-    console.log('Add field:', field);
-  };
-
-  const updateField = async (fieldId: string, updates: Partial<SignatureField>) => {
-    console.log('Update field:', fieldId, updates);
-  };
-
-  const deleteField = async (fieldId: string) => {
-    console.log('Delete field:', fieldId);
-  };
-
-  const signField = async (fieldId: string, value: string, signerId: string) => {
-    toast({ title: 'Success', description: 'Signature applied' });
-  };
-
-  const declineToSign = async (signerId: string, reason: string) => {
-    toast({ title: 'Declined', description: 'The sender has been notified' });
-  };
-
-  const saveUserSignature = async (data: {
-    signature_type: SignatureType;
-    name: string;
-    data_url: string;
-    font_family?: string;
-    is_default?: boolean;
-  }) => {
-    const newSig: UserSignature = {
-      id: crypto.randomUUID(),
-      user_id: 'current-user',
-      ...data,
-      is_default: data.is_default || false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    setUserSignatures(prev => [newSig, ...prev]);
-    toast({ title: 'Success', description: 'Signature saved' });
-  };
-
-  const deleteUserSignature = async (signatureId: string) => {
-    setUserSignatures(prev => prev.filter(s => s.id !== signatureId));
-    toast({ title: 'Success', description: 'Signature deleted' });
-  };
-
-  const getAuditLog = async (requestId: string): Promise<SignatureAuditLog[]> => {
-    return [];
-  };
+  // Placeholders for other functions not yet connected to DB
+  const addField = async (field: any) => console.log('addField', field);
+  const updateField = async (id: string, updates: any) => console.log('updateField', id, updates);
+  const deleteField = async (id: string) => console.log('deleteField', id);
+  const signField = async (id: string, val: string, signerId: string) => console.log('signField');
+  const declineToSign = async (id: string, reason: string) => console.log('declineToSign');
+  const saveUserSignature = async (data: any) => console.log('saveUserSignature');
+  const deleteUserSignature = async (id: string) => console.log('deleteUserSignature');
+  const getAuditLog = async (id: string) => [];
 
   return {
     requests,

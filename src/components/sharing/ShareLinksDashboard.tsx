@@ -44,10 +44,10 @@ import {
 import { useShareLinks } from '@/hooks/useShareLinks';
 import { useToast } from '@/hooks/use-toast';
 import type { EnhancedShareLink, ShareLinkPermission } from '@/types/shareLink';
-import { 
-  SHARE_LINK_PERMISSION_INFO, 
-  generateShareUrl, 
-  generateQRCodeUrl 
+import {
+  SHARE_LINK_PERMISSION_INFO,
+  generateShareUrl,
+  generateQRCodeUrl
 } from '@/types/shareLink';
 import { formatDistanceToNow, format } from 'date-fns';
 import { QuickShareDialog } from './QuickShareDialog';
@@ -64,7 +64,22 @@ export const ShareLinksDashboard: React.FC<ShareLinksDashboardProps> = ({
   resourceType = 'document',
   resourceName = 'Document'
 }) => {
-  const { links, loading, createLink, updateLink, revokeLink, deleteLink, duplicateLink } = useShareLinks(resourceId);
+  const {
+    links,
+    loading,
+    totalViews,
+    activeLinks,
+    expiredLinks,
+    revokedLinks,
+    createLink,
+    updateLink,
+    revokeLink,
+    reactivateLink,
+    deleteLink,
+    duplicateLink,
+    incrementViewCount,
+    refreshLinks
+  } = useShareLinks(resourceId);
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('active');
@@ -72,17 +87,12 @@ export const ShareLinksDashboard: React.FC<ShareLinksDashboardProps> = ({
   const [selectedLink, setSelectedLink] = useState<EnhancedShareLink | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const activeLinks = links.filter(l => l.is_active && (!l.expires_at || new Date(l.expires_at) > new Date()));
-  const expiredLinks = links.filter(l => l.expires_at && new Date(l.expires_at) <= new Date());
-  const revokedLinks = links.filter(l => !l.is_active);
-
   const filteredLinks = (activeTab === 'active' ? activeLinks : activeTab === 'expired' ? expiredLinks : revokedLinks)
-    .filter(l => 
+    .filter(l =>
       l.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       l.resource_name?.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-  const totalViews = links.reduce((sum, l) => sum + l.use_count, 0);
   const totalActiveLinks = activeLinks.length;
 
   const copyLink = async (link: EnhancedShareLink) => {
@@ -255,8 +265,8 @@ export const ShareLinksDashboard: React.FC<ShareLinksDashboardProps> = ({
                     <Link className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
                     <p className="text-muted-foreground">No links found</p>
                     {activeTab === 'active' && (
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         className="mt-4"
                         onClick={() => setShowCreateDialog(true)}
                       >
@@ -303,7 +313,7 @@ export const ShareLinksDashboard: React.FC<ShareLinksDashboardProps> = ({
                             {link.expires_at && (
                               <span className="flex items-center gap-1">
                                 <Clock className="w-3 h-3" />
-                                {new Date(link.expires_at) > new Date() 
+                                {new Date(link.expires_at) > new Date()
                                   ? `Expires ${format(new Date(link.expires_at), 'MMM d')}`
                                   : 'Expired'}
                               </span>
@@ -314,8 +324,8 @@ export const ShareLinksDashboard: React.FC<ShareLinksDashboardProps> = ({
                         {/* Usage Progress */}
                         {link.max_uses && (
                           <div className="w-24">
-                            <Progress 
-                              value={(link.use_count / link.max_uses) * 100} 
+                            <Progress
+                              value={(link.use_count / link.max_uses) * 100}
                               className="h-2"
                             />
                             <p className="text-xs text-muted-foreground text-center mt-1">
@@ -373,6 +383,18 @@ export const ShareLinksDashboard: React.FC<ShareLinksDashboardProps> = ({
                                 <Plus className="w-4 h-4 mr-2" />
                                 Duplicate
                               </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  incrementViewCount(link.id);
+                                  toast({
+                                    title: 'View recorded',
+                                    description: `View count for "${link.name || link.resource_name}" increased by 1`
+                                  });
+                                }}
+                              >
+                                <Eye className="w-4 h-4 mr-2" />
+                                Simulate View
+                              </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               {link.is_active ? (
                                 <DropdownMenuItem onClick={() => revokeLink(link.id)}>
@@ -380,12 +402,12 @@ export const ShareLinksDashboard: React.FC<ShareLinksDashboardProps> = ({
                                   Revoke Link
                                 </DropdownMenuItem>
                               ) : (
-                                <DropdownMenuItem onClick={() => updateLink(link.id, { is_active: true })}>
+                                <DropdownMenuItem onClick={() => reactivateLink(link.id)}>
                                   <Play className="w-4 h-4 mr-2" />
                                   Reactivate
                                 </DropdownMenuItem>
                               )}
-                              <DropdownMenuItem 
+                              <DropdownMenuItem
                                 className="text-destructive"
                                 onClick={() => deleteLink(link.id)}
                               >
@@ -408,9 +430,6 @@ export const ShareLinksDashboard: React.FC<ShareLinksDashboardProps> = ({
       <QuickShareDialog
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
-        resourceType={resourceType}
-        resourceId={resourceId || 'default'}
-        resourceName={resourceName}
         onCreateLink={createLink}
       />
     </div>

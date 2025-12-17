@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { DocumentSelector } from '@/components/common/DocumentSelector';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +35,7 @@ import {
   AlertTriangle,
   Loader2,
   Zap,
+  Eye,
 } from 'lucide-react';
 import { useContentAccessRules, ContentAccessRule, CreateRuleParams } from '@/hooks/useContentAccessRules';
 import { formatDistanceToNow } from 'date-fns';
@@ -47,7 +49,11 @@ export function ContentAccessRulesPanel() {
     deleteRule,
     toggleRule,
     getRuleStats,
+    fetchApplications,
+    applications,
   } = useContentAccessRules();
+
+  const [viewingMatches, setViewingMatches] = useState<ContentAccessRule | null>(null);
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingRule, setEditingRule] = useState<ContentAccessRule | null>(null);
@@ -69,13 +75,15 @@ export function ContentAccessRulesPanel() {
   const [fileTypeInput, setFileTypeInput] = useState('');
   const [patternInput, setPatternInput] = useState('');
   const [keywordInput, setKeywordInput] = useState('');
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
 
   const stats = getRuleStats();
 
   const handleCreate = async () => {
     if (!formData.name.trim()) return;
+    if (selectedDocIds.length === 0) return;
 
-    await createRule(formData);
+    await createRule({ ...formData, document_ids: selectedDocIds });
     setShowCreateDialog(false);
     resetForm();
   };
@@ -107,6 +115,12 @@ export function ContentAccessRulesPanel() {
     setFileTypeInput('');
     setPatternInput('');
     setKeywordInput('');
+    setSelectedDocIds([]);
+  };
+
+  const handleViewMatches = (rule: ContentAccessRule) => {
+    setViewingMatches(rule);
+    fetchApplications({ ruleId: rule.id });
   };
 
   const openEditDialog = (rule: ContentAccessRule) => {
@@ -259,7 +273,7 @@ export function ContentAccessRulesPanel() {
                       {rule.description && (
                         <p className="text-sm text-muted-foreground mt-1">{rule.description}</p>
                       )}
-                      
+
                       {/* Criteria Badges */}
                       <div className="flex flex-wrap items-center gap-2 mt-2">
                         {rule.file_types?.length ? (
@@ -322,12 +336,15 @@ export function ContentAccessRulesPanel() {
                       checked={rule.is_active}
                       onCheckedChange={(checked) => toggleRule(rule.id, checked)}
                     />
+                    <Button variant="ghost" size="sm" onClick={() => handleViewMatches(rule)} title="View Matched Documents">
+                      <Eye className="h-4 w-4" />
+                    </Button>
                     <Button variant="ghost" size="sm" onClick={() => openEditDialog(rule)}>
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => deleteRule(rule.id)}
                       className="text-destructive hover:text-destructive"
                     >
@@ -342,8 +359,8 @@ export function ContentAccessRulesPanel() {
       </div>
 
       {/* Create/Edit Dialog */}
-      <Dialog 
-        open={showCreateDialog || !!editingRule} 
+      <Dialog
+        open={showCreateDialog || !!editingRule}
         onOpenChange={(open) => {
           if (!open) {
             setShowCreateDialog(false);
@@ -360,8 +377,25 @@ export function ContentAccessRulesPanel() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
-            {/* Basic Info */}
+            {/* Step 1: Select Documents */}
+            <div className="space-y-2">
+              <Label className="text-base font-semibold">Step 1: Select Documents *</Label>
+              <p className="text-sm text-muted-foreground">Choose documents to apply this rule to.</p>
+              <DocumentSelector
+                selectedIds={selectedDocIds}
+                onSelectionChange={setSelectedDocIds}
+                maxHeight="200px"
+              />
+              {selectedDocIds.length === 0 && (
+                <p className="text-xs text-destructive">Please select at least one document.</p>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* Step 2: Basic Info */}
             <div className="space-y-4">
+              <Label className="text-base font-semibold">Step 2: Rule Details</Label>
               <div className="space-y-2">
                 <Label>Rule Name *</Label>
                 <Input
@@ -404,8 +438,8 @@ export function ContentAccessRulesPanel() {
                           }
                         }}
                       />
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         onClick={() => {
                           addToArray('file_types', fileTypeInput);
                           setFileTypeInput('');
@@ -442,8 +476,8 @@ export function ContentAccessRulesPanel() {
                           }
                         }}
                       />
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         onClick={() => {
                           addToArray('name_patterns', patternInput);
                           setPatternInput('');
@@ -480,8 +514,8 @@ export function ContentAccessRulesPanel() {
                           }
                         }}
                       />
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         onClick={() => {
                           addToArray('content_keywords', keywordInput);
                           setKeywordInput('');
@@ -508,64 +542,88 @@ export function ContentAccessRulesPanel() {
                 <AccordionTrigger>Access Restrictions</AccordionTrigger>
                 <AccordionContent className="space-y-4 pt-4">
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                    <div
+                      className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => setFormData(prev => ({ ...prev, restrict_download: !prev.restrict_download }))}
+                    >
                       <div className="flex items-center gap-2">
                         <Download className="h-4 w-4 text-muted-foreground" />
-                        <Label>Restrict Download</Label>
+                        <Label className="cursor-pointer">Restrict Download</Label>
                       </div>
                       <Switch
                         checked={formData.restrict_download}
                         onCheckedChange={checked => setFormData(prev => ({ ...prev, restrict_download: checked }))}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                    <div
+                      className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => setFormData(prev => ({ ...prev, restrict_print: !prev.restrict_print }))}
+                    >
                       <div className="flex items-center gap-2">
                         <Printer className="h-4 w-4 text-muted-foreground" />
-                        <Label>Restrict Print</Label>
+                        <Label className="cursor-pointer">Restrict Print</Label>
                       </div>
                       <Switch
                         checked={formData.restrict_print}
                         onCheckedChange={checked => setFormData(prev => ({ ...prev, restrict_print: checked }))}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                    <div
+                      className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => setFormData(prev => ({ ...prev, restrict_share: !prev.restrict_share }))}
+                    >
                       <div className="flex items-center gap-2">
                         <Share2 className="h-4 w-4 text-muted-foreground" />
-                        <Label>Restrict Sharing</Label>
+                        <Label className="cursor-pointer">Restrict Sharing</Label>
                       </div>
                       <Switch
                         checked={formData.restrict_share}
                         onCheckedChange={checked => setFormData(prev => ({ ...prev, restrict_share: checked }))}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                    <div
+                      className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => setFormData(prev => ({ ...prev, restrict_external_share: !prev.restrict_external_share }))}
+                    >
                       <div className="flex items-center gap-2">
                         <Globe className="h-4 w-4 text-muted-foreground" />
-                        <Label>No External Share</Label>
+                        <Label className="cursor-pointer">No External Share</Label>
                       </div>
                       <Switch
                         checked={formData.restrict_external_share}
                         onCheckedChange={checked => setFormData(prev => ({ ...prev, restrict_external_share: checked }))}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                    <div
+                      className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => setFormData(prev => ({ ...prev, watermark_required: !prev.watermark_required }))}
+                    >
                       <div className="flex items-center gap-2">
                         <Droplets className="h-4 w-4 text-muted-foreground" />
-                        <Label>Require Watermark</Label>
+                        <Label className="cursor-pointer">Require Watermark</Label>
                       </div>
                       <Switch
                         checked={formData.watermark_required}
                         onCheckedChange={checked => setFormData(prev => ({ ...prev, watermark_required: checked }))}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                    <div
+                      className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+                      onClick={() => setFormData(prev => ({ ...prev, notify_on_match: !prev.notify_on_match }))}
+                    >
                       <div className="flex items-center gap-2">
                         <Bell className="h-4 w-4 text-muted-foreground" />
-                        <Label>Notify on Match</Label>
+                        <Label className="cursor-pointer">Notify on Match</Label>
                       </div>
                       <Switch
                         checked={formData.notify_on_match}
                         onCheckedChange={checked => setFormData(prev => ({ ...prev, notify_on_match: checked }))}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </div>
                   </div>
@@ -574,8 +632,8 @@ export function ContentAccessRulesPanel() {
             </Accordion>
           </div>
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setShowCreateDialog(false);
                 setEditingRule(null);
@@ -584,10 +642,52 @@ export function ContentAccessRulesPanel() {
             >
               Cancel
             </Button>
-            <Button onClick={editingRule ? handleUpdate : handleCreate} disabled={!formData.name.trim()}>
+            <Button
+              onClick={editingRule ? handleUpdate : handleCreate}
+              disabled={!formData.name.trim() || (!editingRule && selectedDocIds.length === 0)}
+            >
               {editingRule ? 'Update Rule' : 'Create Rule'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Matches Dialog */}
+      <Dialog open={!!viewingMatches} onOpenChange={(open) => !open && setViewingMatches(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Rule Applications: {viewingMatches?.name}</DialogTitle>
+            <DialogDescription>
+              Documents that matched this rule and had restrictions applied.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <ScrollArea className="h-[400px]">
+              {applications.length === 0 ? (
+                <div className="text-center text-muted-foreground p-8">No matching documents found.</div>
+              ) : (
+                <div className="space-y-2">
+                  {applications.map((app: any) => (
+                    <Card key={app.id}>
+                      <CardContent className="p-4 flex justify-between items-center">
+                        <div>
+                          <p className="font-medium">{app.document?.file_name || 'Unknown Document'}</p>
+                          <p className="text-xs text-muted-foreground">Applied: {new Date(app.created_at).toLocaleString()}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {app.actions_applied?.restrict_download && <Badge variant="destructive" className="text-xs">No Download</Badge>}
+                          {app.actions_applied?.restrict_print && <Badge variant="destructive" className="text-xs">No Print</Badge>}
+                          {app.actions_applied?.restrict_share && <Badge variant="destructive" className="text-xs">No Share</Badge>}
+                          {app.actions_applied?.restrict_external_share && <Badge variant="destructive" className="text-xs">No Ext. Share</Badge>}
+                          {app.actions_applied?.watermark_required && <Badge variant="secondary" className="text-xs">Watermark</Badge>}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

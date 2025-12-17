@@ -1,3 +1,4 @@
+import GuestAccessPage from "./pages/GuestAccessPage";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -153,16 +154,20 @@ const App = () => (
                 <Route path="/applications/public/:identifier/:formSlug" element={<RunApplication />} />
                 {/* Route without form slug - backward compatibility */}
                 <Route path="/applications/public/:identifier" element={<RunApplication />} />
-                
+
+                {/* Guest sharing public routes */}
+                <Route path="/guest/:token" element={<GuestAccessPage />} />
+                <Route path="/s/:token" element={<GuestAccessPage />} />
+
                 {/* Protected routes */}
                 {protectedRoutes.map(({ path, element }) => (
-                  <Route 
+                  <Route
                     key={path}
-                    path={path} 
-                    element={<ProtectedRoute>{element}</ProtectedRoute>} 
+                    path={path}
+                    element={<ProtectedRoute>{element}</ProtectedRoute>}
                   />
                 ))}
-                
+
                 {/* Fallback route */}
                 <Route path={ROUTES.NOT_FOUND} element={<NotFound />} />
               </Routes>

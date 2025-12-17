@@ -219,7 +219,7 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
         </TabsList>
 
         <TabsContent value="active" className="mt-4">
-          <SharesList 
+          <SharesList
             shares={shares.filter(s => s.status === 'accepted' || s.status === 'pending')}
             onCopyLink={copyShareLink}
             onRevoke={revokeShare}
@@ -231,7 +231,7 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
         </TabsContent>
 
         <TabsContent value="pending" className="mt-4">
-          <SharesList 
+          <SharesList
             shares={shares.filter(s => s.status === 'pending')}
             onCopyLink={copyShareLink}
             onRevoke={revokeShare}
@@ -243,7 +243,7 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
         </TabsContent>
 
         <TabsContent value="expired" className="mt-4">
-          <SharesList 
+          <SharesList
             shares={shares.filter(s => s.status === 'expired')}
             onCopyLink={copyShareLink}
             onRevoke={revokeShare}
@@ -255,7 +255,7 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
         </TabsContent>
 
         <TabsContent value="all" className="mt-4">
-          <SharesList 
+          <SharesList
             shares={shares}
             onCopyLink={copyShareLink}
             onRevoke={revokeShare}
@@ -283,8 +283,8 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
                 value={formData.resource_id}
                 onValueChange={v => {
                   const doc = documents?.find(d => d.id === v);
-                  setFormData(prev => ({ 
-                    ...prev, 
+                  setFormData(prev => ({
+                    ...prev,
                     resource_id: v,
                     resource_name: doc?.file_name || '',
                   }));
@@ -400,8 +400,8 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
             <Button variant="outline" onClick={() => setShowInviteDialog(false)}>
               Cancel
             </Button>
-            <Button 
-              onClick={handleInvite} 
+            <Button
+              onClick={handleInvite}
               disabled={!formData.guest_email || !formData.resource_id}
               className="gap-2"
             >
@@ -416,11 +416,11 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
 }
 
 // SharesList component
-function SharesList({ 
-  shares, 
-  onCopyLink, 
-  onRevoke, 
-  onResend, 
+function SharesList({
+  shares,
+  onCopyLink,
+  onRevoke,
+  onResend,
   onDelete,
   getStatusColor,
   getPermissionIcon,
@@ -465,9 +465,6 @@ function SharesList({
                         ({share.guest_name})
                       </span>
                     )}
-                    <Badge className={getStatusColor(share.status)}>
-                      {share.status}
-                    </Badge>
                   </div>
                   <p className="text-sm text-muted-foreground mt-1">
                     {share.resource_name || 'Unnamed document'}
@@ -500,18 +497,18 @@ function SharesList({
                   </Button>
                 )}
                 {(share.status === 'pending' || share.status === 'accepted') && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => onRevoke(share.id)}
                     className="text-destructive hover:text-destructive"
                   >
                     <XCircle className="h-4 w-4" />
                   </Button>
                 )}
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => onDelete(share.id)}
                   className="text-destructive hover:text-destructive"
                 >

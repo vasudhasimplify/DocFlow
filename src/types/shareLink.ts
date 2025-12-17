@@ -9,13 +9,13 @@ export interface EnhancedShareLink {
   resource_name?: string;
   token: string;
   short_code?: string; // Short URL code
-  
+
   // Permissions
   permission: ShareLinkPermission;
   allow_download: boolean;
   allow_print: boolean;
   allow_copy: boolean;
-  
+
   // Security
   password_protected: boolean;
   password_hash?: string;
@@ -24,18 +24,22 @@ export interface EnhancedShareLink {
   allowed_emails?: string[];
   allowed_domains?: string[];
   blocked_emails?: string[];
-  
+
   // Limits
   max_uses?: number;
   use_count: number;
   expires_at?: string;
-  
+
   // Tracking
   notify_on_access: boolean;
   track_views: boolean;
   watermark_enabled: boolean;
   watermark_text?: string;
-  
+
+  // Analytics tracking fields
+  download_count: number;
+  unique_visitor_ids: string[]; // Array of visitor fingerprints/IDs
+
   // Metadata
   name?: string;
   description?: string;
@@ -44,7 +48,7 @@ export interface EnhancedShareLink {
   updated_at: string;
   last_accessed_at?: string;
   is_active: boolean;
-  
+
   // Analytics summary
   analytics?: ShareLinkAnalytics;
 }
@@ -83,24 +87,24 @@ export interface CreateShareLinkParams {
   resource_id: string;
   resource_name?: string;
   permission: ShareLinkPermission;
-  
+
   // Options
   name?: string;
   allow_download?: boolean;
   allow_print?: boolean;
   allow_copy?: boolean;
-  
+
   // Security
   password?: string;
   require_email?: boolean;
   require_name?: boolean;
   allowed_emails?: string[];
   allowed_domains?: string[];
-  
+
   // Limits
   max_uses?: number;
   expires_in_hours?: number;
-  
+
   // Tracking
   notify_on_access?: boolean;
   watermark_enabled?: boolean;

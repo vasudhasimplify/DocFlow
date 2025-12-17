@@ -111,14 +111,15 @@ export function useExternalSharing() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const expiresAt = params.expires_in_days
-        ? new Date(Date.now() + params.expires_in_days * 24 * 60 * 60 * 1000).toISOString()
-        : null;
-
-      const { data, error } = await (supabase
-        .from('external_shares')
-        .insert({
-          owner_id: user.id,
+      // Call backend API instead of direct Supabase
+      // Backend will handle email sending and database operations
+      const response = await fetch('/api/shares/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ''}`
+        },
+        body: JSON.stringify({
           resource_type: params.resource_type,
           resource_id: params.resource_id,
           resource_name: params.resource_name,
@@ -128,36 +129,39 @@ export function useExternalSharing() {
           allow_download: params.allow_download ?? true,
           allow_print: params.allow_print ?? true,
           allow_reshare: params.allow_reshare ?? false,
-          password_protected: !!params.password,
-          password_hash: params.password, // In production, hash this
-          require_login: params.require_login ?? false,
-          expires_at: expiresAt,
+          password: params.password,
+          expires_in_days: params.expires_in_days,
           max_views: params.max_views,
           notify_on_view: params.notify_on_view ?? true,
           notify_on_download: params.notify_on_download ?? true,
           message: params.message,
-        } as any)
-        .select()
-        .single() as any);
+        })
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to create share');
+      }
+
+      const data = await response.json();
 
       toast({
         title: "Share invitation sent",
-        description: `Invitation sent to ${params.guest_email}`,
+        description: `Invitation sent to ${params.guest_email}. Email is on its way!`,
       });
 
       await fetchShares();
-      return data as ExternalShare;
-    } catch (error: any) {
+      return data;
+    } catch (error) {
+      console.error('Error creating share:', error);
       toast({
-        title: "Error creating share",
-        description: error.message,
-        variant: "destructive",
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Failed to create share',
+        variant: 'destructive'
       });
       return null;
     }
-  }, [toast, fetchShares]);
+  }, [fetchShares, toast]);
 
   const updateShare = useCallback(async (shareId: string, updates: Partial<ExternalShare>) => {
     try {

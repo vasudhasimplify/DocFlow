@@ -1,32 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import {
   Tags,
   Plus,
@@ -40,10 +27,14 @@ import {
   List,
   Link,
   Mail,
-  GripVertical,
   Loader2,
+  ChevronDown,
+  ChevronRight,
+  FileText,
 } from 'lucide-react';
 import { useCustomMetadata, FieldType, MetadataDefinition } from '@/hooks/useCustomMetadata';
+import { CreateMetadataFieldDialog, MetadataFieldFormData } from './CreateMetadataFieldDialog';
+import { supabase } from '@/integrations/supabase/client';
 
 const fieldTypeIcons: Record<FieldType, React.ReactNode> = {
   text: <Type className="h-4 w-4" />,
@@ -67,93 +58,114 @@ const fieldTypeLabels: Record<FieldType, string> = {
   email: 'Email',
 };
 
+interface DocumentWithMetadata {
+  id: string;
+  file_name: string;
+  field_value: string;
+}
+
 export function CustomMetadataManager() {
-  const { definitions, isLoading, createDefinition, updateDefinition, deleteDefinition } = useCustomMetadata();
+  const { definitions, isLoading, createDefinition, updateDefinition, deleteDefinition, setDocumentMetadata } = useCustomMetadata();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingField, setEditingField] = useState<MetadataDefinition | null>(null);
-  const [formData, setFormData] = useState({
-    field_name: '',
-    field_label: '',
-    field_type: 'text' as FieldType,
-    description: '',
-    is_required: false,
-    default_value: '',
-    options: '',
-  });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const resetForm = () => {
-    setFormData({
-      field_name: '',
-      field_label: '',
-      field_type: 'text',
-      description: '',
-      is_required: false,
-      default_value: '',
-      options: '',
-    });
-    setEditingField(null);
-  };
+  const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null);
+  const [fieldDocuments, setFieldDocuments] = useState<Record<string, DocumentWithMetadata[]>>({});
+  const [loadingFieldDocs, setLoadingFieldDocs] = useState<string | null>(null);
 
   const handleOpenCreate = () => {
-    resetForm();
+    setEditingField(null);
     setShowCreateDialog(true);
   };
 
   const handleOpenEdit = (def: MetadataDefinition) => {
-    setFormData({
-      field_name: def.field_name,
-      field_label: def.field_label,
-      field_type: def.field_type,
-      description: def.description || '',
-      is_required: def.is_required,
-      default_value: def.default_value || '',
-      options: def.options?.join(', ') || '',
-    });
     setEditingField(def);
     setShowCreateDialog(true);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.field_label.trim()) return;
-
-    setIsSubmitting(true);
-    try {
-      const fieldName = formData.field_name || formData.field_label.toLowerCase().replace(/\s+/g, '_');
-      const options = formData.options
-        ? formData.options.split(',').map(o => o.trim()).filter(Boolean)
-        : null;
-
-      if (editingField) {
-        await updateDefinition(editingField.id, {
-          field_name: fieldName,
-          field_label: formData.field_label,
-          field_type: formData.field_type,
-          description: formData.description || null,
-          is_required: formData.is_required,
-          default_value: formData.default_value || null,
-          options,
-        });
-      } else {
-        await createDefinition({
-          field_name: fieldName,
-          field_label: formData.field_label,
-          field_type: formData.field_type,
-          description: formData.description || null,
-          is_required: formData.is_required,
-          default_value: formData.default_value || null,
-          options,
-          sort_order: definitions.length,
-          is_active: true,
-          validation_rules: null,
-        });
-      }
-      setShowCreateDialog(false);
-      resetForm();
-    } finally {
-      setIsSubmitting(false);
+  const handleToggleExpand = async (fieldId: string) => {
+    if (expandedFieldId === fieldId) {
+      setExpandedFieldId(null);
+      return;
     }
+
+    setExpandedFieldId(fieldId);
+
+    // Fetch documents with this metadata field if not already loaded
+    if (!fieldDocuments[fieldId]) {
+      setLoadingFieldDocs(fieldId);
+      try {
+        const { data, error } = await (supabase
+          .from('document_custom_metadata')
+          .select(`
+            id,
+            field_value,
+            documents!inner(id, file_name)
+          `)
+          .eq('definition_id', fieldId) as any);
+
+        if (error) throw error;
+
+        const docs: DocumentWithMetadata[] = (data || []).map((item: any) => ({
+          id: item.documents.id,
+          file_name: item.documents.file_name,
+          field_value: item.field_value || '',
+        }));
+
+        setFieldDocuments(prev => ({ ...prev, [fieldId]: docs }));
+      } catch (err) {
+        console.error('Error fetching field documents:', err);
+        setFieldDocuments(prev => ({ ...prev, [fieldId]: [] }));
+      } finally {
+        setLoadingFieldDocs(null);
+      }
+    }
+  };
+
+  const handleSubmit = async (formData: MetadataFieldFormData) => {
+    const fieldName = formData.field_name || formData.field_label.toLowerCase().replace(/\s+/g, '_');
+    const options = formData.options
+      ? formData.options.split(',').map(o => o.trim()).filter(Boolean)
+      : null;
+
+    if (editingField) {
+      await updateDefinition(editingField.id, {
+        field_name: fieldName,
+        field_label: formData.field_label,
+        field_type: formData.field_type,
+        description: formData.description || null,
+        is_required: formData.is_required,
+        default_value: formData.default_value || null,
+        options,
+        validation_rules: formData.validation_rules || null,
+      });
+      // Clear cached documents for this field
+      setFieldDocuments(prev => {
+        const updated = { ...prev };
+        delete updated[editingField.id];
+        return updated;
+      });
+    } else {
+      const newDefinition = await createDefinition({
+        field_name: fieldName,
+        field_label: formData.field_label,
+        field_type: formData.field_type,
+        description: formData.description || null,
+        is_required: formData.is_required,
+        default_value: formData.default_value || null,
+        options,
+        sort_order: definitions.length,
+        is_active: true,
+        validation_rules: formData.validation_rules || null,
+      });
+
+      // Apply default value to selected documents
+      if (newDefinition && formData.selected_document_ids?.length && formData.default_value) {
+        for (const docId of formData.selected_document_ids) {
+          await setDocumentMetadata(docId, newDefinition.id, formData.default_value);
+        }
+      }
+    }
+    setShowCreateDialog(false);
   };
 
   if (isLoading) {
@@ -205,178 +217,135 @@ export function CustomMetadataManager() {
           ) : (
             <ScrollArea className="max-h-[500px]">
               <div className="space-y-2">
-                {definitions.map((def) => (
-                  <div
-                    key={def.id}
-                    className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent/50 transition-colors"
-                  >
-                    <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab" />
-                    
-                    <div className="p-2 rounded-lg bg-primary/10">
-                      {fieldTypeIcons[def.field_type]}
-                    </div>
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{def.field_label}</span>
-                        {def.is_required && (
-                          <Badge variant="secondary" className="text-xs">Required</Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{fieldTypeLabels[def.field_type]}</span>
-                        {def.description && (
-                          <>
-                            <span>•</span>
-                            <span className="truncate">{def.description}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
+                {definitions.map((def) => {
+                  const isExpanded = expandedFieldId === def.id;
+                  const docs = fieldDocuments[def.id] || [];
+                  const isLoadingDocs = loadingFieldDocs === def.id;
 
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleOpenEdit(def)}>
-                          <Pencil className="h-4 w-4 mr-2" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => deleteDefinition(def.id)}
-                          className="text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                ))}
+                  return (
+                    <Collapsible
+                      key={def.id}
+                      open={isExpanded}
+                      onOpenChange={() => handleToggleExpand(def.id)}
+                    >
+                      <div className="rounded-lg border overflow-hidden">
+                        <CollapsibleTrigger asChild>
+                          <div className="flex items-center gap-3 p-3 hover:bg-accent/50 transition-colors cursor-pointer">
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+
+                            <div className="p-2 rounded-lg bg-primary/10">
+                              {fieldTypeIcons[def.field_type]}
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{def.field_label}</span>
+                                {def.is_required && (
+                                  <Badge variant="secondary" className="text-xs">Required</Badge>
+                                )}
+                                {docs.length > 0 && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {docs.length} doc{docs.length !== 1 ? 's' : ''}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {fieldTypeLabels[def.field_type]}
+                              </div>
+                            </div>
+
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                                <Button variant="ghost" size="sm">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleOpenEdit(def)}>
+                                  <Pencil className="h-4 w-4 mr-2" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => deleteDefinition(def.id)}
+                                  className="text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </CollapsibleTrigger>
+
+                        <CollapsibleContent>
+                          <div className="px-4 pb-4 pt-2 bg-muted/30 border-t space-y-3">
+                            {def.description && (
+                              <div>
+                                <p className="text-xs text-muted-foreground font-medium mb-1">Description</p>
+                                <p className="text-sm">{def.description}</p>
+                              </div>
+                            )}
+
+                            {def.default_value && (
+                              <div>
+                                <p className="text-xs text-muted-foreground font-medium mb-1">Default Value</p>
+                                <p className="text-sm">{def.default_value}</p>
+                              </div>
+                            )}
+
+                            <div>
+                              <p className="text-xs text-muted-foreground font-medium mb-2">
+                                Documents with this field ({docs.length})
+                              </p>
+                              {isLoadingDocs ? (
+                                <div className="flex items-center gap-2 py-2">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span className="text-sm text-muted-foreground">Loading...</span>
+                                </div>
+                              ) : docs.length === 0 ? (
+                                <p className="text-sm text-muted-foreground italic">
+                                  No documents have this field set yet.
+                                </p>
+                              ) : (
+                                <div className="space-y-1 max-h-32 overflow-y-auto">
+                                  {docs.map((doc) => (
+                                    <div
+                                      key={doc.id}
+                                      className="flex items-center gap-2 text-sm p-2 rounded bg-background border"
+                                    >
+                                      <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                      <span className="truncate flex-1">{doc.file_name}</span>
+                                      <span className="text-xs text-muted-foreground truncate max-w-[100px]">
+                                        = {doc.field_value}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </CollapsibleContent>
+                      </div>
+                    </Collapsible>
+                  );
+                })}
               </div>
             </ScrollArea>
           )}
         </CardContent>
       </Card>
 
-      {/* Create/Edit Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>
-              {editingField ? 'Edit Field' : 'Create Custom Field'}
-            </DialogTitle>
-            <DialogDescription>
-              {editingField
-                ? 'Update the field properties'
-                : 'Add a new metadata field for your documents'}
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleSubmit}>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="field_label">Field Label *</Label>
-                <Input
-                  id="field_label"
-                  placeholder="e.g., Project Name"
-                  value={formData.field_label}
-                  onChange={(e) => setFormData(prev => ({ ...prev, field_label: e.target.value }))}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="field_type">Field Type</Label>
-                <Select
-                  value={formData.field_type}
-                  onValueChange={(v) => setFormData(prev => ({ ...prev, field_type: v as FieldType }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(fieldTypeLabels).map(([type, label]) => (
-                      <SelectItem key={type} value={type}>
-                        <div className="flex items-center gap-2">
-                          {fieldTypeIcons[type as FieldType]}
-                          {label}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Input
-                  id="description"
-                  placeholder="Optional description"
-                  value={formData.description}
-                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                />
-              </div>
-
-              {(formData.field_type === 'select' || formData.field_type === 'multi-select') && (
-                <div className="space-y-2">
-                  <Label htmlFor="options">Options (comma separated)</Label>
-                  <Input
-                    id="options"
-                    placeholder="Option 1, Option 2, Option 3"
-                    value={formData.options}
-                    onChange={(e) => setFormData(prev => ({ ...prev, options: e.target.value }))}
-                  />
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="default_value">Default Value</Label>
-                <Input
-                  id="default_value"
-                  placeholder="Optional default"
-                  value={formData.default_value}
-                  onChange={(e) => setFormData(prev => ({ ...prev, default_value: e.target.value }))}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Required Field</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Make this field mandatory
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.is_required}
-                  onCheckedChange={(checked) => setFormData(prev => ({ ...prev, is_required: checked }))}
-                />
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowCreateDialog(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Saving...
-                  </>
-                ) : editingField ? (
-                  'Save Changes'
-                ) : (
-                  'Create Field'
-                )}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <CreateMetadataFieldDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        onSubmit={handleSubmit}
+        editingField={editingField}
+      />
     </>
   );
 }
+

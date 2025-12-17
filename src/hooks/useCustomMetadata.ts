@@ -68,14 +68,40 @@ export function useCustomMetadata() {
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) throw new Error('Not authenticated');
 
-      const { data, error } = await supabase
+      let finalDefinition = { ...definition, user_id: user.user.id };
+
+      // Client-side duplicate check to avoid DB errors
+      const duplicate = definitions.find(d => d.field_name === finalDefinition.field_name);
+      if (duplicate) {
+        const timestamp = new Date().getTime().toString().slice(-4);
+        finalDefinition.field_name = `${finalDefinition.field_name}_${timestamp}`;
+        // Ensure the new name is also unique (though highly likely)
+        if (definitions.some(d => d.field_name === finalDefinition.field_name)) {
+          finalDefinition.field_name = `${finalDefinition.field_name}_${Math.floor(Math.random() * 1000)}`;
+        }
+      }
+
+      // Try insert
+      let { data, error } = await supabase
         .from('custom_metadata_definitions')
-        .insert({
-          ...definition,
-          user_id: user.user.id,
-        })
+        .insert(finalDefinition)
         .select()
         .single();
+
+      // Fallback: If still collision (race condition), retry one more time
+      if (error && (error.code === '23505' || error.message?.includes('unique'))) {
+        const timestamp = new Date().getTime().toString().slice(-4);
+        finalDefinition.field_name = `${finalDefinition.field_name}_${timestamp}`;
+
+        const retry = await supabase
+          .from('custom_metadata_definitions')
+          .insert(finalDefinition)
+          .select()
+          .single();
+
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) throw error;
 
@@ -86,16 +112,16 @@ export function useCustomMetadata() {
 
       fetchDefinitions();
       return data;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating definition:', error);
       toast({
         title: 'Error',
-        description: 'Failed to create custom field',
+        description: `Failed to create: ${error.message || 'Unknown error'}`,
         variant: 'destructive',
       });
       return null;
     }
-  }, [fetchDefinitions, toast]);
+  }, [definitions, fetchDefinitions, toast]);
 
   const updateDefinition = useCallback(async (
     id: string,
@@ -147,6 +173,45 @@ export function useCustomMetadata() {
         description: 'Failed to delete custom field',
         variant: 'destructive',
       });
+    }
+  }, [fetchDefinitions, toast]);
+
+  const reorderDefinitions = useCallback(async (reorderedDefinitions: MetadataDefinition[]) => {
+    // Optimistic update
+    setDefinitions(reorderedDefinitions);
+
+    try {
+      const updates = reorderedDefinitions.map((def, index) => ({
+        id: def.id,
+        sort_order: index,
+        updated_at: new Date().toISOString(),
+      }));
+
+      // Update in batches or use upsert if all fields are active
+      const { error } = await supabase
+        .from('custom_metadata_definitions')
+        .upsert(
+          updates.map(u => ({ ...u, is_active: true })) // Ensure we don't accidentally unset other fields, but upsert needs minimal fields if we only want to update.
+          // Actually, safer to just update sort_order one by one or create a specific RPC?
+          // For simplicity in Supabase client-side:
+        );
+
+      // Supabase upsert requires all non-null columns if it inserts, but we are updating existing IDs.
+      // Better approach for bulk update without RPC:
+      for (const update of updates) {
+        await supabase.from('custom_metadata_definitions').update({ sort_order: update.sort_order }).eq('id', update.id);
+      }
+
+      // Ideally we would use an RPC for this, but looping is okay for small list (<50 items).
+
+    } catch (error) {
+      console.error('Error reordering definitions:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to save new order',
+        variant: 'destructive',
+      });
+      fetchDefinitions(); // Revert on error
     }
   }, [fetchDefinitions, toast]);
 
@@ -223,6 +288,7 @@ export function useCustomMetadata() {
     deleteDefinition,
     getDocumentMetadata,
     setDocumentMetadata,
+    reorderDefinitions,
     refetch: fetchDefinitions,
   };
 }

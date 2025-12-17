@@ -88,8 +88,8 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
 
   const analytics = link.analytics || {
     total_views: link.use_count,
-    unique_visitors: Math.floor(link.use_count * 0.7),
-    download_count: 0,
+    unique_visitors: link.unique_visitor_ids?.length || (link.use_count > 0 ? 1 : 0),
+    download_count: link.download_count || 0,
     avg_view_duration_seconds: 120,
     views_by_date: [],
     views_by_country: [],
@@ -189,8 +189,8 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
             <CardContent>
               <div className="space-y-4">
                 {analytics.views_by_device.map((item) => {
-                  const percentage = analytics.total_views > 0 
-                    ? (item.views / analytics.total_views) * 100 
+                  const percentage = analytics.total_views > 0
+                    ? (item.views / analytics.total_views) * 100
                     : 0;
                   return (
                     <div key={item.device} className="space-y-2">
@@ -223,8 +223,8 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
               <CardContent>
                 <div className="space-y-3">
                   {analytics.views_by_country.map((item) => {
-                    const percentage = analytics.total_views > 0 
-                      ? (item.views / analytics.total_views) * 100 
+                    const percentage = analytics.total_views > 0
+                      ? (item.views / analytics.total_views) * 100
                       : 0;
                     return (
                       <div key={item.country} className="flex items-center justify-between">
@@ -258,9 +258,9 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col items-center">
-              <img 
-                src={qrUrl} 
-                alt="QR Code" 
+              <img
+                src={qrUrl}
+                alt="QR Code"
                 className="w-[160px] h-[160px] rounded-lg border mb-4"
               />
               <Button variant="outline" size="sm" className="w-full">
@@ -340,8 +340,8 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
           <Card>
             <CardContent className="p-4 space-y-2">
               {isActive ? (
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full"
                   onClick={() => onRevoke(link.id)}
                 >
@@ -349,8 +349,8 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
                   Revoke Link
                 </Button>
               ) : (
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full"
                   onClick={() => onUpdate(link.id, { is_active: true })}
                 >
@@ -358,8 +358,8 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
                   Reactivate Link
                 </Button>
               )}
-              <Button 
-                variant="destructive" 
+              <Button
+                variant="destructive"
                 className="w-full"
                 onClick={async () => {
                   await onDelete(link.id);

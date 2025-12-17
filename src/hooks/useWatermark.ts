@@ -24,6 +24,9 @@ export interface WatermarkSettings {
   include_username: boolean;
   created_at: string;
   updated_at: string;
+  document?: {
+    file_name: string;
+  };
 }
 
 export function useWatermark() {
@@ -39,7 +42,10 @@ export function useWatermark() {
 
       const { data, error } = await (supabase
         .from('document_watermarks')
-        .select('*')
+        .select(`
+          *,
+          document:documents(file_name)
+        `)
         .eq('user_id', user.user.id)
         .order('created_at', { ascending: false }) as any);
 

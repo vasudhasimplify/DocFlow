@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,13 +35,15 @@ import {
   Pencil,
   Trash2,
   Star,
-  StarOff,
   Loader2,
-  Type,
-  Image,
+  FileText,
+  Search,
+  Check,
+  X,
 } from 'lucide-react';
 import { useWatermark, WatermarkSettings, WatermarkPosition, WatermarkType } from '@/hooks/useWatermark';
 import { WatermarkPreview } from './WatermarkPreview';
+import { supabase } from '@/integrations/supabase/client';
 
 const positionOptions: { value: WatermarkPosition; label: string }[] = [
   { value: 'center', label: 'Center' },
@@ -61,8 +63,13 @@ const fontOptions = [
   'Verdana',
 ];
 
+interface DocumentItem {
+  id: string;
+  file_name: string;
+}
+
 export function WatermarkEditor() {
-  const { watermarks, defaultWatermark, isLoading, createWatermark, updateWatermark, deleteWatermark } = useWatermark();
+  const { watermarks, isLoading, createWatermark, updateWatermark, deleteWatermark } = useWatermark();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingWatermark, setEditingWatermark] = useState<WatermarkSettings | null>(null);
   const [formData, setFormData] = useState({
@@ -78,8 +85,16 @@ export function WatermarkEditor() {
     include_date: false,
     include_username: false,
     is_default: false,
+    document_id: null as string | null,
+    document_name: null as string | null, // For display only
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Document picker state
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [docSearchQuery, setDocSearchQuery] = useState('');
+  const [showDocResults, setShowDocResults] = useState(false);
 
   const resetForm = () => {
     setFormData({
@@ -95,8 +110,11 @@ export function WatermarkEditor() {
       include_date: false,
       include_username: false,
       is_default: false,
+      document_id: null,
+      document_name: null,
     });
     setEditingWatermark(null);
+    setDocSearchQuery('');
   };
 
   const handleOpenCreate = () => {
@@ -118,10 +136,48 @@ export function WatermarkEditor() {
       include_date: wm.include_date,
       include_username: wm.include_username,
       is_default: wm.is_default,
+      document_id: wm.document_id,
+      document_name: wm.document?.file_name || null,
     });
     setEditingWatermark(wm);
     setShowCreateDialog(true);
   };
+
+  // Fetch documents for picker
+  useEffect(() => {
+    if (showCreateDialog) {
+      const fetchDocuments = async () => {
+        setLoadingDocs(true);
+        try {
+          const { data: user } = await supabase.auth.getUser();
+          if (!user.user) return;
+
+          let query = supabase
+            .from('documents')
+            .select('id, file_name')
+            .eq('user_id', user.user.id)
+            .eq('is_deleted', false)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+          if (docSearchQuery) {
+            query = query.ilike('file_name', `%${docSearchQuery}%`);
+          }
+
+          const { data, error } = await query;
+          if (error) throw error;
+          setDocuments(data || []);
+        } catch (err) {
+          console.error('Error fetching documents:', err);
+        } finally {
+          setLoadingDocs(false);
+        }
+      };
+
+      const timer = setTimeout(fetchDocuments, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [showCreateDialog, docSearchQuery]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,18 +185,27 @@ export function WatermarkEditor() {
 
     setIsSubmitting(true);
     try {
+      const submitData = {
+        name: formData.name,
+        watermark_type: formData.watermark_type,
+        text_content: formData.text_content,
+        font_family: formData.font_family,
+        font_size: formData.font_size,
+        text_color: formData.text_color,
+        rotation: formData.rotation,
+        opacity: formData.opacity,
+        position: formData.position,
+        include_date: formData.include_date,
+        include_username: formData.include_username,
+        is_default: formData.is_default,
+        document_id: formData.document_id,
+        image_url: null,
+      };
+
       if (editingWatermark) {
-        await updateWatermark(editingWatermark.id, {
-          ...formData,
-          image_url: null,
-          document_id: null,
-        });
+        await updateWatermark(editingWatermark.id, submitData);
       } else {
-        await createWatermark({
-          ...formData,
-          image_url: null,
-          document_id: null,
-        });
+        await createWatermark(submitData);
       }
       setShowCreateDialog(false);
       resetForm();
@@ -211,10 +276,19 @@ export function WatermarkEditor() {
                               </Badge>
                             )}
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            {wm.watermark_type === 'text' ? `"${wm.text_content}"` : 'Image watermark'}
-                            {' • '}{wm.position}
-                          </p>
+
+                          <div className="text-xs text-muted-foreground mt-1 space-y-1">
+                            <p>
+                              {wm.watermark_type === 'text' ? `"${wm.text_content}"` : 'Image watermark'}
+                              {' • '}{wm.position}
+                            </p>
+                            {wm.document?.file_name && (
+                              <div className="flex items-center gap-1 text-primary/80 font-medium">
+                                <FileText className="h-3 w-3" />
+                                <span>{wm.document.file_name}</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -283,6 +357,93 @@ export function WatermarkEditor() {
                     onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                     required
                   />
+                </div>
+
+                {/* Document Selection */}
+                <div className="space-y-2">
+                  <Label>Apply to Document (Optional)</Label>
+                  {formData.document_id ? (
+                    <div className="flex items-center justify-between p-2 rounded-md border bg-accent/20">
+                      <div className="flex items-center gap-2 text-sm truncate">
+                        <FileText className="h-4 w-4 text-primary" />
+                        <span className="font-medium truncate">{formData.document_name}</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => setFormData(prev => ({ ...prev, document_id: null, document_name: null }))}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <div className="relative">
+                        <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Search documents..."
+                          className="pl-8"
+                          value={docSearchQuery}
+                          onChange={(e) => {
+                            setDocSearchQuery(e.target.value);
+                            setShowDocResults(true);
+                          }}
+                          onFocus={() => setShowDocResults(true)}
+                        />
+                      </div>
+
+                      {showDocResults && (docSearchQuery || documents.length > 0) && (
+                        <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-md border bg-popover text-popover-foreground shadow-md outline-none animate-in fade-in-0 zoom-in-95">
+                          <ScrollArea className="max-h-[200px]">
+                            <div className="p-1">
+                              {loadingDocs ? (
+                                <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                  Loading...
+                                </div>
+                              ) : documents.length === 0 ? (
+                                <div className="py-2 px-4 text-sm text-muted-foreground text-center">
+                                  No documents found
+                                </div>
+                              ) : (
+                                documents.map(doc => (
+                                  <div
+                                    key={doc.id}
+                                    className="flex items-center gap-2 p-2 rounded-sm cursor-pointer hover:bg-accent hover:text-accent-foreground text-sm"
+                                    onClick={() => {
+                                      setFormData(prev => ({
+                                        ...prev,
+                                        document_id: doc.id,
+                                        document_name: doc.file_name
+                                      }));
+                                      setShowDocResults(false);
+                                      setDocSearchQuery('');
+                                    }}
+                                  >
+                                    <FileText className="h-4 w-4 opacity-50" />
+                                    <span className="truncate">{doc.file_name}</span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </ScrollArea>
+                        </div>
+                      )}
+
+                      {/* Simple overlay to close results when clicking outside */}
+                      {showDocResults && (
+                        <div
+                          className="fixed inset-0 z-0"
+                          onClick={() => setShowDocResults(false)}
+                        />
+                      )}
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Leave empty to create a general watermark template
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -375,8 +536,8 @@ export function WatermarkEditor() {
                       id="text_color"
                       type="color"
                       value={formData.text_color.slice(0, 7)}
-                      onChange={(e) => setFormData(prev => ({ 
-                        ...prev, 
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
                         text_color: e.target.value + Math.round(formData.opacity * 255).toString(16).padStart(2, '0')
                       }))}
                       className="w-12 h-10 p-1 cursor-pointer"

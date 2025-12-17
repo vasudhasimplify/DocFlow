@@ -6,8 +6,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Download, ExternalLink, X } from 'lucide-react';
+import { Download, ExternalLink, X, Tags, ChevronRight, ChevronLeft } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { DocumentMetadataEditor } from '@/components/metadata';
+import { useContentAccessRules } from '@/hooks/useContentAccessRules';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { ShieldAlert } from 'lucide-react';
 
 interface Document {
   id: string;
@@ -32,18 +36,19 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [isLoadingImage, setIsLoadingImage] = React.useState(false);
   const [resolvedUrl, setResolvedUrl] = React.useState<string | null>(null);
   const [isLoadingUrl, setIsLoadingUrl] = React.useState(false);
+  const [showMetadata, setShowMetadata] = React.useState(false);
 
   // Check file type more accurately - prioritize file extension
   const fileName = (document?.file_name || '').toLowerCase();
   const fileExt = fileName.split('.').pop() || '';
-  
+
   // Image extensions - check extension FIRST, it's more reliable
   const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico'];
   const isImage = imageExtensions.includes(fileExt);
-  
+
   // PDF check - only if NOT an image
   const isPDF = !isImage && (fileExt === 'pdf' || document?.file_type === 'application/pdf');
-  
+
   // Generate signed URL when document opens
   React.useEffect(() => {
     if (!isOpen || !document?.storage_path) {
@@ -77,7 +82,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
     generateSignedUrl();
   }, [isOpen, document?.storage_path]);
-  
+
   // Fetch image as blob to bypass CORS issues
   React.useEffect(() => {
     // Always run cleanup
@@ -108,7 +113,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       }
     };
   }, []);
-  
+
   // Debug log
   React.useEffect(() => {
     if (document) {
@@ -124,7 +129,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   const handleDownload = async () => {
     if (!resolvedUrl) return;
-    
+
     try {
       const response = await fetch(resolvedUrl);
       const blob = await response.blob();
@@ -140,6 +145,33 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       console.error('Download failed:', error);
     }
   };
+
+  const { fetchApplications, applications } = useContentAccessRules();
+
+  // Fetch restrictions when document opens
+  React.useEffect(() => {
+    if (document?.id) {
+      fetchApplications({ documentId: document.id });
+    }
+  }, [document?.id, fetchApplications]);
+
+  const restrictions = React.useMemo(() => {
+    const r = {
+      download: false,
+      print: false,
+      share: false,
+      watermark: false
+    };
+
+    applications.forEach(app => {
+      if (app.actions_applied?.restrict_download) r.download = true;
+      if (app.actions_applied?.restrict_print) r.print = true;
+      if (app.actions_applied?.restrict_share) r.share = true;
+      if (app.actions_applied?.watermark_required) r.watermark = true;
+    });
+
+    return r;
+  }, [applications]);
 
   const handleOpenInNewTab = () => {
     if (resolvedUrl) {
@@ -159,9 +191,19 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </DialogTitle>
             <div className="flex items-center gap-2">
               <Button
+                variant={showMetadata ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowMetadata(!showMetadata)}
+                className="gap-2"
+              >
+                <Tags className="w-4 h-4" />
+                Metadata
+              </Button>
+              <Button
                 variant="outline"
                 size="sm"
                 onClick={handleDownload}
+                disabled={restrictions.download}
                 className="gap-2"
               >
                 <Download className="w-4 h-4" />
@@ -171,6 +213,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 variant="outline"
                 size="sm"
                 onClick={handleOpenInNewTab}
+                disabled={restrictions.download || restrictions.print || restrictions.share}
                 className="gap-2"
               >
                 <ExternalLink className="w-4 h-4" />
@@ -187,44 +230,73 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           </div>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden bg-gray-100 dark:bg-gray-900">
-          {isLoadingUrl ? (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-muted-foreground">Loading document...</p>
-            </div>
-          ) : !resolvedUrl ? (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-muted-foreground">Failed to load document</p>
-            </div>
-          ) : isPDF ? (
-            <iframe
-              src={resolvedUrl}
-              className="w-full h-full border-0"
-              title={document.file_name}
-            />
-          ) : isImage ? (
-            <div className="flex items-center justify-center h-full p-4">
-              {isLoadingImage ? (
-                <p className="text-muted-foreground">Loading image...</p>
-              ) : imageObjectUrl ? (
-                <img
-                  src={imageObjectUrl}
-                  alt={document.file_name}
-                  className="max-w-full max-h-full object-contain"
-                />
-              ) : (
-                <p className="text-muted-foreground">Failed to load image</p>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
-              <p className="text-muted-foreground">
-                Preview not available for this file type
-              </p>
-              <Button onClick={handleDownload} className="gap-2">
-                <Download className="w-4 h-4" />
-                Download to view
-              </Button>
+        {/* Restrictions Banner */}
+        {(restrictions.download || restrictions.print || restrictions.share) && (
+          <Alert variant="destructive" className="mx-6 mt-4 mb-0">
+            <ShieldAlert className="h-4 w-4" />
+            <AlertTitle>Restricted Access</AlertTitle>
+            <AlertDescription>
+              This document is protected by access rules: {' '}
+              {[
+                restrictions.download && 'Download Restricted',
+                restrictions.print && 'Print Restricted',
+                restrictions.share && 'Sharing Restricted'
+              ].filter(Boolean).join(', ')}.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div className="flex-1 overflow-hidden flex">
+          {/* Main content area */}
+          <div className={`flex-1 overflow-hidden bg-gray-100 dark:bg-gray-900 ${showMetadata ? '' : ''}`}>
+            {isLoadingUrl ? (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-muted-foreground">Loading document...</p>
+              </div>
+            ) : !resolvedUrl ? (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-muted-foreground">Failed to load document</p>
+              </div>
+            ) : isPDF ? (
+              <iframe
+                src={resolvedUrl}
+                className="w-full h-full border-0"
+                title={document.file_name}
+              />
+            ) : isImage ? (
+              <div className="flex items-center justify-center h-full p-4">
+                {isLoadingImage ? (
+                  <p className="text-muted-foreground">Loading image...</p>
+                ) : imageObjectUrl ? (
+                  <img
+                    src={imageObjectUrl}
+                    alt={document.file_name}
+                    className="max-w-full max-h-full object-contain"
+                  />
+                ) : (
+                  <p className="text-muted-foreground">Failed to load image</p>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full gap-4">
+                <p className="text-muted-foreground">
+                  Preview not available for this file type
+                </p>
+                <Button onClick={handleDownload} className="gap-2">
+                  <Download className="w-4 h-4" />
+                  Download to view
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Metadata Sidebar */}
+          {showMetadata && (
+            <div className="w-80 border-l bg-background overflow-y-auto p-4">
+              <DocumentMetadataEditor
+                documentId={document.id}
+                documentName={document.file_name}
+              />
             </div>
           )}
         </div>

@@ -15,8 +15,18 @@ env_file_path = backend_dir / ".env"
 if env_file_path.exists():
     load_dotenv(env_file_path)
 
-from .api.routes import analyze_router
+# Import shares router (always works)
+from .api.shares import router as shares_router
 from .core.config import settings
+
+# Import analyze_router with graceful fallback for Python 3.13 compatibility
+try:
+    from .api.routes import analyze_router
+    HAS_ANALYZE_ROUTER = True
+except Exception as e:
+    print(f"⚠️  Warning: Analyze router not available (Python 3.13 incompatibility): {str(e)[:100]}")
+    HAS_ANALYZE_ROUTER = False
+    analyze_router = None
 
 # Configure logging with both console and file handlers
 log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
@@ -136,7 +146,22 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(analyze_router, prefix="/api/v1")
+# Only include analyze_router if it loaded successfully (Python 3.13 compatibility)
+if HAS_ANALYZE_ROUTER and analyze_router:
+    app.include_router(analyze_router, prefix="/api/v1")
+# Always include shares router (works with all Python versions)
+app.include_router(shares_router)
+
+# Import and include rules router
+# Import and include rules router
+from .api.rules import router as rules_router
+app.include_router(rules_router)
+logger.info("✅ Rules router loaded")
+
+# Import and include legal holds router
+from .api.legal_holds import router as legal_holds_router
+app.include_router(legal_holds_router)
+logger.info("✅ Legal Holds router loaded")
 
 @app.on_event("shutdown")
 async def shutdown_event():
