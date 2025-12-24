@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { 
+import {
   ArrowLeft, FileText, Users, Clock, CheckCircle, XCircle,
   Send, Download, RefreshCw, MoreVertical, Mail, Eye,
   Calendar, Shield, AlertTriangle, PenTool
@@ -15,6 +15,9 @@ import { useElectronicSignatures } from '@/hooks/useElectronicSignatures';
 import { STATUS_CONFIG, SIGNER_STATUS_CONFIG } from '@/types/signature';
 import type { SignatureRequest, SignatureAuditLog } from '@/types/signature';
 import { cn } from '@/lib/utils';
+import { SignaturePadDialog } from './SignaturePadDialog';
+import { SignatureCertificate } from './SignatureCertificate';
+import { supabase } from '@/integrations/supabase/client';
 
 interface SignatureRequestDetailProps {
   request: SignatureRequest;
@@ -25,22 +28,36 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
   request,
   onBack,
 }) => {
-  const { sendRequest, cancelRequest, getAuditLog, refresh } = useElectronicSignatures();
+  const { sendRequest, cancelRequest, getAuditLog, signDocument, refresh } = useElectronicSignatures();
   const [auditLog, setAuditLog] = useState<SignatureAuditLog[]>([]);
   const [activeTab, setActiveTab] = useState('overview');
+  const [showSignDialog, setShowSignDialog] = useState(false);
+  const [signingAs, setSigningAs] = useState<string>('signature');
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const [showCertificate, setShowCertificate] = useState(false);
 
   useEffect(() => {
-    const loadAudit = async () => {
-      const logs = await getAuditLog(request.id);
-      setAuditLog(logs);
-    };
-    loadAudit();
-  }, [request.id, getAuditLog]);
+    // Temporarily disabled audit log to fix freeze - TODO: fix later
+    // const loadAudit = async () => {
+    //   const logs = await getAuditLog(request.id);
+    //   setAuditLog(logs);
+    // };
+    // loadAudit();
+
+    // Get current user email
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setCurrentUserEmail(data.user.email || null);
+    });
+  }, [request.id]);
 
   const statusConfig = STATUS_CONFIG[request.status];
   const signers = request.signers?.filter(s => s.role === 'signer' || s.role === 'approver') || [];
   const signedCount = signers.filter(s => s.status === 'signed').length;
   const progress = signers.length ? (signedCount / signers.length) * 100 : 0;
+
+  // Check if current user needs to sign
+  const currentUserSigner = request.signers?.find(s => s.email === currentUserEmail);
+  const needsMySignature = currentUserSigner && currentUserSigner.status === 'sent';
 
   const getAuditIcon = (action: string) => {
     switch (action) {
@@ -96,16 +113,23 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
                 Send Now
               </Button>
             )}
+            {request.status === 'pending' && (
+              needsMySignature ? (
+                <Button onClick={() => setShowSignDialog(true)} className="gap-2">
+                  <PenTool className="h-4 w-4" />
+                  Sign Document
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={() => cancelRequest(request.id)}>
+                  <XCircle className="h-4 w-4 mr-2" />
+                  Cancel
+                </Button>
+              )
+            )}
             {request.status === 'completed' && (
-              <Button variant="outline">
+              <Button variant="outline" onClick={() => setShowCertificate(true)}>
                 <Download className="h-4 w-4 mr-2" />
                 Download Certificate
-              </Button>
-            )}
-            {request.status === 'pending' && (
-              <Button variant="outline" onClick={() => cancelRequest(request.id)}>
-                <XCircle className="h-4 w-4 mr-2" />
-                Cancel
               </Button>
             )}
           </div>
@@ -143,16 +167,16 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
                       {request.signers?.map((signer) => {
                         const signerStatus = SIGNER_STATUS_CONFIG[signer.status];
                         return (
-                          <div 
-                            key={signer.id} 
+                          <div
+                            key={signer.id}
                             className="flex items-center justify-between p-3 border rounded-lg"
                           >
                             <div className="flex items-center gap-3">
                               <div className={cn(
                                 "w-10 h-10 rounded-full flex items-center justify-center font-medium",
                                 signer.status === 'signed' ? 'bg-green-500/20 text-green-700' :
-                                signer.status === 'declined' ? 'bg-red-500/20 text-red-700' :
-                                'bg-muted text-muted-foreground'
+                                  signer.status === 'declined' ? 'bg-red-500/20 text-red-700' :
+                                    'bg-muted text-muted-foreground'
                               )}>
                                 {signer.status === 'signed' ? (
                                   <CheckCircle className="h-5 w-5" />
@@ -319,6 +343,24 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
           </Tabs>
         </div>
       </div>
+
+      {/* Signature Dialog */}
+      <SignaturePadDialog
+        open={showSignDialog}
+        onOpenChange={setShowSignDialog}
+        type={signingAs as 'signature' | 'initial'}
+        onSignatureSelect={async (dataUrl) => {
+          await signDocument(request.id, dataUrl);
+          setShowSignDialog(false);
+        }}
+      />
+
+      {/* Certificate Dialog */}
+      <SignatureCertificate
+        request={request}
+        open={showCertificate}
+        onClose={() => setShowCertificate(false)}
+      />
     </div>
   );
 };

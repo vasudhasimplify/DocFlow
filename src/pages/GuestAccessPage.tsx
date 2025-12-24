@@ -102,8 +102,8 @@ export default function GuestAccessPage() {
 
         setShare(localShare);
 
-        // Fetch the actual document data from Supabase
-        await fetchDocument(localShare.resource_id);
+        // Fetch the actual document data from Supabase using direct method (for share links)
+        await fetchDocumentDirect(localShare.resource_id);
 
         setLoading(false);
         return;
@@ -153,7 +153,7 @@ export default function GuestAccessPage() {
 
           setShare(tokenData);
           setViewCount(tokenData.use_count || 0);
-          await fetchDocument(tokenData.resource_id);
+          await fetchDocumentFromBackend();
           // Track view via API
           fetch(`/api/shares/${tokenData.id}/view`, { method: 'POST' }).catch(() => { });
           setLoading(false);
@@ -181,7 +181,7 @@ export default function GuestAccessPage() {
 
         setShare(data);
         setViewCount(data.use_count || 0);
-        await fetchDocument(data.resource_id);
+        await fetchDocumentFromBackend();
         // Track view via API
         fetch(`/api/shares/${data.id}/view`, { method: 'POST' }).catch(() => { });
         setLoading(false);
@@ -218,7 +218,7 @@ export default function GuestAccessPage() {
         setViewCount(share.use_count || 0);
       }
 
-      await fetchDocument(share.resource_id);
+      await fetchDocumentDirect(share.resource_id);
     } else {
       setPasswordError(true);
       toast({
@@ -229,36 +229,73 @@ export default function GuestAccessPage() {
     }
   };
 
-  const fetchDocument = async (resourceId: string) => {
+  const fetchDocumentFromBackend = async () => {
+    // For external_shares (guest sharing) - use backend API
     try {
-      // Try to fetch the document from Supabase
+      console.log('🔍 Fetching document via backend API with token:', token);
+
+      const response = await fetch(`/api/guest/document/${token}`);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ Backend API error:', errorData);
+        setError(errorData.detail || 'Failed to load document');
+        return;
+      }
+
+      const data = await response.json();
+      console.log('✅ Document data received from backend:', data);
+
+      setDocument({
+        id: data.document_id,
+        file_name: data.file_name,
+        storage_path: null,
+        file_type: data.file_type,
+        extracted_text: null
+      });
+
+      if (data.signed_url) {
+        console.log('✅ Signed URL received successfully');
+        setDocumentUrl(data.signed_url);
+      } else {
+        console.error('❌ No signed URL in response');
+        setError('Failed to generate document URL');
+      }
+    } catch (err) {
+      console.error('❌ Error fetching document from backend:', err);
+      setError(`Failed to load document: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  };
+
+  const fetchDocumentDirect = async (resourceId: string) => {
+    // For localStorage share links - use client-side signed URLs
+    try {
+      console.log('🔍 Fetching document directly with ID:', resourceId);
+
       const { data: docData, error: docError } = await supabase
         .from('documents')
         .select('*')
         .eq('id', resourceId)
         .single();
 
-      if (docError || !docData) {
-        console.log('Document not found in database, using share info');
+      if (docError) {
+        console.error('❌ Error fetching document:', docError);
+        setError('Document not found in database');
         return;
       }
 
-      // Determine file type from multiple possible fields
+      if (!docData) {
+        console.log('⚠️ Document not found');
+        return;
+      }
+
+      console.log('✅ Document found:', docData);
+
       const fileName = docData.file_name || docData.original_name || docData.name || '';
       const fileExtension = fileName.split('.').pop()?.toLowerCase() || '';
       const mimeType = docData.mime_type || docData.file_type || '';
       const documentType = docData.document_type || '';
-
-      // Combine all type information for better detection
       const fileType = mimeType || documentType || fileExtension;
-
-      console.log('📄 Document data:', {
-        fileName,
-        fileExtension,
-        mimeType,
-        documentType,
-        finalFileType: fileType
-      });
 
       setDocument({
         id: docData.id,
@@ -268,18 +305,31 @@ export default function GuestAccessPage() {
         extracted_text: docData.extracted_text
       });
 
-      // Get the storage URL if storage_path exists
+      // Get storage URL if storage_path exists
       if (docData.storage_path) {
-        const { data: urlData } = await supabase.storage
+        console.log('🔐 Creating signed URL for storage_path:', docData.storage_path);
+
+        const { data: urlData, error: urlError } = await supabase.storage
           .from('documents')
-          .createSignedUrl(docData.storage_path, 3600); // 1 hour expiry
+          .createSignedUrl(docData.storage_path, 3600);
+
+        if (urlError) {
+          console.error('❌ Error creating signed URL:', urlError);
+          setError('Failed to generate document URL');
+          return;
+        }
 
         if (urlData?.signedUrl) {
+          console.log('✅ Signed URL created successfully');
           setDocumentUrl(urlData.signedUrl);
         }
+      } else {
+        console.error('❌ No storage_path found');
+        setError('Document file not found in storage');
       }
     } catch (err) {
-      console.error('Error fetching document:', err);
+      console.error('❌ Error fetching document directly:', err);
+      setError(`Failed to load document: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -312,12 +362,18 @@ export default function GuestAccessPage() {
   };
 
   const handleViewDocument = () => {
+    console.log('🔘 View Document clicked. documentUrl:', documentUrl);
+
     if (documentUrl) {
       // Open document in new tab or show in viewer
       setShowViewer(true);
     } else {
-      // If no URL, just show a message
-      alert('Document preview is being prepared. Please try again in a moment.');
+      // If no URL, show error with more context
+      if (error) {
+        alert(`Unable to display document: ${error}`);
+      } else {
+        alert('Document preview is being prepared. Please try again in a moment.\n\nIf this persists, the document may not be properly uploaded to storage.');
+      }
     }
   };
 

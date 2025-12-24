@@ -19,6 +19,12 @@ from .api.routes import analyze_router
 from .api.quick_access import router as quick_access_router
 from .api.checkinout import router as checkinout_router
 from .api.ownership_transfers import router as ownership_transfers_router
+from .api.shares import router as shares_router
+from .api.rules import router as rules_router
+from .api.guest import router as guest_router
+from .api.signatures import router as signatures_router
+from .api.watermarks import router as watermarks_router
+from .api.migration import router as migration_router
 from .core.config import settings
 
 # Configure logging with both console and file handlers
@@ -143,6 +149,12 @@ app.include_router(analyze_router, prefix="/api/v1")
 app.include_router(quick_access_router, prefix="/api/v1")
 app.include_router(checkinout_router)
 app.include_router(ownership_transfers_router)
+app.include_router(shares_router)
+app.include_router(rules_router)
+app.include_router(guest_router)
+app.include_router(signatures_router)
+app.include_router(watermarks_router)
+app.include_router(migration_router)
 
 @app.on_event("shutdown")
 async def shutdown_event():

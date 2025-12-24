@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { 
-  Plus, Trash2, Users, Calendar, Mail, User, 
-  ArrowUp, ArrowDown, AlertCircle
+import React, { useState, useRef } from 'react';
+import {
+  Plus, Trash2, Users, Calendar, Mail, User,
+  ArrowUp, ArrowDown, AlertCircle, Upload, FileText, X
 } from 'lucide-react';
 import {
   Dialog,
@@ -53,6 +53,9 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [documentName, setDocumentName] = useState('');
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSequential, setIsSequential] = useState(false);
   const [hasExpiry, setHasExpiry] = useState(false);
   const [expiryDays, setExpiryDays] = useState(30);
@@ -74,7 +77,7 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
   };
 
   const updateSigner = (id: string, field: keyof SignerInput, value: string) => {
-    setSigners(signers.map(s => 
+    setSigners(signers.map(s =>
       s.id === id ? { ...s, [field]: value } : s
     ));
   };
@@ -88,7 +91,7 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
 
   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-  const canProceed = step === 'details' 
+  const canProceed = step === 'details'
     ? title.trim().length > 0
     : signers.every(s => s.name.trim() && isValidEmail(s.email));
 
@@ -97,7 +100,7 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
 
     setIsSubmitting(true);
     try {
-      const expiresAt = hasExpiry 
+      const expiresAt = hasExpiry
         ? new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString()
         : undefined;
 
@@ -133,10 +136,28 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
     setTitle('');
     setMessage('');
     setDocumentName('');
+    setDocumentFile(null);
     setIsSequential(false);
     setHasExpiry(false);
     setExpiryDays(30);
     setSigners([{ id: '1', name: '', email: '', role: 'signer' }]);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setDocumentFile(file);
+      if (!documentName) {
+        setDocumentName(file.name);
+      }
+    }
+  };
+
+  const removeDocument = () => {
+    setDocumentFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   return (
@@ -145,7 +166,7 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
         <DialogHeader>
           <DialogTitle>Create Signature Request</DialogTitle>
           <DialogDescription>
-            {step === 'details' 
+            {step === 'details'
               ? 'Enter the details for your signature request'
               : 'Add recipients who need to sign this document'}
           </DialogDescription>
@@ -170,6 +191,49 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
                   value={documentName}
                   onChange={(e) => setDocumentName(e.target.value)}
                 />
+              </div>
+
+              <div>
+                <Label>Upload Document</Label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx,.txt"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                {documentFile ? (
+                  <div className="border rounded-lg p-4 flex items-center justify-between bg-muted/30">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-primary/10 rounded">
+                        <FileText className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm">{documentFile.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {(documentFile.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={removeDocument}
+                      className="text-destructive"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-accent/50 transition-colors"
+                  >
+                    <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                    <p className="text-sm font-medium mb-1">Click to upload document</p>
+                    <p className="text-xs text-muted-foreground">PDF, DOC, DOCX, or TXT up to 10MB</p>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -234,8 +298,8 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
               )}
 
               {signers.map((signer, index) => (
-                <div 
-                  key={signer.id} 
+                <div
+                  key={signer.id}
                   className="p-4 border rounded-lg space-y-3"
                 >
                   <div className="flex items-center justify-between">
@@ -311,8 +375,8 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
 
                   <div>
                     <Label className="text-xs">Role</Label>
-                    <Select 
-                      value={signer.role} 
+                    <Select
+                      value={signer.role}
                       onValueChange={(v) => updateSigner(signer.id, 'role', v)}
                     >
                       <SelectTrigger>
@@ -352,14 +416,14 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
             </Button>
           ) : (
             <>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => handleSubmit(false)}
                 disabled={isSubmitting || !canProceed}
               >
                 Save as Draft
               </Button>
-              <Button 
+              <Button
                 onClick={() => handleSubmit(true)}
                 disabled={isSubmitting || !canProceed}
               >

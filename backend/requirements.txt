@@ -63,3 +63,9 @@ websockets==15.0.1
 yarl==1.22.0
 langsmith==0.1.129
 google-generativeai>=0.8.0
+
+# Google Drive Migration
+google-api-python-client==2.108.0
+google-auth==2.25.2
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0

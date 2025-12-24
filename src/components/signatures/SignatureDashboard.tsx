@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { 
+import {
   PenTool, FileText, Clock, CheckCircle, XCircle, Send,
   Plus, RefreshCw, Users, Calendar, AlertTriangle, Download,
   Eye, MoreVertical, Trash2, Copy, Edit
@@ -38,67 +38,68 @@ export const SignatureDashboard: React.FC = () => {
     cancelRequest,
   } = useElectronicSignatures();
 
-  const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'completed' | 'drafts'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'completed' | 'drafts' | 'cancelled'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showSignaturePad, setShowSignaturePad] = useState(false);
 
   const filteredRequests = requests.filter(request => {
     const matchesSearch = request.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      request.signers?.some(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      request.signers?.some(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         s.email.toLowerCase().includes(searchQuery.toLowerCase()));
-    
+
     switch (activeTab) {
       case 'pending': return matchesSearch && request.status === 'pending';
       case 'completed': return matchesSearch && request.status === 'completed';
       case 'drafts': return matchesSearch && request.status === 'draft';
+      case 'cancelled': return matchesSearch && request.status === 'cancelled';
       default: return matchesSearch;
     }
   });
 
   const statCards = [
-    { 
-      title: 'Total Requests', 
-      value: stats.total_requests, 
-      icon: FileText, 
+    {
+      title: 'Total Requests',
+      value: stats.total_requests,
+      icon: FileText,
       color: 'text-blue-500',
       bgColor: 'bg-blue-500/10',
     },
-    { 
-      title: 'Pending', 
-      value: stats.pending, 
-      icon: Clock, 
+    {
+      title: 'Pending',
+      value: stats.pending,
+      icon: Clock,
       color: 'text-yellow-500',
       bgColor: 'bg-yellow-500/10',
       alert: stats.pending > 0,
     },
-    { 
-      title: 'Completed', 
-      value: stats.completed, 
-      icon: CheckCircle, 
+    {
+      title: 'Completed',
+      value: stats.completed,
+      icon: CheckCircle,
       color: 'text-green-500',
       bgColor: 'bg-green-500/10',
     },
-    { 
-      title: 'Awaiting My Signature', 
-      value: stats.awaiting_my_signature, 
-      icon: PenTool, 
+    {
+      title: 'Awaiting My Signature',
+      value: stats.awaiting_my_signature,
+      icon: PenTool,
       color: 'text-purple-500',
       bgColor: 'bg-purple-500/10',
       alert: stats.awaiting_my_signature > 0,
     },
-    { 
-      title: 'Completion Rate', 
-      value: `${stats.completion_rate}%`, 
-      icon: CheckCircle, 
+    {
+      title: 'Completion Rate',
+      value: `${stats.completion_rate}%`,
+      icon: CheckCircle,
       color: 'text-emerald-500',
       bgColor: 'bg-emerald-500/10',
       isPercentage: true,
     },
-    { 
-      title: 'Declined/Expired', 
-      value: stats.declined + stats.expired, 
-      icon: XCircle, 
+    {
+      title: 'Declined/Expired',
+      value: stats.declined + stats.expired,
+      icon: XCircle,
       color: 'text-red-500',
       bgColor: 'bg-red-500/10',
     },
@@ -112,8 +113,8 @@ export const SignatureDashboard: React.FC = () => {
 
   if (activeRequest) {
     return (
-      <SignatureRequestDetail 
-        request={activeRequest} 
+      <SignatureRequestDetail
+        request={activeRequest}
         onBack={() => setActiveRequest(null)}
       />
     );
@@ -200,6 +201,10 @@ export const SignatureDashboard: React.FC = () => {
               <Edit className="h-4 w-4" />
               Drafts
             </TabsTrigger>
+            <TabsTrigger value="cancelled" className="gap-2">
+              <XCircle className="h-4 w-4" />
+              Cancelled
+            </TabsTrigger>
           </TabsList>
 
           <div className="flex items-center gap-2 py-2">
@@ -220,8 +225,8 @@ export const SignatureDashboard: React.FC = () => {
                 const progress = getSignerProgress(request);
 
                 return (
-                  <Card 
-                    key={request.id} 
+                  <Card
+                    key={request.id}
                     className="cursor-pointer hover:border-primary/50 transition-colors"
                     onClick={() => setActiveRequest(request)}
                   >
@@ -245,6 +250,12 @@ export const SignatureDashboard: React.FC = () => {
                           </div>
 
                           <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            {request.document_name && (
+                              <span className="flex items-center gap-1">
+                                <FileText className="h-3 w-3" />
+                                {request.document_name}
+                              </span>
+                            )}
                             <span className="flex items-center gap-1">
                               <Users className="h-3 w-3" />
                               {request.signers?.length || 0} recipients
@@ -272,29 +283,38 @@ export const SignatureDashboard: React.FC = () => {
                           )}
 
                           {/* Signer Avatars */}
-                          <div className="flex items-center gap-1 mt-2">
-                            {request.signers?.slice(0, 5).map((signer) => {
-                              const signerStatus = SIGNER_STATUS_CONFIG[signer.status];
-                              return (
-                                <div
-                                  key={signer.id}
-                                  className={cn(
-                                    "w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium border-2",
-                                    signer.status === 'signed' ? 'bg-green-500/20 border-green-500 text-green-700' :
-                                    signer.status === 'declined' ? 'bg-red-500/20 border-red-500 text-red-700' :
-                                    signer.status === 'viewed' ? 'bg-yellow-500/20 border-yellow-500 text-yellow-700' :
-                                    'bg-muted border-border text-muted-foreground'
-                                  )}
-                                  title={`${signer.name} - ${signerStatus.label}`}
-                                >
-                                  {signer.name.charAt(0).toUpperCase()}
-                                </div>
-                              );
-                            })}
-                            {(request.signers?.length || 0) > 5 && (
-                              <span className="text-xs text-muted-foreground ml-1">
-                                +{(request.signers?.length || 0) - 5}
-                              </span>
+                          <div className="mt-2">
+                            <div className="flex items-center gap-1">
+                              {request.signers?.slice(0, 5).map((signer) => {
+                                const signerStatus = SIGNER_STATUS_CONFIG[signer.status];
+                                return (
+                                  <div
+                                    key={signer.id}
+                                    className={cn(
+                                      "w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium border-2",
+                                      signer.status === 'signed' ? 'bg-green-500/20 border-green-500 text-green-700' :
+                                        signer.status === 'declined' ? 'bg-red-500/20 border-red-500 text-red-700' :
+                                          signer.status === 'viewed' ? 'bg-yellow-500/20 border-yellow-500 text-yellow-700' :
+                                            'bg-muted border-border text-muted-foreground'
+                                    )}
+                                    title={`${signer.name} - ${signerStatus.label}`}
+                                  >
+                                    {signer.name.charAt(0).toUpperCase()}
+                                  </div>
+                                );
+                              })}
+                              {(request.signers?.length || 0) > 5 && (
+                                <span className="text-xs text-muted-foreground ml-1">
+                                  +{(request.signers?.length || 0) - 5}
+                                </span>
+                              )}
+                            </div>
+                            {/* Show recipient names */}
+                            {request.signers && request.signers.length > 0 && (
+                              <p className="text-xs text-muted-foreground mt-1 truncate">
+                                Recipients: {request.signers.slice(0, 3).map(s => s.name).join(', ')}
+                                {request.signers.length > 3 && '...'}
+                              </p>
                             )}
                           </div>
                         </div>
@@ -331,7 +351,7 @@ export const SignatureDashboard: React.FC = () => {
                               {request.status === 'pending' && (
                                 <>
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuItem 
+                                  <DropdownMenuItem
                                     className="text-destructive"
                                     onClick={() => cancelRequest(request.id)}
                                   >
@@ -372,8 +392,8 @@ export const SignatureDashboard: React.FC = () => {
       </Tabs>
 
       {/* Dialogs */}
-      <CreateSignatureRequestDialog 
-        open={showCreateDialog} 
+      <CreateSignatureRequestDialog
+        open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
       />
       <SignaturePadDialog

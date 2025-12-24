@@ -33,6 +33,7 @@ import ImagePreviewPage from "./pages/ImagePreviewPage";
 import RunApplication from "./pages/RunApplication";
 import Settings from "./pages/Settings";
 import BulkTest from "./pages/BulkTest";
+import { SigningPage } from "./pages/SigningPage";
 
 // Configure React Query client
 const queryClient = new QueryClient({
@@ -158,6 +159,9 @@ const App = () => (
                 {/* Guest sharing public routes */}
                 <Route path="/guest/:token" element={<GuestAccessPage />} />
                 <Route path="/s/:token" element={<GuestAccessPage />} />
+
+                {/* E-Signature public signing route */}
+                <Route path="/sign/:token" element={<SigningPage />} />
 
                 {/* Protected routes */}
                 {protectedRoutes.map(({ path, element }) => (

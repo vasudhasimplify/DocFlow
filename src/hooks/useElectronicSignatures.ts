@@ -55,6 +55,17 @@ export const useElectronicSignatures = () => {
 
       setRequests(typedRequests);
 
+      // Fetch user signatures
+      const { data: signaturesData, error: sigError } = await supabase
+        .from('user_signatures')
+        .select('*')
+        .eq('user_id', user.user.id)
+        .order('created_at', { ascending: false });
+
+      if (!sigError && signaturesData) {
+        setUserSignatures(signaturesData as UserSignature[]);
+      }
+
       // Calculate stats
       const total = typedRequests.length;
       const pending = typedRequests.filter(r => r.status === 'pending').length;
@@ -162,6 +173,28 @@ export const useElectronicSignatures = () => {
 
       if (error) throw error;
 
+      // Send emails to all signers
+      try {
+        console.log('📧 Sending emails for request:', requestId);
+        const response = await fetch('/api/signatures/send-emails', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ request_id: requestId }),
+        });
+
+        const data = await response.json();
+        console.log('📧 Email API response:', data);
+
+        if (response.ok) {
+          console.log('✅ Emails sent successfully:', data);
+        } else {
+          console.error('❌ Email API error:', data);
+        }
+      } catch (emailError) {
+        console.error('❌ Failed to send emails:', emailError);
+        // Don't fail the whole operation if emails fail
+      }
+
       toast({ title: 'Success', description: 'Signature request sent' });
       fetchData();
     } catch (error) {
@@ -187,14 +220,144 @@ export const useElectronicSignatures = () => {
     }
   };
 
+  const saveUserSignature = async (data: {
+    signature_type: SignatureType;
+    name: string;
+    data_url: string;
+    font_family?: string;
+    is_default: boolean;
+  }) => {
+    try {
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) throw new Error('Not authenticated');
+
+      // If setting as default, unset other defaults of same type first
+      if (data.is_default) {
+        await supabase
+          .from('user_signatures')
+          .update({ is_default: false })
+          .eq('user_id', user.user.id)
+          .eq('signature_type', data.signature_type);
+      }
+
+      // Insert new signature
+      const { error } = await supabase
+        .from('user_signatures')
+        .insert({
+          user_id: user.user.id,
+          signature_type: data.signature_type,
+          name: data.name,
+          data_url: data.data_url,
+          font_family: data.font_family,
+          is_default: data.is_default,
+        });
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Signature saved successfully',
+      });
+
+      fetchData(); // Refresh to show new signature
+    } catch (error) {
+      console.error('Error saving signature:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to save signature',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const deleteUserSignature = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('user_signatures')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Signature deleted',
+      });
+
+      fetchData(); // Refresh
+    } catch (error) {
+      console.error('Error deleting signature:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete signature',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const signDocument = async (requestId: string, signatureDataUrl: string) => {
+    try {
+      const user = await supabase.auth.getUser();
+      if (!user.data.user) throw new Error('Not authenticated');
+
+      // Find signer record for this user
+      const { data: signer, error: signerError } = await supabase
+        .from('signature_signers')
+        .select('*')
+        .eq('request_id', requestId)
+        .eq('email', user.data.user.email)
+        .single();
+
+      if (signerError || !signer) {
+        throw new Error('You are not a signer on this request');
+      }
+
+      // Update signer with signature
+      const { error: updateError } = await supabase
+        .from('signature_signers')
+        .update({
+          status: 'signed',
+          signed_at: new Date().toISOString(),
+          signature_data_url: signatureDataUrl
+        })
+        .eq('id', signer.id);
+
+      if (updateError) throw updateError;
+
+      // Check if all signers have signed
+      const { data: allSigners } = await supabase
+        .from('signature_signers')
+        .select('status')
+        .eq('request_id', requestId)
+        .in('role', ['signer', 'approver']);
+
+      const allSigned = allSigners?.every(s => s.status === 'signed');
+
+      // If all signed, mark request as completed
+      if (allSigned) {
+        await supabase
+          .from('signature_requests')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', requestId);
+      }
+
+      toast({ title: 'Success', description: 'Document signed successfully!' });
+      fetchData();
+    } catch (error: any) {
+      console.error('Error signing document:', error);
+      toast({ title: 'Error', description: error.message || 'Failed to sign document', variant: 'destructive' });
+    }
+  };
+
   // Placeholders for other functions not yet connected to DB
   const addField = async (field: any) => console.log('addField', field);
   const updateField = async (id: string, updates: any) => console.log('updateField', id, updates);
   const deleteField = async (id: string) => console.log('deleteField', id);
   const signField = async (id: string, val: string, signerId: string) => console.log('signField');
   const declineToSign = async (id: string, reason: string) => console.log('declineToSign');
-  const saveUserSignature = async (data: any) => console.log('saveUserSignature');
-  const deleteUserSignature = async (id: string) => console.log('deleteUserSignature');
   const getAuditLog = async (id: string) => [];
 
   return {
@@ -216,6 +379,7 @@ export const useElectronicSignatures = () => {
     declineToSign,
     saveUserSignature,
     deleteUserSignature,
+    signDocument,
     getAuditLog,
   };
 };
