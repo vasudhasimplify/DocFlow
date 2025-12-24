@@ -33,6 +33,7 @@ import ImagePreviewPage from "./pages/ImagePreviewPage";
 import RunApplication from "./pages/RunApplication";
 import Settings from "./pages/Settings";
 import BulkTest from "./pages/BulkTest";
+import EditorWrapper from "@/components/modern-editor/EditorWrapper";
 import { SigningPage } from "./pages/SigningPage";
 
 // Configure React Query client
@@ -159,6 +160,13 @@ const App = () => (
                 {/* Guest sharing public routes */}
                 <Route path="/guest/:token" element={<GuestAccessPage />} />
                 <Route path="/s/:token" element={<GuestAccessPage />} />
+
+                {/* Document Editor Route - Protected but standalone layout */}
+                <Route path="/editor" element={
+                  <ProtectedRoute>
+                    <EditorWrapper />
+                  </ProtectedRoute>
+                } />
 
                 {/* E-Signature public signing route */}
                 <Route path="/sign/:token" element={<SigningPage />} />

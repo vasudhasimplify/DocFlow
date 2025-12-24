@@ -25,6 +25,8 @@ from .api.guest import router as guest_router
 from .api.signatures import router as signatures_router
 from .api.watermarks import router as watermarks_router
 from .api.migration import router as migration_router
+from .api.document_editor import router as document_editor_router
+from .api.ai_routes import router as ai_router
 from .core.config import settings
 
 # Configure logging with both console and file handlers
@@ -155,6 +157,8 @@ app.include_router(guest_router)
 app.include_router(signatures_router)
 app.include_router(watermarks_router)
 app.include_router(migration_router)
+app.include_router(document_editor_router, prefix="/api")
+app.include_router(ai_router)
 
 @app.on_event("shutdown")
 async def shutdown_event():

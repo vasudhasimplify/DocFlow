@@ -46,7 +46,6 @@ pydantic==2.12.4
 email-validator>=2.0.0
 pymupdf
 PyJWT
-pymupdf
 python-dotenv==1.0.0
 python-multipart==0.0.6
 pyyaml==6.0.3
