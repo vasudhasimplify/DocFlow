@@ -45,6 +45,8 @@ pydantic-settings==2.1.0
 pydantic==2.12.4
 email-validator>=2.0.0
 pymupdf
+reportlab
+PyPDF2
 PyJWT
 python-dotenv==1.0.0
 python-multipart==0.0.6

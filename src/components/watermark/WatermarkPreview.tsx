@@ -46,11 +46,17 @@ export function WatermarkPreview({
         if (data.thumbnail_url) {
           setDocumentUrl(data.thumbnail_url);
         } else if (data.file_path) {
-          // Get public URL from storage
-          const { data: urlData } = supabase.storage
+          // Get signed URL from storage (since bucket is not public)
+          const { data: urlData, error: urlError } = await supabase.storage
             .from('documents')
-            .getPublicUrl(data.file_path);
-          setDocumentUrl(urlData.publicUrl);
+            .createSignedUrl(data.file_path, 3600); // 1 hour expiry
+
+          if (urlError) {
+            console.error('Error creating signed URL:', urlError);
+            setDocumentUrl(null);
+          } else {
+            setDocumentUrl(urlData.signedUrl);
+          }
         }
       } catch (err) {
         console.error('Error fetching document:', err);

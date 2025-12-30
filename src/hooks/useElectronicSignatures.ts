@@ -16,6 +16,8 @@ import type {
 export const useElectronicSignatures = () => {
   const { toast } = useToast();
   const [requests, setRequests] = useState<SignatureRequest[]>([]);
+  const [requestsToSign, setRequestsToSign] = useState<SignatureRequest[]>([]);
+  const [receivedRequests, setReceivedRequests] = useState<SignatureRequest[]>([]);
   const [activeRequest, setActiveRequest] = useState<SignatureRequest | null>(null);
   const [userSignatures, setUserSignatures] = useState<UserSignature[]>([]);
   const [templates] = useState<SignatureTemplate[]>([]);
@@ -26,7 +28,7 @@ export const useElectronicSignatures = () => {
     completed: 0,
     declined: 0,
     expired: 0,
-    awaiting_my_signature: 0, // Not fully implemented yet
+    awaiting_my_signature: 0,
     completion_rate: 0,
   });
 
@@ -98,7 +100,136 @@ export const useElectronicSignatures = () => {
   // Initial fetch
   useEffect(() => {
     fetchData();
+    fetchRequestsToSign();
+    fetchReceivedRequests();
   }, [fetchData]);
+
+  // Fetch ALL signature requests where current user is a signer (any status - for history)
+  // EXCLUDES requests created by the current user (those show in All/Pending/Completed)
+  const fetchReceivedRequests = useCallback(async () => {
+    try {
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user?.email || !user.user?.id) return;
+
+      // Find all signers with current user's email (any status)
+      const { data: signerRecords, error: signerError } = await supabase
+        .from('signature_signers')
+        .select(`
+          *,
+          request:signature_requests(
+            *,
+            signers:signature_signers(*)
+          )
+        `)
+        .eq('email', user.user.email);
+
+      if (signerError) {
+        console.error('Error fetching received requests:', signerError);
+        return;
+      }
+
+      if (!signerRecords || signerRecords.length === 0) {
+        setReceivedRequests([]);
+        return;
+      }
+
+      // Extract unique requests with full signer info
+      // IMPORTANT: Exclude requests where the current user is the owner/sender
+      const allReceived = signerRecords
+        .filter((s: any) => s.request && s.request.user_id !== user.user!.id)
+        .map((s: any) => ({
+          ...s.request,
+          signers: s.request.signers?.sort((a: any, b: any) => a.signing_order - b.signing_order) || [],
+          mySignerInfo: {
+            signerId: s.id,
+            signerStatus: s.status,
+            signerRole: s.role,
+            signedAt: s.signed_at,
+          }
+        })) as SignatureRequest[];
+
+      // Remove duplicates by request id
+      const uniqueReceived = allReceived.reduce((acc: SignatureRequest[], curr) => {
+        if (!acc.find(r => r.id === curr.id)) {
+          acc.push(curr);
+        }
+        return acc;
+      }, []);
+
+      // Sort by created_at descending
+      uniqueReceived.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      setReceivedRequests(uniqueReceived);
+      console.log('📨 Received requests (from others):', uniqueReceived.length);
+
+    } catch (error) {
+      console.error('Error fetching received requests:', error);
+    }
+  }, []);
+  // Fetch pending signature requests where current user is a signer (needs to sign)
+  // EXCLUDES requests created by the current user
+  const fetchRequestsToSign = useCallback(async () => {
+    try {
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user?.email || !user.user?.id) return;
+
+      // Find all signers with current user's email
+      const { data: signerRecords, error: signerError } = await supabase
+        .from('signature_signers')
+        .select(`
+          *,
+          request:signature_requests(
+            *,
+            signers:signature_signers(*)
+          )
+        `)
+        .eq('email', user.user.email)
+        .in('status', ['pending', 'sent', 'viewed']);
+
+      if (signerError) {
+        console.error('Error fetching signers:', signerError);
+        return;
+      }
+
+      if (!signerRecords || signerRecords.length === 0) {
+        setRequestsToSign([]);
+        return;
+      }
+
+      // Extract unique requests where user needs to sign
+      // IMPORTANT: Exclude requests created by the current user
+      const pendingRequests = signerRecords
+        .filter((s: any) => s.request && s.request.status === 'pending' && s.request.user_id !== user.user!.id)
+        .map((s: any) => ({
+          ...s.request,
+          signers: s.request.signers?.sort((a: any, b: any) => a.signing_order - b.signing_order) || [],
+          currentSignerInfo: {
+            signerId: s.id,
+            signerStatus: s.status,
+            signerRole: s.role,
+          }
+        })) as SignatureRequest[];
+
+      // Remove duplicates by request id
+      const uniqueRequests = pendingRequests.reduce((acc: SignatureRequest[], curr) => {
+        if (!acc.find(r => r.id === curr.id)) {
+          acc.push(curr);
+        }
+        return acc;
+      }, []);
+
+      setRequestsToSign(uniqueRequests);
+
+      // Update stats with awaiting count
+      setStats(prev => ({
+        ...prev,
+        awaiting_my_signature: uniqueRequests.length
+      }));
+
+    } catch (error) {
+      console.error('Error fetching requests to sign:', error);
+    }
+  }, []);
 
   const createRequest = async (data: {
     title: string;
@@ -295,7 +426,11 @@ export const useElectronicSignatures = () => {
     }
   };
 
-  const signDocument = async (requestId: string, signatureDataUrl: string) => {
+  const signDocument = async (
+    requestId: string,
+    signatureDataUrl: string,
+    position?: { page: number; x: number; y: number; width: number; height: number; xPercent: number; yPercent: number }
+  ) => {
     try {
       const user = await supabase.auth.getUser();
       if (!user.data.user) throw new Error('Not authenticated');
@@ -312,40 +447,120 @@ export const useElectronicSignatures = () => {
         throw new Error('You are not a signer on this request');
       }
 
-      // Update signer with signature
+      // Check if it's this signer's turn (for sequential signing)
+      try {
+        const turnCheckResponse = await fetch('/api/signatures/check-signer-turn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            request_id: requestId,
+            signer_email: user.data.user.email
+          }),
+        });
+
+        if (turnCheckResponse.ok) {
+          const turnData = await turnCheckResponse.json();
+          if (!turnData.can_sign) {
+            toast({
+              title: 'Please Wait',
+              description: turnData.message || 'It is not your turn to sign yet.',
+              variant: 'destructive'
+            });
+            return;
+          }
+        }
+      } catch (turnError) {
+        console.error('Error checking signer turn:', turnError);
+        // Continue anyway - don't block signing due to check failure
+      }
+
+      console.log('📝 Signing document for signer:', signer.id, signer.email);
+      if (position) {
+        console.log('📍 Signature position:', position);
+      }
+
+      // Update signer with signature and position
+      const updateData: Record<string, unknown> = {
+        status: 'signed',
+        signed_at: new Date().toISOString(),
+        signature_data_url: signatureDataUrl,
+      };
+
+      // Add position if provided
+      if (position) {
+        updateData.signature_position = position;
+      }
+
       const { error: updateError } = await supabase
         .from('signature_signers')
-        .update({
-          status: 'signed',
-          signed_at: new Date().toISOString(),
-          signature_data_url: signatureDataUrl
-        })
+        .update(updateData)
         .eq('id', signer.id);
 
       if (updateError) throw updateError;
 
-      // Check if all signers have signed
-      const { data: allSigners } = await supabase
-        .from('signature_signers')
-        .select('status')
-        .eq('request_id', requestId)
-        .in('role', ['signer', 'approver']);
+      console.log('✅ Signer status updated to signed');
 
-      const allSigned = allSigners?.every(s => s.status === 'signed');
+      // Check if all signers have signed (fetch fresh data)
+      const { data: allSigners, error: allSignersError } = await supabase
+        .from('signature_signers')
+        .select('id, email, status, role')
+        .eq('request_id', requestId);
+
+      console.log('📋 All signers for this request:', allSigners);
+
+      if (allSignersError) {
+        console.error('Error fetching signers:', allSignersError);
+      }
+
+      // Check signers who need to sign (signer or approver roles)
+      const signersToCheck = allSigners?.filter(s => s.role === 'signer' || s.role === 'approver') || [];
+      const allSigned = signersToCheck.length > 0 && signersToCheck.every(s => s.status === 'signed');
+
+      console.log('🔍 Signers to check:', signersToCheck);
+      console.log('✅ All signed?', allSigned);
 
       // If all signed, mark request as completed
       if (allSigned) {
-        await supabase
+        const { error: completeError } = await supabase
           .from('signature_requests')
           .update({
             status: 'completed',
             completed_at: new Date().toISOString()
           })
           .eq('id', requestId);
+
+        if (completeError) {
+          console.error('Error completing request:', completeError);
+        } else {
+          console.log('🎉 Request marked as completed!');
+        }
+
+        toast({ title: 'Success', description: 'Document fully signed and completed!' });
+      } else {
+        // Not all signed - notify next signer for sequential signing
+        try {
+          console.log('📧 Notifying next signer in sequence...');
+          await fetch('/api/signatures/notify-next-signer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ request_id: requestId }),
+          });
+        } catch (notifyError) {
+          console.error('Error notifying next signer:', notifyError);
+          // Non-blocking - continue even if notification fails
+        }
+
+        toast({ title: 'Success', description: 'Document signed successfully! Waiting for other signers.' });
       }
 
-      toast({ title: 'Success', description: 'Document signed successfully!' });
-      fetchData();
+      // Refresh all data sources to update UI
+      await fetchData();
+      await fetchRequestsToSign();
+      await fetchReceivedRequests();
+
+      // Clear active request so UI goes back to list
+      setActiveRequest(null);
+
     } catch (error: any) {
       console.error('Error signing document:', error);
       toast({ title: 'Error', description: error.message || 'Failed to sign document', variant: 'destructive' });
@@ -362,6 +577,8 @@ export const useElectronicSignatures = () => {
 
   return {
     requests,
+    requestsToSign,
+    receivedRequests,
     userSignatures,
     templates,
     stats,
@@ -369,6 +586,8 @@ export const useElectronicSignatures = () => {
     activeRequest,
     setActiveRequest,
     refresh: fetchData,
+    refreshToSign: fetchRequestsToSign,
+    refreshReceived: fetchReceivedRequests,
     createRequest,
     sendRequest,
     cancelRequest,

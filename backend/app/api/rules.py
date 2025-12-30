@@ -195,6 +195,57 @@ async def delete_rule(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ToggleRuleRequest(BaseModel):
+    is_active: bool
+
+
+@router.post("/{rule_id}/toggle")
+async def toggle_rule(
+    rule_id: str,
+    toggle_data: ToggleRuleRequest,
+    current_user = Depends(get_current_user)
+):
+    """Toggle a rule on/off and apply/remove its applications"""
+    try:
+        # Verify ownership
+        check = supabase.table('content_access_rules').select('user_id').eq('id', rule_id).single().execute()
+        if not check.data or check.data['user_id'] != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        is_active = toggle_data.is_active
+        
+        # Update the is_active status
+        supabase.table('content_access_rules').update({'is_active': is_active}).eq('id', rule_id).execute()
+        
+        if is_active:
+            # Rule is being enabled - re-apply to matching documents
+            print(f"🔄 Rule {rule_id} enabled - applying to matching documents")
+            matched_count = await match_documents_to_rule(rule_id, current_user.id)
+            return {
+                "success": True,
+                "is_active": True,
+                "action": "applied",
+                "matched_count": matched_count,
+                "message": f"Rule enabled and applied to {matched_count} document(s)"
+            }
+        else:
+            # Rule is being disabled - remove all applications
+            print(f"🔄 Rule {rule_id} disabled - removing applications")
+            delete_result = supabase.table('content_rule_applications').delete().eq('rule_id', rule_id).execute()
+            removed_count = len(delete_result.data) if delete_result.data else 0
+            return {
+                "success": True,
+                "is_active": False,
+                "action": "removed",
+                "removed_count": removed_count,
+                "message": f"Rule disabled and removed from {removed_count} document(s)"
+            }
+    except Exception as e:
+        print(f"ERROR: Exception in toggle_rule: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def match_documents_to_rule(rule_id: str, user_id: str):
     """
     Automatically match documents to a rule based on matching criteria

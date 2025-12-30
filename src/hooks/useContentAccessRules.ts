@@ -292,8 +292,39 @@ export function useContentAccessRules() {
   }, [toast, fetchRules]);
 
   const toggleRule = useCallback(async (ruleId: string, isActive: boolean) => {
-    await updateRule(ruleId, { is_active: isActive });
-  }, [updateRule]);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated');
+
+      const response = await fetch(`/api/rules/${ruleId}/toggle`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ is_active: isActive })
+      });
+
+      if (!response.ok) throw new Error('Failed to toggle rule');
+
+      const result = await response.json();
+
+      toast({
+        title: isActive ? "Rule Enabled" : "Rule Disabled",
+        description: result.message || (isActive
+          ? `Rule applied to ${result.matched_count || 0} document(s)`
+          : `Rule removed from ${result.removed_count || 0} document(s)`),
+      });
+
+      await fetchRules();
+    } catch (error: any) {
+      toast({
+        title: "Error toggling rule",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  }, [toast, fetchRules]);
 
   const reorderRules = useCallback(async (ruleIds: string[]) => {
     try {

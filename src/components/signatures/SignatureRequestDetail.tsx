@@ -17,6 +17,8 @@ import type { SignatureRequest, SignatureAuditLog } from '@/types/signature';
 import { cn } from '@/lib/utils';
 import { SignaturePadDialog } from './SignaturePadDialog';
 import { SignatureCertificate } from './SignatureCertificate';
+import { SignatureFieldPlacer } from './SignatureFieldPlacer';
+import type { SignaturePosition } from '@/types/signature';
 import { supabase } from '@/integrations/supabase/client';
 
 interface SignatureRequestDetailProps {
@@ -35,6 +37,7 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
   const [signingAs, setSigningAs] = useState<string>('signature');
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [showCertificate, setShowCertificate] = useState(false);
+  const [signaturePosition, setSignaturePosition] = useState<SignaturePosition | null>(null);
 
   useEffect(() => {
     // Temporarily disabled audit log to fix freeze - TODO: fix later
@@ -55,9 +58,9 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
   const signedCount = signers.filter(s => s.status === 'signed').length;
   const progress = signers.length ? (signedCount / signers.length) * 100 : 0;
 
-  // Check if current user needs to sign
+  // Check if current user needs to sign (pending, sent, or viewed but not yet signed)
   const currentUserSigner = request.signers?.find(s => s.email === currentUserEmail);
-  const needsMySignature = currentUserSigner && currentUserSigner.status === 'sent';
+  const needsMySignature = currentUserSigner && ['pending', 'sent', 'viewed'].includes(currentUserSigner.status);
 
   const getAuditIcon = (action: string) => {
     switch (action) {
@@ -150,6 +153,55 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
             </div>
 
             <TabsContent value="overview" className="flex-1 p-6 m-0">
+              {/* Sign Document Banner - shown when user needs to sign */}
+              {needsMySignature && (
+                <Card className="mb-6 border-2 border-purple-500 bg-purple-500/10">
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="p-4 bg-purple-500 rounded-full">
+                        <PenTool className="h-8 w-8 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-purple-700 dark:text-purple-300">
+                          Your Signature is Required
+                        </h3>
+                        <p className="text-muted-foreground mt-1">
+                          {request.document_url
+                            ? 'Click on the document below to select where your signature should appear, then click "Sign Now"'
+                            : 'Click the button to sign this document'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* PDF Preview for position selection - only show if document exists */}
+                    {request.document_url && (
+                      <div className="mb-4">
+                        <SignatureFieldPlacer
+                          documentUrl={request.document_url.startsWith('storage://')
+                            ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/signatures/preview-document/${request.id}`
+                            : request.document_url
+                          }
+                          selectedPosition={signaturePosition}
+                          onPositionSelected={setSignaturePosition}
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex justify-end">
+                      <Button
+                        size="lg"
+                        onClick={() => setShowSignDialog(true)}
+                        className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-6 text-lg"
+                        disabled={request.document_url ? !signaturePosition : false}
+                      >
+                        <PenTool className="h-6 w-6 mr-3" />
+                        {signaturePosition ? 'Sign at Selected Position' : 'Sign Now'}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               <div className="grid grid-cols-2 gap-6">
                 {/* Progress */}
                 <Card>
@@ -268,19 +320,124 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
 
             <TabsContent value="document" className="flex-1 p-6 m-0">
               <Card className="h-full">
-                <CardContent className="h-full flex items-center justify-center">
-                  <div className="text-center text-muted-foreground">
-                    <FileText className="h-16 w-16 mx-auto mb-4 opacity-50" />
-                    <h3 className="text-lg font-medium mb-2">Document Preview</h3>
-                    <p className="text-sm">
-                      {request.document_name || 'No document attached'}
-                    </p>
-                    {request.document_url && (
-                      <Button variant="outline" className="mt-4">
-                        <Eye className="h-4 w-4 mr-2" />
-                        View Document
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    {request.document_name || 'Signature Request Document'}
+                  </CardTitle>
+                  <CardDescription>
+                    {request.status === 'completed'
+                      ? 'This document has been fully signed by all parties'
+                      : 'Document preview with signature status'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-6">
+                    {/* Document Info */}
+                    <div className="bg-muted/30 rounded-lg p-4 border">
+                      <h4 className="font-medium mb-3">Document Information</h4>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Title:</span>
+                          <p className="font-medium">{request.title}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Status:</span>
+                          <p className="font-medium capitalize">{request.status}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Created:</span>
+                          <p className="font-medium">{new Date(request.created_at).toLocaleDateString()}</p>
+                        </div>
+                        {request.completed_at && (
+                          <div>
+                            <span className="text-muted-foreground">Completed:</span>
+                            <p className="font-medium">{new Date(request.completed_at).toLocaleDateString()}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Signatures Section */}
+                    <div>
+                      <h4 className="font-medium mb-3 flex items-center gap-2">
+                        <PenTool className="h-4 w-4" />
+                        Collected Signatures
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {request.signers?.map((signer) => (
+                          <div key={signer.id} className="border rounded-lg p-4 bg-card">
+                            <div className="flex items-start justify-between mb-2">
+                              <div>
+                                <p className="font-medium">{signer.name}</p>
+                                <p className="text-xs text-muted-foreground">{signer.email}</p>
+                                <p className="text-xs text-muted-foreground capitalize">Role: {signer.role}</p>
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className={signer.status === 'signed' ? 'text-green-500 border-green-500' : 'text-yellow-500 border-yellow-500'}
+                              >
+                                {signer.status === 'signed' ? 'Signed' : 'Pending'}
+                              </Badge>
+                            </div>
+
+                            {/* Show signature image if available */}
+                            {signer.signature_data_url ? (
+                              <div className="mt-3 border-t pt-3">
+                                <p className="text-xs text-muted-foreground mb-2">Electronic Signature:</p>
+                                <div className="bg-white border rounded p-2 inline-block">
+                                  <img
+                                    src={signer.signature_data_url}
+                                    alt={`${signer.name}'s signature`}
+                                    className="h-16 object-contain"
+                                  />
+                                </div>
+                                {signer.signed_at && (
+                                  <p className="text-xs text-muted-foreground mt-2">
+                                    Signed on: {new Date(signer.signed_at).toLocaleString()}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="mt-3 border-t pt-3">
+                                <div className="bg-muted/30 border-2 border-dashed rounded p-4 text-center">
+                                  <PenTool className="h-6 w-6 mx-auto mb-2 text-muted-foreground opacity-50" />
+                                  <p className="text-xs text-muted-foreground">Awaiting signature</p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 pt-4 border-t">
+                      {/* Download Signed PDF - calls backend to generate PDF with embedded signatures */}
+                      <Button
+                        onClick={() => {
+                          const apiUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/signatures/download-signed/${request.id}`;
+                          window.open(apiUrl, '_blank');
+                        }}
+                        className="gap-2 bg-green-600 hover:bg-green-700"
+                      >
+                        <Download className="h-4 w-4" />
+                        Download Signed PDF
                       </Button>
-                    )}
+
+                      {request.status === 'completed' && (
+                        <Button onClick={() => setShowCertificate(true)} variant="outline" className="gap-2">
+                          <Eye className="h-4 w-4" />
+                          View Certificate
+                        </Button>
+                      )}
+                      {request.document_url && (
+                        <Button variant="outline" className="gap-2" onClick={() => window.open(request.document_url, '_blank')}>
+                          <Eye className="h-4 w-4" />
+                          View Original
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -350,8 +507,10 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
         onOpenChange={setShowSignDialog}
         type={signingAs as 'signature' | 'initial'}
         onSignatureSelect={async (dataUrl) => {
-          await signDocument(request.id, dataUrl);
+          // Pass position data if available
+          await signDocument(request.id, dataUrl, signaturePosition || undefined);
           setShowSignDialog(false);
+          setSignaturePosition(null); // Reset position after signing
         }}
       />
 

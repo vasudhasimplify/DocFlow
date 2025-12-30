@@ -25,6 +25,21 @@ def create_watermark_overlay(text: str, font_family: str = "Helvetica",
     Returns:
         BytesIO object containing watermark PDF
     """
+    # Map web fonts to ReportLab standard fonts
+    font_mapping = {
+        'arial': 'Helvetica',
+        'times new roman': 'Times-Roman',
+        'courier new': 'Courier',
+        'georgia': 'Times-Roman',
+        'verdana': 'Helvetica',
+        'helvetica': 'Helvetica',
+        'times-roman': 'Times-Roman',
+        'courier': 'Courier',
+    }
+    
+    # Get mapped font (case-insensitive)
+    mapped_font = font_mapping.get(font_family.lower(), 'Helvetica')
+    
     packet = io.BytesIO()
     
     # Create canvas with letter size
@@ -34,18 +49,19 @@ def create_watermark_overlay(text: str, font_family: str = "Helvetica",
     # Set opacity
     can.setFillColorRGB(color[0], color[1], color[2], alpha=opacity)
     
-    # Set font
+    # Set font with safe fallback
     try:
-        can.setFont(font_family, font_size)
+        can.setFont(mapped_font, font_size)
     except:
         can.setFont("Helvetica", font_size)
+        mapped_font = "Helvetica"
     
     # Position in center and rotate
     can.translate(width / 2, height / 2)
     can.rotate(rotation)
     
-    # Draw text centered
-    text_width = can.stringWidth(text, font_family, font_size)
+    # Draw text centered (use mapped_font for stringWidth)
+    text_width = can.stringWidth(text, mapped_font, font_size)
     can.drawString(-text_width / 2, 0, text)
     
     can.save()
@@ -131,6 +147,19 @@ def apply_tiled_watermark(pdf_path: str, watermark_text: str,
     Returns:
         Path to watermarked PDF
     """
+    # Map web fonts to ReportLab standard fonts
+    font_mapping = {
+        'arial': 'Helvetica',
+        'times new roman': 'Times-Roman',
+        'courier new': 'Courier',
+        'georgia': 'Times-Roman',
+        'verdana': 'Helvetica',
+        'helvetica': 'Helvetica',
+        'times-roman': 'Times-Roman',
+        'courier': 'Courier',
+    }
+    mapped_font = font_mapping.get(font_family.lower(), 'Helvetica')
+    
     # Convert hex color to RGB
     color_hex = color_hex.lstrip('#')
     r, g, b = tuple(int(color_hex[i:i+2], 16) / 255.0 for i in (0, 2, 4))
@@ -142,7 +171,7 @@ def apply_tiled_watermark(pdf_path: str, watermark_text: str,
     
     can.setFillColorRGB(r, g, b, alpha=opacity)
     try:
-        can.setFont(font_family, font_size)
+        can.setFont(mapped_font, font_size)
     except:
         can.setFont("Helvetica", font_size)
     

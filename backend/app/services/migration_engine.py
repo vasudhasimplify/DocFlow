@@ -31,17 +31,18 @@ class MigrationEngine:
     def __init__(self, job_id: str):
         self.job_id = job_id
         self.supabase = get_supabase_client()
-        self.supabase = get_supabase_client()
         self.connector: Optional[Any] = None  # Generic connector
-        self.concurrency = 10  # Higher default
         self.concurrency = 10  # Higher default
         self.processed_count = 0
         self.failed_count = 0
         self.total_bytes = 0
-        self.total_bytes = 0
         self.start_time: Optional[float] = None
         self.access_token: Optional[str] = None
         self.source_system: str = 'google_drive'
+        # Metrics tracking
+        self.last_metrics_time: float = 0
+        self.metrics_interval: float = 5.0  # Record metrics every 5 seconds
+        self.throttle_count: int = 0
         
     async def start_migration(self):
         """Start ultra-fast migration with timing."""
@@ -50,6 +51,7 @@ class MigrationEngine:
         try:
             logger.info(f"🚀 Starting ULTRA-FAST migration: {self.job_id}")
             self._update_job_status('discovering')
+            self._record_audit_log('job_started', metadata={'source_system': self.source_system})
             
             job = self._get_job()
             self.concurrency = job.get('config', {}).get('concurrency', 10)
@@ -102,6 +104,16 @@ class MigrationEngine:
                     'speed_mbps': round(speed, 2)
                 }
             )
+            
+            # Record final metrics snapshot with accurate stage counts
+            self._record_metrics()
+            
+            self._record_audit_log('job_completed', metadata={
+                'processed': self.processed_count,
+                'failed': self.failed_count,
+                'total_bytes': self.total_bytes,
+                'speed_mbps': round(speed, 2)
+            })
             
         except Exception as e:
             import traceback
@@ -304,6 +316,9 @@ class MigrationEngine:
             self.processed_count += 1
             self.total_bytes += len(file_content)
             
+            # Record live metrics periodically
+            self._maybe_record_metrics()
+            
             size_kb = len(file_content) / 1024
             logger.info(f"✅ [{self.processed_count}] {file_name} ({size_kb:.1f}KB) - {total_time:.2f}s (⬇️{download_time:.2f}s ⬆️{upload_time:.2f}s)")
             
@@ -315,6 +330,9 @@ class MigrationEngine:
                 'status': 'failed',
                 'last_error': str(e)[:500]
             }).eq('id', item['id']).execute()
+            
+            # Record failure in audit log
+            self._record_audit_log('item_failed', source_item_id=file_id, error_message=str(e)[:200])
     
     def _update_job_status(self, status: str, **kwargs):
         """Update job status with logging."""
@@ -329,6 +347,79 @@ class MigrationEngine:
         except Exception as e:
             logger.error(f"❌ Failed to update job status to {status}: {e}")
             raise
+    
+    def _maybe_record_metrics(self):
+        """Record metrics if enough time has passed since last recording."""
+        current_time = time.time()
+        if current_time - self.last_metrics_time >= self.metrics_interval:
+            self._record_metrics()
+            self.last_metrics_time = current_time
+    
+    def _record_metrics(self):
+        """Record live performance metrics to database for frontend display."""
+        try:
+            if not self.start_time:
+                return
+            
+            elapsed_seconds = time.time() - self.start_time
+            
+            if elapsed_seconds > 0:
+                files_per_minute = (self.processed_count / elapsed_seconds) * 60
+                bytes_per_second = self.total_bytes / elapsed_seconds
+            else:
+                files_per_minute = 0
+                bytes_per_second = 0
+            
+            # Get current stage counts from items
+            try:
+                stage_counts_response = self.supabase.table('migration_items').select('status').eq('job_id', self.job_id).execute()
+                stage_counts = {}
+                for item in stage_counts_response.data:
+                    status = item['status']
+                    stage_counts[status] = stage_counts.get(status, 0) + 1
+            except Exception:
+                stage_counts = {}
+            
+            metrics_data = {
+                'job_id': self.job_id,
+                'files_per_minute': round(files_per_minute, 2),
+                'bytes_per_second': round(bytes_per_second, 2),
+                'error_count': self.failed_count,
+                'api_throttle_count': self.throttle_count,
+                'stage_counts': stage_counts,
+                'recorded_at': datetime.utcnow().isoformat()
+            }
+            
+            self.supabase.table('migration_metrics').insert(metrics_data).execute()
+            logger.info(f"📊 Metrics: {files_per_minute:.1f} files/min, {bytes_per_second/1024:.1f} KB/s, {self.processed_count} done")
+            
+            # Also update job processed counts for real-time progress
+            self.supabase.table('migration_jobs').update({
+                'processed_items': self.processed_count,
+                'failed_items': self.failed_count,
+                'transferred_bytes': self.total_bytes
+            }).eq('id', self.job_id).execute()
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to record metrics: {e}")
+    
+    def _record_audit_log(self, event_type: str, source_item_id: str = None, error_message: str = None, error_code: str = None, metadata: dict = None):
+        """Record an event to the migration audit log for Activity Log display."""
+        try:
+            log_data = {
+                'job_id': self.job_id,
+                'event_type': event_type,
+                'source_item_id': source_item_id,
+                'error_message': error_message,
+                'error_code': error_code,
+                'metadata': metadata or {},
+                'created_at': datetime.utcnow().isoformat()
+            }
+            
+            self.supabase.table('migration_audit_log').insert(log_data).execute()
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to record audit log: {e}")
 
 
 async def start_migration_job(job_id: str):

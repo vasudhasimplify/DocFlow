@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { useToast } from '@/hooks/use-toast';
 import {
   Plus, Trash2, Users, Calendar, Mail, User,
   ArrowUp, ArrowDown, AlertCircle, Upload, FileText, X
@@ -28,6 +29,7 @@ import {
 import { useElectronicSignatures } from '@/hooks/useElectronicSignatures';
 import type { SignerRole } from '@/types/signature';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
 
 interface CreateSignatureRequestDialogProps {
   open: boolean;
@@ -46,6 +48,7 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
   onOpenChange,
 }) => {
   const { createRequest, sendRequest } = useElectronicSignatures();
+  const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [step, setStep] = useState<'details' | 'recipients'>('details');
 
@@ -100,6 +103,43 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
 
     setIsSubmitting(true);
     try {
+      // Upload document file to storage if provided
+      let documentUrl: string | undefined = undefined;
+
+      if (documentFile) {
+        setIsUploading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+
+        // Create safe filename - use user's folder directly (matches existing RLS policies)
+        const timestamp = Date.now();
+        const safeName = documentFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const filePath = `${user.id}/${timestamp}_sig_${safeName}`;
+
+        console.log('📤 Uploading signature document to:', filePath);
+
+        // Upload to storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(filePath, documentFile, {
+            contentType: documentFile.type,
+            upsert: false
+          });
+
+        if (uploadError) {
+          console.error('❌ Upload failed:', uploadError);
+          throw new Error(`Failed to upload document: ${uploadError.message}`);
+        }
+
+        console.log('✅ Upload successful:', uploadData);
+
+        // Store the storage path - backend will create signed URL when needed
+        // Format: storage://bucket/path
+        documentUrl = `storage://documents/${filePath}`;
+        console.log('🔗 Document storage path:', documentUrl);
+        setIsUploading(false);
+      }
+
       const expiresAt = hasExpiry
         ? new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString()
         : undefined;
@@ -107,7 +147,8 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
       const request = await createRequest({
         title,
         message: message || undefined,
-        document_name: documentName || undefined,
+        document_name: documentName || documentFile?.name || undefined,
+        document_url: documentUrl,
         signing_order: isSequential ? 'sequential' : 'parallel',
         expires_at: expiresAt,
         signers: signers.map((s, index) => ({
@@ -124,12 +165,19 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
 
       onOpenChange(false);
       resetForm();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create request:', error);
+      toast({
+        title: 'Error',
+        description: error?.message || 'Failed to create signature request',
+        variant: 'destructive',
+      });
+      setIsUploading(false);
     } finally {
       setIsSubmitting(false);
     }
   };
+
 
   const resetForm = () => {
     setStep('details');

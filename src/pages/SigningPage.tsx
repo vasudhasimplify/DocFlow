@@ -77,10 +77,18 @@ export const SigningPage: React.FC = () => {
             setRequestData(request);
             setLoading(false);
 
-            // If user is already authenticated, redirect immediately
+            // If user is already authenticated, check email match before redirecting
             const { data: userData } = await supabase.auth.getUser();
             if (userData.user) {
-                navigate('/documents?feature=signatures&requestId=' + signer.request_id);
+                // Verify logged-in user's email matches signer email
+                if (userData.user.email?.toLowerCase() === signer.email.toLowerCase()) {
+                    // Email matches - allow access
+                    navigate('/documents?feature=signatures&requestId=' + signer.request_id);
+                } else {
+                    // Email doesn't match - set current user but show mismatch error
+                    setCurrentUser(userData.user);
+                    setAuthError(`This document was sent to ${signer.email}. You are currently signed in as ${userData.user.email}. Please sign out and sign in with the correct email.`);
+                }
             }
         } catch (err) {
             console.error('Error fetching signing data:', err);
@@ -149,6 +157,55 @@ export const SigningPage: React.FC = () => {
                         <p className="text-muted-foreground">{error}</p>
                         <Button onClick={() => navigate('/')} className="mt-4 w-full">
                             Go to Home
+                        </Button>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
+
+    // If user is logged in but with wrong email, show mismatch error
+    if (currentUser && authError) {
+        const handleSignOut = async () => {
+            await supabase.auth.signOut();
+            setCurrentUser(null);
+            setAuthError(null);
+        };
+
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50 p-4">
+                <Card className="max-w-md w-full">
+                    <CardHeader className="text-center">
+                        <div className="mx-auto w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mb-4">
+                            <AlertCircle className="h-6 w-6 text-orange-600" />
+                        </div>
+                        <CardTitle>Wrong Account</CardTitle>
+                        <CardDescription>
+                            You need to sign in with a different account
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Alert variant="destructive" className="mb-4">
+                            <AlertDescription>{authError}</AlertDescription>
+                        </Alert>
+
+                        <div className="space-y-4">
+                            <div className="p-3 bg-muted rounded-lg">
+                                <p className="text-sm font-medium">Document</p>
+                                <p className="text-sm text-muted-foreground">{requestData?.title}</p>
+                            </div>
+                            <div className="p-3 bg-muted rounded-lg">
+                                <p className="text-sm font-medium">Sent to</p>
+                                <p className="text-sm text-muted-foreground">{signerData?.email}</p>
+                            </div>
+                            <div className="p-3 bg-muted rounded-lg">
+                                <p className="text-sm font-medium">Currently signed in as</p>
+                                <p className="text-sm text-muted-foreground">{currentUser.email}</p>
+                            </div>
+                        </div>
+
+                        <Button onClick={handleSignOut} className="w-full mt-6">
+                            Sign Out & Use Correct Account
                         </Button>
                     </CardContent>
                 </Card>
