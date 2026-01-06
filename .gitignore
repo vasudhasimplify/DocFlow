@@ -123,9 +123,3 @@ backend/.pytest_cache/
 # Supabase
 supabase/.branches
 supabase/.temp
-
-# Secrets and credentials
-backend/google-service-account.json
-*-service-account.json
-*.pem
-*.key

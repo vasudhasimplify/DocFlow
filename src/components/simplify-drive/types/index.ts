@@ -13,6 +13,8 @@ export interface Document {
   insights?: DocumentInsight;
   tags?: DocumentTag[];
   folders?: SmartFolder[];
+  has_restrictions?: boolean;
+  restriction_count?: number;
 }
 
 export interface DocumentInsight {

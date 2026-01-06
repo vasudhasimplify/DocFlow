@@ -92,6 +92,8 @@ export interface DocumentComment {
     name?: string;
     avatar_url?: string;
   };
+  guest_email?: string;
+  guest_name?: string;
 }
 
 export interface CommentMention {
@@ -117,6 +119,8 @@ export interface CommentReaction {
   user_id: string;
   reaction: string;
   created_at: string;
+  guest_email?: string;
+  guest_name?: string;
 }
 
 export interface DocumentActivity {

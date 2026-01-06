@@ -160,6 +160,7 @@ class GoogleDriveConnector:
         """
         Download file content from Google Drive.
         Uses direct HTTP request to bypass SSL/proxy issues.
+        Falls back to export for Google Workspace files.
         
         Args:
             file_id: Google Drive file ID
@@ -176,15 +177,16 @@ class GoogleDriveConnector:
                     access_token = self.creds.token
                 
                 if access_token:
-                    # Direct download URL
-                    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+                    # Direct download URL with acknowledgeAbuse for shared files
+                    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&acknowledgeAbuse=true&supportsAllDrives=true"
                     headers = {"Authorization": f"Bearer {access_token}"}
                     
-                    # Make request without proxy
+                    # Make request without proxy, with explicit SSL handling
                     session = requests.Session()
                     session.trust_env = False  # Ignore system proxy settings
                     
-                    response = session.get(url, headers=headers, timeout=60)
+                    # Disable SSL verification for problematic networks
+                    response = session.get(url, headers=headers, timeout=120, verify=False)
                     response.raise_for_status()
                     
                     content = response.content
@@ -194,7 +196,72 @@ class GoogleDriveConnector:
                 logger.warning(f"Direct download failed, trying API method: {direct_err}")
             
             # Method 2: Fallback to Google API client
-            request = self.service.files().get_media(fileId=file_id)
+            try:
+                from googleapiclient import errors as gapi_errors
+                request = self.service.files().get_media(fileId=file_id)
+                file_buffer = io.BytesIO()
+                downloader = MediaIoBaseDownload(file_buffer, request)
+                
+                done = False
+                while not done:
+                    status, done = downloader.next_chunk()
+                
+                file_buffer.seek(0)
+                content = file_buffer.read()
+                
+                logger.info(f"✅ Downloaded (API): {len(content)} bytes")
+                return content
+            except gapi_errors.HttpError as e:
+                # Check if it's a "fileNotDownloadable" error - means it's a Google Workspace file
+                if 'fileNotDownloadable' in str(e) or 'Only files with binary content' in str(e):
+                    logger.info(f"📄 File is a Google Workspace file, trying export as PDF...")
+                    return self.export_file(file_id, 'application/pdf')
+                raise
+            
+        except Exception as e:
+            logger.error(f"❌ Error downloading file: {e}")
+            raise
+    
+    def export_file(self, file_id: str, mime_type: str = 'application/pdf') -> bytes:
+        """
+        Export Google Workspace file (Docs, Sheets, Slides) to specified format.
+        
+        Args:
+            file_id: Google Drive file ID
+            mime_type: Target MIME type for export (default: PDF)
+        
+        Returns:
+            Exported file content as bytes
+        """
+        try:
+            # Method 1: Direct HTTP export
+            try:
+                access_token = self.creds.token
+                if not access_token and hasattr(self.creds, 'refresh') and self.creds.refresh_token:
+                    from google.auth.transport.requests import Request
+                    self.creds.refresh(Request())
+                    access_token = self.creds.token
+                
+                if access_token:
+                    import urllib.parse
+                    encoded_mime = urllib.parse.quote(mime_type, safe='')
+                    url = f"https://www.googleapis.com/drive/v3/files/{file_id}/export?mimeType={encoded_mime}&supportsAllDrives=true"
+                    headers = {"Authorization": f"Bearer {access_token}"}
+                    
+                    session = requests.Session()
+                    session.trust_env = False
+                    
+                    response = session.get(url, headers=headers, timeout=120, verify=False)
+                    response.raise_for_status()
+                    
+                    content = response.content
+                    logger.info(f"✅ Exported (direct): {len(content)} bytes as {mime_type}")
+                    return content
+            except Exception as direct_err:
+                logger.warning(f"Direct export failed, trying API method: {direct_err}")
+            
+            # Method 2: Fallback to Google API client
+            request = self.service.files().export_media(fileId=file_id, mimeType=mime_type)
             file_buffer = io.BytesIO()
             downloader = MediaIoBaseDownload(file_buffer, request)
             
@@ -205,11 +272,11 @@ class GoogleDriveConnector:
             file_buffer.seek(0)
             content = file_buffer.read()
             
-            logger.info(f"✅ Downloaded (API): {len(content)} bytes")
+            logger.info(f"✅ Exported (API): {len(content)} bytes as {mime_type}")
             return content
             
         except Exception as e:
-            logger.error(f"❌ Error downloading file: {e}")
+            logger.error(f"❌ Error exporting file: {e}")
             raise
     
     def get_folder_tree(self, folder_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -259,3 +326,57 @@ class GoogleDriveConnector:
             'client_secret': self.creds.client_secret,
             'scopes': self.creds.scopes
         }
+
+    def get_permissions(self, file_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all permissions (sharing settings) for a file.
+        
+        Args:
+            file_id: Google Drive file ID
+        
+        Returns:
+            List of permission dicts: [{email, role, type, displayName}, ...]
+        """
+        try:
+            permissions = self.service.permissions().list(
+                fileId=file_id,
+                fields="permissions(id, emailAddress, role, type, displayName)"
+            ).execute()
+            
+            result = []
+            for perm in permissions.get('permissions', []):
+                result.append({
+                    'email': perm.get('emailAddress'),
+                    'role': perm.get('role'),  # owner, writer, commenter, reader
+                    'type': perm.get('type'),  # user, group, domain, anyone
+                    'displayName': perm.get('displayName')
+                })
+            
+            logger.info(f"📋 Got {len(result)} permissions for file {file_id}")
+            return result
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not get permissions for {file_id}: {e}")
+            return []  # Return empty list on failure (best effort)
+
+    def trash_file(self, file_id: str) -> bool:
+        """
+        Move file to trash (safer than delete).
+        
+        Args:
+            file_id: Google Drive file ID
+            
+        Returns:
+            True if successful
+        """
+        try:
+            self.service.files().update(
+                fileId=file_id,
+                body={'trashed': True}
+            ).execute()
+            logger.info(f"🗑️ Trashed source file: {file_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to trash file {file_id}: {e}")
+            # Try permanent delete if trash fails (optional, but sticking to trash for safety)
+            return False

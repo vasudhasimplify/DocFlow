@@ -22,8 +22,6 @@ import {
   Printer,
   Share2,
   Globe,
-  Droplets,
-  Bell,
   Trash2,
   Edit,
   MoreVertical,
@@ -67,8 +65,6 @@ export function ContentAccessRulesPanel() {
     restrict_print: false,
     restrict_share: false,
     restrict_external_share: false,
-    watermark_required: false,
-    notify_on_match: false,
     is_active: true,
     priority: 100,
   });
@@ -107,8 +103,6 @@ export function ContentAccessRulesPanel() {
       restrict_print: false,
       restrict_share: false,
       restrict_external_share: false,
-      watermark_required: false,
-      notify_on_match: false,
       is_active: true,
       priority: 100,
     });
@@ -135,8 +129,6 @@ export function ContentAccessRulesPanel() {
       restrict_print: rule.restrict_print || false,
       restrict_share: rule.restrict_share || false,
       restrict_external_share: rule.restrict_external_share || false,
-      watermark_required: rule.watermark_required || false,
-      notify_on_match: rule.notify_on_match || false,
       is_active: rule.is_active,
       priority: rule.priority,
     });
@@ -322,12 +314,6 @@ export function ContentAccessRulesPanel() {
                             No External
                           </Badge>
                         )}
-                        {rule.watermark_required && (
-                          <Badge variant="secondary" className="gap-1 text-xs">
-                            <Droplets className="h-3 w-3" />
-                            Watermark
-                          </Badge>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -433,8 +419,8 @@ export function ContentAccessRulesPanel() {
                             }
                           }}
                           className={`px-3 py-2 text-sm border rounded-md transition-colors ${formData.file_types?.includes(type)
-                              ? 'bg-primary text-primary-foreground border-primary'
-                              : 'bg-background hover:bg-muted border-input'
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'bg-background hover:bg-muted border-input'
                             }`}
                         >
                           .{type}
@@ -593,34 +579,6 @@ export function ContentAccessRulesPanel() {
                         onClick={(e) => e.stopPropagation()}
                       />
                     </div>
-                    <div
-                      className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => setFormData(prev => ({ ...prev, watermark_required: !prev.watermark_required }))}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Droplets className="h-4 w-4 text-muted-foreground" />
-                        <Label className="cursor-pointer">Require Watermark</Label>
-                      </div>
-                      <Switch
-                        checked={formData.watermark_required}
-                        onCheckedChange={checked => setFormData(prev => ({ ...prev, watermark_required: checked }))}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </div>
-                    <div
-                      className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
-                      onClick={() => setFormData(prev => ({ ...prev, notify_on_match: !prev.notify_on_match }))}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Bell className="h-4 w-4 text-muted-foreground" />
-                        <Label className="cursor-pointer">Notify on Match</Label>
-                      </div>
-                      <Switch
-                        checked={formData.notify_on_match}
-                        onCheckedChange={checked => setFormData(prev => ({ ...prev, notify_on_match: checked }))}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </div>
                   </div>
                 </AccordionContent>
               </AccordionItem>
@@ -674,7 +632,6 @@ export function ContentAccessRulesPanel() {
                           {app.actions_applied?.restrict_print && <Badge variant="destructive" className="text-xs">No Print</Badge>}
                           {app.actions_applied?.restrict_share && <Badge variant="destructive" className="text-xs">No Share</Badge>}
                           {app.actions_applied?.restrict_external_share && <Badge variant="destructive" className="text-xs">No Ext. Share</Badge>}
-                          {app.actions_applied?.watermark_required && <Badge variant="secondary" className="text-xs">Watermark</Badge>}
                         </div>
                       </CardContent>
                     </Card>

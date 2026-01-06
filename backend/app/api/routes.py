@@ -547,6 +547,194 @@ async def semantic_search(request: SemanticSearchRequest):
             detail=f"Semantic search failed: {str(e)}"
         )
 
+@analyze_router.post("/verify-signature-image")
+async def verify_signature_image(request: dict):
+    """
+    Verify that an uploaded image is actually a signature using AI vision.
+    Returns: { is_valid_signature: bool, confidence: int, reason: str }
+    """
+    try:
+        image_data_url = request.get("image_data_url")
+        if not image_data_url:
+            raise HTTPException(status_code=400, detail="No image provided")
+
+        logger.info("Verifying signature image with AI")
+
+        # PRE-CHECK: Analyze image complexity to reject photos BEFORE AI call
+        try:
+            import base64
+            from io import BytesIO
+            from PIL import Image
+            
+            # Extract base64 data
+            if "," in image_data_url:
+                image_b64 = image_data_url.split(",")[1]
+            else:
+                image_b64 = image_data_url
+            
+            # Decode and analyze image
+            image_bytes = base64.b64decode(image_b64)
+            img = Image.open(BytesIO(image_bytes))
+            
+            # Convert to RGB if needed
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Get image colors
+            colors = img.getcolors(maxcolors=256*256*256)
+            num_unique_colors = len(colors) if colors else 256*256*256
+            
+            # Signatures: < 3500 colors (white + black/blue + compression artifacts from scanning)
+            # Photos: 5000+ colors (landscapes, people, etc. have many colors)
+            if num_unique_colors > 3500:
+                logger.warning(f"Image rejected: Too many colors ({num_unique_colors}), likely a photo")
+                return {
+                    "is_valid_signature": False,
+                    "confidence": 95,
+                    "reason": "Not a signature. Upload signature on white paper with blue or black pen."
+                }
+            
+            # Check image dimensions - very large images are likely photos
+            width, height = img.size
+            if width > 2000 or height > 2000:
+                logger.warning(f"Image rejected: Too large ({width}x{height}), likely a photo")
+                return {
+                    "is_valid_signature": False,
+                    "confidence": 90,
+                    "reason": "Not a signature. Upload signature on white paper with blue or black pen."
+                }
+                
+            logger.info(f"Image pre-check passed: {num_unique_colors} colors, {width}x{height}px")
+            
+        except Exception as img_error:
+            logger.warning(f"Image pre-check failed: {img_error}, continuing with AI verification")
+
+        # Import LLM client
+        from ..services.llm_client import LLMClient
+        llm_client = LLMClient()
+
+        prompt = """You are a signature verification expert. Analyze this image VERY CAREFULLY.
+
+CRITICAL: A signature is ONLY handwritten text showing a person's name or initials. Nothing else.
+
+✅ ACCEPT ONLY IF:
+- Image shows ONLY handwritten text (cursive or print writing)
+- Text appears to be someone's name or initials (like "John Smith" or "JS")
+- Written with pen/marker on paper or white background
+- NO faces, NO people, NO objects visible
+- Looks like what someone would write when signing a document
+
+❌ MUST REJECT IF ANY OF THESE:
+- Contains a FACE or any part of a person (head, body, hands, etc.)
+- Is a PHOTOGRAPH of a person
+- Shows any objects (animals, buildings, nature, etc.)
+- Contains typed/printed text (not handwritten)
+- Is a logo, symbol, or graphic design
+- Has colorful backgrounds or complex scenes
+- Is blank, empty, or unclear
+- Shows anything OTHER than simple handwritten text
+
+STRICT RULE: If you see ANY human face, body part, or if this looks like a photo of a person, you MUST set is_valid_signature to false.
+
+Respond in JSON format:
+{
+  "is_valid_signature": false,
+  "confidence": 95,
+  "reason": "Not a signature. Upload signature on white paper with blue or black pen."
+}
+
+Example responses:
+- Photo of person → {"is_valid_signature": false, "confidence": 99, "reason": "Not a signature. Upload signature on white paper with blue or black pen."}
+- Dog photo → {"is_valid_signature": false, "confidence": 99, "reason": "Not a signature. Upload signature on white paper with blue or black pen."}
+- Handwritten "John Doe" → {"is_valid_signature": true, "confidence": 95, "reason": "Verified by AI"}
+- Typed text → {"is_valid_signature": false, "confidence": 95, "reason": "Not a signature. Upload signature on white paper with blue or black pen."}
+
+Now analyze the provided image:"""
+
+        try:
+            # Call LLM with vision capabilities
+            response = await llm_client.generate_completion_with_image(
+                prompt=prompt,
+                image_url=image_data_url,
+                temperature=0.3,
+                max_tokens=150
+            )
+
+            logger.info(f"AI verification response: {response}")
+
+            # Parse JSON response
+            import json
+            try:
+                result = json.loads(response)
+                # Additional safety checks with REJECT-BY-DEFAULT approach
+                reason_lower = result.get('reason', '').lower()
+                
+                # Expanded rejection keywords - photos, objects, scenery, etc.
+                rejection_keywords = [
+                    'person', 'face', 'photograph', 'photo of', 'human', 'body', 'people',
+                    'landscape', 'scenery', 'nature', 'building', 'animal', 'dog', 'cat',
+                    'flower', 'plant', 'water', 'lake', 'river', 'sky', 'cloud', 'tree',
+                    'mountain', 'road', 'car', 'object', 'picture of', 'image of', 'shows a'
+                ]
+                
+                if any(keyword in reason_lower for keyword in rejection_keywords):
+                    logger.warning(f"AI response contains rejection keyword: {result['reason']}")
+                    result['is_valid_signature'] = False
+                    result['confidence'] = 99
+                
+                # CRITICAL: Only accept if confidence is HIGH (75%+) AND explicitly says signature/handwritten
+                if result.get('is_valid_signature', False):
+                    confidence = result.get('confidence', 0)
+                    acceptance_keywords = ['signature', 'handwritten', 'initials', 'cursive', 'written']
+                    has_acceptance_keyword = any(kw in reason_lower for kw in acceptance_keywords)
+                    
+                    if confidence < 75 or not has_acceptance_keyword:
+                        logger.warning(f"Rejecting: Low confidence ({confidence}%) or missing acceptance keywords")
+                        result['is_valid_signature'] = False
+                        result['confidence'] = confidence
+                        result['reason'] = "Not a signature. Upload signature on white paper with blue or black pen."
+                    
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Failed to parse JSON response: {e}. Response: {response}")
+                # Fallback: VERY strict - reject unless explicitly says signature
+                response_lower = response.lower()
+                
+                # Strong rejection for any object/photo keywords
+                rejection_words = ['person', 'face', 'photograph', 'photo', 'human', 'landscape', 
+                                 'scenery', 'nature', 'animal', 'object', 'building', 'picture']
+                if any(word in response_lower for word in rejection_words):
+                    result = {
+                        "is_valid_signature": False,
+                        "confidence": 99,
+                        "reason": "Image appears to be a photo or object, not a handwritten signature"
+                    }
+                else:
+                    # Only accept if EXPLICITLY mentions signature/handwritten
+                    is_signature = 'signature' in response_lower or 'handwritten' in response_lower
+                    
+                    result = {
+                        "is_valid_signature": is_signature,
+                        "confidence": 80 if is_signature else 10,
+                        "reason": "Verified by AI" if is_signature else "Not a signature. Upload signature on white paper with blue or black pen."
+                    }
+
+            logger.info(f"Signature verification result: {result}")
+            return result
+
+        except Exception as llm_error:
+            logger.error(f"LLM error during signature verification: {str(llm_error)}")
+            # Fallback: Accept image but with low confidence
+            return {
+                "is_valid_signature": True,
+                "confidence": 50,
+                "reason": "AI verification temporarily unavailable, image accepted with low confidence"
+            }
+
+    except Exception as e:
+        logger.error(f"Signature verification error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @analyze_router.post("/similar-documents")
 async def find_similar_documents(request: SimilarDocumentsRequest):
     """

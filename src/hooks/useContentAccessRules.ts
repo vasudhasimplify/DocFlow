@@ -26,9 +26,6 @@ export interface ContentAccessRule {
   restrict_print?: boolean;
   restrict_share?: boolean;
   restrict_external_share?: boolean;
-  watermark_required?: boolean;
-  notify_on_match?: boolean;
-  notify_users?: string[];
   is_active: boolean;
   priority: number;
   created_at: string;
@@ -61,8 +58,6 @@ export interface CreateRuleParams {
   restrict_print?: boolean;
   restrict_share?: boolean;
   restrict_external_share?: boolean;
-  watermark_required?: boolean;
-  notify_on_match?: boolean;
   is_active?: boolean;
   priority?: number;
   document_ids?: string[];
@@ -138,7 +133,7 @@ export function useContentAccessRules() {
 
         const { data: docs, error: fetchError } = await supabase
           .from('documents')
-          .select('id, file_name, file_type, file_size, extracted_text')
+          .select('id, file_name, file_type, file_size, extracted_text, analysis_result')
           .in('id', document_ids);
 
         console.log('[Rules] Fetched docs:', docs?.length, 'Error:', fetchError);
@@ -173,13 +168,16 @@ export function useContentAccessRules() {
                 });
                 console.log('[Rules] Name pattern match:', ruleMatched);
               }
-              // Check keywords
+              // Check keywords in both extracted_text and analysis_result
               if (!ruleMatched && ruleParams.content_keywords?.length) {
-                const text = doc.extracted_text || '';
+                const extractedText = (doc.extracted_text || '').toLowerCase();
+                const analysisText = doc.analysis_result ? JSON.stringify(doc.analysis_result).toLowerCase() : '';
+                const combinedText = extractedText + ' ' + analysisText;
+
                 ruleMatched = ruleParams.content_keywords.some(k =>
-                  text.toLowerCase().includes(k.toLowerCase())
+                  combinedText.includes(k.toLowerCase())
                 );
-                console.log('[Rules] Keyword match:', ruleMatched, 'text length:', text.length);
+                console.log('[Rules] Keyword match:', ruleMatched, 'extracted_text length:', extractedText.length, 'analysis_result present:', !!doc.analysis_result);
               }
             }
 
@@ -195,8 +193,6 @@ export function useContentAccessRules() {
                   restrict_print: newRule.restrict_print,
                   restrict_share: newRule.restrict_share,
                   restrict_external_share: newRule.restrict_external_share,
-                  watermark_required: newRule.watermark_required,
-                  notify_on_match: newRule.notify_on_match
                 }
               });
               console.log('[Rules] Insert result - Error:', insertError);
@@ -478,8 +474,6 @@ export function useContentAccessRules() {
         restrict_print: rule.restrict_print,
         restrict_share: rule.restrict_share,
         restrict_external_share: rule.restrict_external_share,
-        watermark_required: rule.watermark_required,
-        notify_on_match: rule.notify_on_match
       }
     }));
 

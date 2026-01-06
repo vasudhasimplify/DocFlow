@@ -491,8 +491,12 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
                     // Also update allow_download based on permission
                     if (value === 'download' || value === 'edit') {
                       updateSetting('allow_download', true);
+                      setSettings(prev => ({ ...prev, permission: value, allow_download: true }));
                     } else if (value === 'view') {
                       updateSetting('allow_download', false);
+                      setSettings(prev => ({ ...prev, permission: value, allow_download: false }));
+                    } else {
+                      setSettings(prev => ({ ...prev, permission: value }));
                     }
                     toast({
                       title: 'Permission updated',
@@ -682,10 +686,30 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
                   checked={settings.allow_download}
                   onCheckedChange={(checked) => {
                     updateSetting('allow_download', checked);
-                    toast({
-                      title: checked ? 'Download enabled' : 'Download disabled',
-                      description: 'Link settings updated'
-                    });
+                    // Sync permission with allow_download for consistency
+                    if (checked && settings.permission === 'view') {
+                      // If enabling download but permission is view-only, upgrade to download
+                      updateSetting('permission', 'download');
+                      setSettings(prev => ({ ...prev, permission: 'download', allow_download: true }));
+                      toast({
+                        title: 'Download enabled',
+                        description: 'Permission upgraded to Download'
+                      });
+                    } else if (!checked && settings.permission === 'download') {
+                      // If disabling download and permission is 'download', downgrade to view
+                      updateSetting('permission', 'view');
+                      setSettings(prev => ({ ...prev, permission: 'view', allow_download: false }));
+                      toast({
+                        title: 'Download disabled',
+                        description: 'Permission changed to View Only'
+                      });
+                    } else {
+                      setSettings(prev => ({ ...prev, allow_download: checked }));
+                      toast({
+                        title: checked ? 'Download enabled' : 'Download disabled',
+                        description: 'Link settings updated'
+                      });
+                    }
                   }}
                 />
               </div>

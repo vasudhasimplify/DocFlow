@@ -16,6 +16,7 @@ import { initOfflineDB } from '@/services/offlineStorage';
 import { useDocumentLock } from '@/hooks/useDocumentLock';
 import { DocumentLockBanner } from '@/components/version-control/DocumentLockBanner';
 import { useWatermark, WatermarkSettings } from '@/hooks/useWatermark';
+import { useDocumentRestrictions, DocumentRestrictions } from '@/hooks/useDocumentRestrictions';
 
 interface Document {
   id: string;
@@ -48,6 +49,16 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const docxContainerRef = React.useRef<HTMLDivElement>(null);
   const [isLoadingDocx, setIsLoadingDocx] = React.useState(false);
 
+  const { getDocumentRestrictions } = useDocumentRestrictions();
+  const [docRestrictions, setDocRestrictions] = React.useState<DocumentRestrictions>({
+    hasRestrictions: false,
+    restrictDownload: false,
+    restrictPrint: false,
+    restrictShare: false,
+    restrictExternalShare: false,
+    matchedRules: []
+  });
+
   // Get watermarks for this document
   const { watermarks } = useWatermark();
   const documentWatermark = React.useMemo(() => {
@@ -59,6 +70,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     // Find watermark linked to this document, or use default
     const linkedWatermark = watermarks.find(w => w.document_id === document.id);
     if (linkedWatermark) return linkedWatermark;
+
     // Fall back to default watermark
     return watermarks.find(w => w.is_default) || null;
   }, [watermarks, document?.id, customWatermark]);
@@ -314,32 +326,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     }
   };
 
-  const { fetchApplications, applications } = useContentAccessRules();
+  // No longer needed here as it was moved up
 
   // Fetch restrictions when document opens
   React.useEffect(() => {
-    if (document?.id) {
-      fetchApplications({ documentId: document.id });
+    if (document?.id && isOpen) {
+      getDocumentRestrictions(document.id).then(setDocRestrictions);
     }
-  }, [document?.id, fetchApplications]);
-
-  const restrictions = React.useMemo(() => {
-    const r = {
-      download: false,
-      print: false,
-      share: false,
-      watermark: false
-    };
-
-    applications.forEach(app => {
-      if (app.actions_applied?.restrict_download) r.download = true;
-      if (app.actions_applied?.restrict_print) r.print = true;
-      if (app.actions_applied?.restrict_share) r.share = true;
-      if (app.actions_applied?.watermark_required) r.watermark = true;
-    });
-
-    return r;
-  }, [applications]);
+  }, [document?.id, isOpen, getDocumentRestrictions]);
 
   const handleOpenInNewTab = () => {
     if (resolvedUrl) {
@@ -379,7 +373,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 variant="outline"
                 size="sm"
                 onClick={handleDownload}
-                disabled={restrictions.download}
+                disabled={docRestrictions.restrictDownload}
                 className="gap-2"
               >
                 <Download className="w-4 h-4" />
@@ -389,7 +383,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 variant="outline"
                 size="sm"
                 onClick={handleOpenInNewTab}
-                disabled={restrictions.download || restrictions.print || restrictions.share}
+                disabled={docRestrictions.restrictDownload || docRestrictions.restrictPrint || docRestrictions.restrictShare}
                 className="gap-2"
               >
                 <ExternalLink className="w-4 h-4" />
@@ -430,21 +424,6 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           />
         </div>
 
-        {/* Restrictions Banner */}
-        {(restrictions.download || restrictions.print || restrictions.share) && (
-          <Alert variant="destructive" className="mx-6 mt-4 mb-0">
-            <ShieldAlert className="h-4 w-4" />
-            <AlertTitle>Restricted Access</AlertTitle>
-            <AlertDescription>
-              This document is protected by access rules: {' '}
-              {[
-                restrictions.download && 'Download Restricted',
-                restrictions.print && 'Print Restricted',
-                restrictions.share && 'Sharing Restricted'
-              ].filter(Boolean).join(', ')}.
-            </AlertDescription>
-          </Alert>
-        )}
 
         <div className="flex-1 overflow-hidden flex">
           {/* Main content area with watermark overlay */}

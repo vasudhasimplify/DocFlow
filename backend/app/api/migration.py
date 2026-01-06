@@ -146,6 +146,77 @@ async def get_credentials(user_id: str):
 
 
 # ============================================================================
+# Users Endpoint (for Identity Mapping lookups)
+# ============================================================================
+
+@router.get("/users")
+async def get_users():
+    """
+    Get all SimplifyDrive users from auth.users.
+    Used by Identity Mapping to show available target users.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Use Admin API to get all users from auth.users
+        auth_response = supabase.auth.admin.list_users()
+        
+        logger.info(f"🔍 Auth response type: {type(auth_response)}")
+        
+        users = []
+        user_list = []
+        
+        # Handle different response formats from supabase-py
+        if hasattr(auth_response, 'users'):
+            user_list = auth_response.users
+        elif isinstance(auth_response, list):
+            user_list = auth_response
+        
+        logger.info(f"🔍 Found {len(user_list)} raw users")
+        
+        for user in user_list:
+            # Try multiple ways to get email
+            email = None
+            user_id = None
+            full_name = ''
+            
+            # Get email
+            if hasattr(user, 'email'):
+                email = user.email
+            elif isinstance(user, dict) and 'email' in user:
+                email = user['email']
+            
+            # Get id
+            if hasattr(user, 'id'):
+                user_id = user.id
+            elif isinstance(user, dict) and 'id' in user:
+                user_id = user['id']
+            
+            # Get full_name from user_metadata
+            if hasattr(user, 'user_metadata') and user.user_metadata:
+                full_name = user.user_metadata.get('full_name', '')
+            elif isinstance(user, dict) and 'user_metadata' in user:
+                full_name = user.get('user_metadata', {}).get('full_name', '')
+            
+            if email and user_id:
+                users.append({
+                    'id': str(user_id),
+                    'email': email,
+                    'full_name': full_name or ''
+                })
+                logger.debug(f"   Found user: {email}")
+        
+        logger.info(f"📋 Returning {len(users)} users from auth.users")
+        return users
+        
+    except Exception as e:
+        logger.error(f"Error fetching users: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # Discovery Endpoint
 # ============================================================================
 
@@ -374,3 +445,170 @@ async def start_job(job_id: str, user_id: str):
     except Exception as e:
         logger.error(f"Error starting job: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# AI Summary Endpoint (NEW - No changes to existing functionality)
+# ============================================================================
+
+class GenerateSummaryRequest(BaseModel):
+    job_id: str
+
+
+class GenerateSummaryResponse(BaseModel):
+    summary: str
+    metrics: Dict[str, Any]
+
+
+@router.post("/generate-summary", response_model=GenerateSummaryResponse)
+async def generate_migration_summary(request: GenerateSummaryRequest, user_id: str):
+    """
+    Generate AI-powered summary of migration job with tabular statistics.
+    
+    This is a NEW endpoint that doesn't modify any existing functionality.
+    """
+    try:
+        import json
+        from ..services.llm_client import LLMClient
+        
+        supabase = get_supabase_client()
+        
+        # Fetch job data
+        job_response = supabase.table('migration_jobs').select('*').eq('id', request.job_id).eq('user_id', user_id).single().execute()
+        
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = job_response.data
+        
+        # Fetch metrics
+        metrics_response = supabase.table('migration_metrics').select('*').eq('job_id', request.job_id).order('recorded_at', desc=True).limit(50).execute()
+        metrics = metrics_response.data
+        
+        # Fetch audit logs (errors)
+        logs_response = supabase.table('migration_audit_log').select('*').eq('job_id', request.job_id).order('created_at', desc=True).limit(100).execute()
+        audit_logs = logs_response.data
+        
+        # Calculate summary metrics
+        total_size_mb = round(job.get('transferred_bytes', 0) / (1024 * 1024), 2)
+        avg_speed_mbps = 0
+        if metrics:
+            latest = metrics[0]
+            bytes_per_sec = latest.get('bytes_per_second', 0)
+            avg_speed_mbps = round(bytes_per_sec / (1024 * 1024), 2)
+        
+        duration_minutes = 0
+        if job.get('started_at') and job.get('completed_at'):
+            from datetime import datetime
+            start = datetime.fromisoformat(job['started_at'])
+            end = datetime.fromisoformat(job['completed_at'])
+            duration_minutes = round((end - start).total_seconds() / 60, 1)
+        
+        # Count errors by type
+        error_counts = {}
+        for log in audit_logs:
+            if log.get('event_type') == 'item_failed' and log.get('error_message'):
+                error_msg = log['error_message'][:50]  # First 50 chars
+                error_counts[error_msg] = error_counts.get(error_msg, 0) + 1
+        
+        # Prepare context for LLM
+        context = {
+            "job_name": job.get('name', 'Unknown'),
+            "source_system": job.get('source_system', 'google_drive'),
+            "status": job.get('status', 'unknown'),
+            "total_items": job.get('total_items', 0),
+            "processed_items": job.get('processed_items', 0),
+            "failed_items": job.get('failed_items', 0),
+            "skipped_items": job.get('skipped_items', 0),
+            "total_size_mb": total_size_mb,
+            "avg_speed_mbps": avg_speed_mbps,
+            "duration_minutes": duration_minutes,
+            "error_summary": error_counts
+        }
+        
+        # Generate AI summary
+        prompt = f"""Analyze this migration job and create a professional, concise summary.
+
+Migration Data:
+{json.dumps(context, indent=2)}
+
+Create a markdown summary with:
+1. **📊 Overview Table** - Key metrics in a table
+2. **🚀 Performance Analysis** - Brief analysis of speed and throughput
+3. **⚠️ Issues** - Only if there are failures (list top error types)
+4. **💡 Recommendations** - 2-3 actionable suggestions
+
+Keep it concise and professional. Use emojis sparingly. Format tables properly."""
+
+        llm_client = LLMClient()
+        
+        # Try AI summary, fallback to manual if unavailable
+        try:
+            summary = await llm_client.generate_text_completion(prompt=prompt, max_tokens=800)
+        except Exception as e:
+            # Fallback: generate summary manually if LLM fails (API down, etc.)
+            logger.warning(f"LLM generation failed, using manual summary: {e}")
+            success_rate = round((context['processed_items'] / max(context['total_items'], 1)) * 100, 1) if context['total_items'] > 0 else 0
+            
+            summary = f"""# Migration Summary: {context['job_name']}
+
+## Overview
+
+- **Total Files:** {context['total_items']:,}
+- **Completed:** {context['processed_items']:,} ({success_rate}%)
+- **Failed:** {context['failed_items']:,}
+- **Skipped:** {context['skipped_items']:,}
+- **Total Size:** {context['total_size_mb']} MB
+- **Average Speed:** {context['avg_speed_mbps']} MB/s
+- **Duration:** {context['duration_minutes']} minutes
+
+## Performance
+
+Migration {'completed successfully' if context['status'] == 'completed' else 'is ' + context['status']} with **{success_rate}% success rate**.
+
+"""
+            
+            # Only add issues section if there are failures
+            if context['failed_items'] > 0:
+                # Get top 3 error messages, cleaned up
+                top_errors = []
+                for error_msg, count in list(error_counts.items())[:3]:
+                    # Clean up error message (remove technical codes)
+                    clean_msg = error_msg.replace('StatusCode:', '').replace('error', 'Error')
+                    top_errors.append(f"- {clean_msg} ({count} files)")
+                
+                summary += f"""## Issues Found
+
+{chr(10).join(top_errors)}
+
+## Recommendations
+
+1. **Review failed items** - Most errors can be fixed by retrying
+2. **Check permissions** - Some files may need access rights
+3. **Verify file sizes** - Large files may have timed out
+"""
+            else:
+                summary += "\n✓ **No issues detected** - All files migrated successfully!"
+
+        
+        logger.info(f"✅ Generated AI summary for job {request.job_id}")
+        
+        return GenerateSummaryResponse(
+            summary=summary,
+            metrics={
+                "total_files": context['total_items'],
+                "completed": context['processed_items'],
+                "failed": context['failed_items'],
+                "skipped": context['skipped_items'],
+                "total_size_mb": context['total_size_mb'],
+                "avg_speed_mbps": context['avg_speed_mbps'],
+                "duration_minutes": context['duration_minutes']
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

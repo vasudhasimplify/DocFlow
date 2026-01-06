@@ -9,6 +9,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -32,8 +34,13 @@ import {
   Lock,
   Loader2,
   AlertTriangle,
+  Search,
+  Check,
+  ChevronsUpDown,
+  AlertCircle,
 } from 'lucide-react';
 import { useExternalSharing, ExternalShare, CreateExternalShareParams } from '@/hooks/useExternalSharing';
+import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 
@@ -52,12 +59,16 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
     getShareUrl,
     getShareStats,
   } = useExternalSharing();
+  const { getDocumentRestrictions } = useDocumentRestrictions();
   const { toast } = useToast();
 
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [selectedShare, setSelectedShare] = useState<ExternalShare | null>(null);
+  const [showDetailDialog, setShowDetailDialog] = useState(false);
+  const [detailShare, setDetailShare] = useState<ExternalShare | null>(null);
   const [guestEmails, setGuestEmails] = useState<string[]>([]);
   const [newEmailInput, setNewEmailInput] = useState('');
+  const [openDocSelector, setOpenDocSelector] = useState(false);
   const [formData, setFormData] = useState<CreateExternalShareParams>({
     resource_type: 'document',
     resource_id: '',
@@ -72,6 +83,11 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
   });
 
   const stats = getShareStats();
+
+  const handleViewDetails = (share: ExternalShare) => {
+    setDetailShare(share);
+    setShowDetailDialog(true);
+  };
 
   // Add email to list
   const addEmail = () => {
@@ -98,6 +114,27 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
   const handleInvite = async () => {
     if (guestEmails.length === 0 || !formData.resource_id) return;
 
+    // Check for access restrictions on the document
+    const restrictions = await getDocumentRestrictions(formData.resource_id);
+
+    if (restrictions.restrictExternalShare) {
+      toast({
+        title: "🚫 External Sharing Restricted",
+        description: `This document is restricted from external sharing by access rule(s): ${restrictions.matchedRules.join(', ')}`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (restrictions.restrictShare) {
+      toast({
+        title: "🚫 Sharing Restricted",
+        description: `This document is restricted from sharing by access rule(s): ${restrictions.matchedRules.join(', ')}`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     let successCount = 0;
     let failCount = 0;
 
@@ -106,6 +143,9 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
       const shareParams = {
         ...formData,
         guest_email: email,
+        // Override permissions based on document restrictions
+        allow_download: restrictions.restrictDownload ? false : formData.allow_download,
+        allow_print: restrictions.restrictPrint ? false : formData.allow_print,
       };
       const share = await createShare(shareParams);
       if (share) {
@@ -272,6 +312,7 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
             onRevoke={revokeShare}
             onResend={resendInvitation}
             onDelete={deleteShare}
+            onViewDetails={handleViewDetails}
             getStatusColor={getStatusColor}
             getPermissionIcon={getPermissionIcon}
           />
@@ -284,6 +325,7 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
             onRevoke={revokeShare}
             onResend={resendInvitation}
             onDelete={deleteShare}
+            onViewDetails={handleViewDetails}
             getStatusColor={getStatusColor}
             getPermissionIcon={getPermissionIcon}
           />
@@ -296,6 +338,7 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
             onRevoke={revokeShare}
             onResend={resendInvitation}
             onDelete={deleteShare}
+            onViewDetails={handleViewDetails}
             getStatusColor={getStatusColor}
             getPermissionIcon={getPermissionIcon}
           />
@@ -308,6 +351,7 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
             onRevoke={revokeShare}
             onResend={resendInvitation}
             onDelete={deleteShare}
+            onViewDetails={handleViewDetails}
             getStatusColor={getStatusColor}
             getPermissionIcon={getPermissionIcon}
           />
@@ -326,28 +370,50 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>Select Document</Label>
-              <Select
-                value={formData.resource_id}
-                onValueChange={v => {
-                  const doc = documents?.find(d => d.id === v);
-                  setFormData(prev => ({
-                    ...prev,
-                    resource_id: v,
-                    resource_name: doc?.file_name || '',
-                  }));
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a document to share" />
-                </SelectTrigger>
-                <SelectContent>
-                  {documents?.map(doc => (
-                    <SelectItem key={doc.id} value={doc.id}>
-                      {doc.file_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={openDocSelector} onOpenChange={setOpenDocSelector}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={openDocSelector}
+                    className="w-full justify-between"
+                  >
+                    {formData.resource_id
+                      ? documents?.find(d => d.id === formData.resource_id)?.file_name
+                      : "Choose a document to share..."}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-full p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search documents..." />
+                    <CommandList>
+                      <CommandEmpty>No document found.</CommandEmpty>
+                      <CommandGroup>
+                        {documents?.map(doc => (
+                          <CommandItem
+                            key={doc.id}
+                            value={doc.file_name}
+                            onSelect={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                resource_id: doc.id,
+                                resource_name: doc.file_name,
+                              }));
+                              setOpenDocSelector(false);
+                            }}
+                          >
+                            <Check
+                              className={`mr-2 h-4 w-4 ${formData.resource_id === doc.id ? 'opacity-100' : 'opacity-0'}`}
+                            />
+                            {doc.file_name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
             {/* Multi-email input */}
@@ -498,7 +564,166 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+
+      {/* Share Detail Dialog */}
+      <Dialog open={showDetailDialog} onOpenChange={setShowDetailDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Share Details</DialogTitle>
+            <DialogDescription>
+              Complete information about this external share
+            </DialogDescription>
+          </DialogHeader>
+          {detailShare && (
+            <div className="space-y-6 py-4">
+              {/* Guest Info */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Guest Information</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-muted-foreground">Email</Label>
+                    <p className="font-medium">{detailShare.guest_email}</p>
+                  </div>
+                  {detailShare.guest_name && (
+                    <div>
+                      <Label className="text-muted-foreground">Name</Label>
+                      <p className="font-medium">{detailShare.guest_name}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Document Info */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Document</h3>
+                <div>
+                  <Label className="text-muted-foreground">File Name</Label>
+                  <p className="font-medium">{detailShare.resource_name || 'Unnamed document'}</p>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Permissions */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Permissions</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-muted-foreground">Permission Level</Label>
+                    <Badge variant="secondary" className="mt-1">
+                      {getPermissionIcon(detailShare.permission)}
+                      <span className="ml-1 capitalize">{detailShare.permission}</span>
+                    </Badge>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Can Download</Label>
+                    <p className="font-medium">{detailShare.allow_download ? '✓ Yes' : '✗ No'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Can Print</Label>
+                    <p className="font-medium">{detailShare.allow_print ? '✓ Yes' : '✗ No'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Status</Label>
+                    <Badge className={getStatusColor(detailShare.status)}>
+                      {detailShare.status}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Activity Stats */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Activity</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <Label className="text-muted-foreground">Views</Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Eye className="h-4 w-4 text-primary" />
+                      <p className="text-xl font-bold">{detailShare.view_count || 0}</p>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Downloads</Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Download className="h-4 w-4 text-primary" />
+                      <p className="text-xl font-bold">{detailShare.download_count || 0}</p>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Prints</Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Activity className="h-4 w-4 text-primary" />
+                      <p className="text-xl font-bold">{detailShare.print_count || 0}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Dates */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Timeline</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-muted-foreground">Created</Label>
+                    <p className="font-medium">{format(new Date(detailShare.created_at), 'PPp')}</p>
+                  </div>
+                  {detailShare.expires_at && (
+                    <div>
+                      <Label className="text-muted-foreground">Expires</Label>
+                      <p className="font-medium">
+                        {format(new Date(detailShare.expires_at), 'PPp')}
+                        <span className="text-xs text-muted-foreground ml-2">
+                          ({formatDistanceToNow(new Date(detailShare.expires_at), { addSuffix: true })})
+                        </span>
+                      </p>
+                    </div>
+                  )}
+                  {detailShare.last_accessed_at && (
+                    <div>
+                      <Label className="text-muted-foreground">Last Accessed</Label>
+                      <p className="font-medium">{format(new Date(detailShare.last_accessed_at), 'PPp')}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {detailShare.message && (
+                <>
+                  <Separator />
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Message</Label>
+                    <div className="p-3 rounded-lg bg-muted">
+                      <p className="text-sm">{detailShare.message}</p>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDetailDialog(false)}>
+              Close
+            </Button>
+            {detailShare && (
+              <Button onClick={() => {
+                copyShareLink(detailShare);
+                setShowDetailDialog(false);
+              }} className="gap-2">
+                <Copy className="h-4 w-4" />
+                Copy Link
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div >
   );
 }
 
@@ -509,6 +734,7 @@ function SharesList({
   onRevoke,
   onResend,
   onDelete,
+  onViewDetails,
   getStatusColor,
   getPermissionIcon,
 }: {
@@ -517,6 +743,7 @@ function SharesList({
   onRevoke: (shareId: string) => void;
   onResend: (shareId: string) => void;
   onDelete: (shareId: string) => void;
+  onViewDetails: (share: ExternalShare) => void;
   getStatusColor: (status: ExternalShare['status']) => string;
   getPermissionIcon: (permission: ExternalShare['permission']) => React.ReactNode;
 }) {
@@ -537,14 +764,18 @@ function SharesList({
   return (
     <div className="space-y-3">
       {shares.map(share => (
-        <Card key={share.id}>
+        <Card
+          key={share.id}
+          className="cursor-pointer transition-colors hover:bg-accent/50"
+          onClick={() => onViewDetails(share)}
+        >
           <CardContent className="p-4">
             <div className="flex items-start justify-between">
-              <div className="flex items-start gap-3">
+              <div className="flex items-start gap-3 flex-1">
                 <div className="p-2 rounded-full bg-muted">
                   <Mail className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <div>
+                <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{share.guest_email}</span>
                     {share.guest_name && (
@@ -574,7 +805,7 @@ function SharesList({
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                 <Button variant="ghost" size="sm" onClick={() => onCopyLink(share)}>
                   <Copy className="h-4 w-4" />
                 </Button>

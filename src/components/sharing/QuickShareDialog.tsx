@@ -46,9 +46,11 @@ import {
   Search,
   Loader2,
   ArrowLeft,
-  Folder
+  Folder,
+  AlertCircle
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
 import type {
   CreateShareLinkParams,
   ShareLinkPermission,
@@ -101,7 +103,7 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
   const [copied, setCopied] = useState(false);
 
   // Quick share state
-  const [permission, setPermission] = useState<ShareLinkPermission>('view');
+  const [permission, setPermission] = useState<ShareLinkPermission | null>(null); // No default - user must select
   const [expiration, setExpiration] = useState<number>(168); // 7 days default
 
   // Advanced settings
@@ -112,12 +114,34 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
   const [requireName, setRequireName] = useState(false);
   const [hasMaxUses, setHasMaxUses] = useState(false);
   const [maxUses, setMaxUses] = useState(100);
-  const [allowDownload, setAllowDownload] = useState(false);
+  const [allowDownload, setAllowDownload] = useState(false); // Will sync with permission
   const [allowPrint, setAllowPrint] = useState(false);
   const [allowCopy, setAllowCopy] = useState(true);
-  const [notifyOnAccess, setNotifyOnAccess] = useState(false);
   const [watermarkEnabled, setWatermarkEnabled] = useState(false);
   const [watermarkText, setWatermarkText] = useState('');
+  const [notifyOnAccess, setNotifyOnAccess] = useState(false);
+
+  // Sync permission and allowDownload - when permission changes
+  const handlePermissionChange = (perm: ShareLinkPermission) => {
+    setPermission(perm);
+    // Sync allowDownload with permission
+    if (perm === 'download' || perm === 'edit') {
+      setAllowDownload(true);
+    } else if (perm === 'view') {
+      setAllowDownload(false);
+    }
+  };
+
+  // Sync permission and allowDownload - when allowDownload changes
+  const handleAllowDownloadChange = (checked: boolean) => {
+    setAllowDownload(checked);
+    // Sync permission with allowDownload
+    if (checked && permission === 'view') {
+      setPermission('download');
+    } else if (!checked && permission === 'download') {
+      setPermission('view');
+    }
+  };
   const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
   const [newDomain, setNewDomain] = useState('');
   const [blockedEmails, setBlockedEmails] = useState<string[]>([]);
@@ -159,8 +183,22 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
     setStep('configure');
   };
 
+  const { getDocumentRestrictions } = useDocumentRestrictions();
+
   const handleCreate = async () => {
-    if (!selectedDocument) return;
+    if (!selectedDocument || !permission) return;
+
+    // Check for access restrictions on the document
+    const restrictions = await getDocumentRestrictions(selectedDocument.id);
+
+    if (restrictions.restrictShare) {
+      toast({
+        title: "🚫 Sharing Restricted",
+        description: `This document is restricted from sharing by access rule(s): ${restrictions.matchedRules.join(', ')}`,
+        variant: "destructive",
+      });
+      return;
+    }
 
     // Validate password if enabled
     if (hasPassword && (password.length < 4 || password.length > 8)) {
@@ -180,8 +218,8 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
         resource_name: selectedDocument.name,
         permission,
         name: linkName || undefined,
-        allow_download: allowDownload || permission === 'download',
-        allow_print: allowPrint,
+        allow_download: restrictions.restrictDownload ? false : (allowDownload || permission === 'download' || permission === 'comment'),
+        allow_print: restrictions.restrictPrint ? false : allowPrint,
         allow_copy: allowCopy,
         password: hasPassword ? password : undefined,
         require_email: requireEmail,
@@ -190,9 +228,9 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
         allowed_domains: allowedDomains.length > 0 ? allowedDomains : undefined,
         max_uses: hasMaxUses ? maxUses : undefined,
         expires_in_hours: expiration > 0 ? expiration : undefined,
-        notify_on_access: notifyOnAccess,
         watermark_enabled: watermarkEnabled,
-        watermark_text: watermarkEnabled ? watermarkText : undefined
+        watermark_text: watermarkEnabled ? (watermarkText || 'CONFIDENTIAL') : undefined,
+        notify_on_access: notifyOnAccess
       };
 
       const link = await onCreateLink(params);
@@ -249,7 +287,7 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
     setCreatedLink(null);
     setSelectedDocument(null);
     setStep('select');
-    setPermission('view');
+    setPermission(null); // No default - user must select
     setExpiration(168);
     setLinkName('');
     setHasPassword(false);
@@ -258,12 +296,12 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
     setRequireName(false);
     setHasMaxUses(false);
     setMaxUses(100);
-    setAllowDownload(false);
+    setAllowDownload(false); // Will sync with permission
     setAllowPrint(false);
     setAllowCopy(true);
-    setNotifyOnAccess(false);
     setWatermarkEnabled(false);
     setWatermarkText('');
+    setNotifyOnAccess(false);
     setAllowedDomains([]);
     setBlockedEmails([]);
     setActiveTab('quick');
@@ -288,6 +326,7 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
   const getPermissionIcon = (perm: ShareLinkPermission) => {
     switch (perm) {
       case 'view': return <Eye className="w-4 h-4" />;
+      case 'comment': return <MessageSquare className="w-4 h-4" />;
       case 'download': return <Download className="w-4 h-4" />;
       case 'edit': return <Edit className="w-4 h-4" />;
     }
@@ -595,12 +634,18 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
             <TabsContent value="quick" className="space-y-6 mt-4 pb-4">
               {/* Permission Selection */}
               <div className="space-y-3">
-                <Label>Who can access this link?</Label>
+                <Label className="flex items-center gap-1">
+                  Who can access this link?
+                  <span className="text-destructive">*</span>
+                </Label>
+                {!permission && (
+                  <p className="text-xs text-muted-foreground">Please select a permission level</p>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   {(Object.keys(SHARE_LINK_PERMISSION_INFO) as ShareLinkPermission[]).map((perm) => (
                     <button
                       key={perm}
-                      onClick={() => setPermission(perm)}
+                      onClick={() => handlePermissionChange(perm)}
                       className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all text-left ${permission === perm
                         ? 'border-primary bg-primary/5'
                         : 'border-border hover:border-primary/50'
@@ -813,7 +858,7 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
 
                 <div className="flex items-center justify-between">
                   <Label>Allow Download</Label>
-                  <Switch checked={allowDownload} onCheckedChange={setAllowDownload} />
+                  <Switch checked={allowDownload} onCheckedChange={handleAllowDownloadChange} />
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -825,20 +870,37 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
                   <Label>Allow Copy Text</Label>
                   <Switch checked={allowCopy} onCheckedChange={setAllowCopy} />
                 </div>
+              </div>
+
+              <Separator />
+
+              {/* Watermark */}
+              <div className="space-y-4">
+                <h4 className="font-medium flex items-center gap-2">
+                  <Shield className="w-4 h-4" />
+                  Watermark
+                </h4>
 
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label>Watermark</Label>
-                    <p className="text-xs text-muted-foreground">Add visible watermark</p>
+                    <Label>Enable Watermark</Label>
+                    <p className="text-xs text-muted-foreground">Display watermark on document</p>
                   </div>
                   <Switch checked={watermarkEnabled} onCheckedChange={setWatermarkEnabled} />
                 </div>
+
                 {watermarkEnabled && (
-                  <Input
-                    placeholder="e.g., CONFIDENTIAL"
-                    value={watermarkText}
-                    onChange={(e) => setWatermarkText(e.target.value)}
-                  />
+                  <div className="space-y-2">
+                    <Label>Watermark Text</Label>
+                    <Input
+                      placeholder="e.g., CONFIDENTIAL, DRAFT"
+                      value={watermarkText}
+                      onChange={(e) => setWatermarkText(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Leave empty for "CONFIDENTIAL"
+                    </p>
+                  </div>
                 )}
               </div>
 
@@ -854,11 +916,13 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label>Notify on Access</Label>
-                    <p className="text-xs text-muted-foreground">Get notified when link is used</p>
+                    <p className="text-xs text-muted-foreground">Get notified when someone views</p>
                   </div>
                   <Switch checked={notifyOnAccess} onCheckedChange={setNotifyOnAccess} />
                 </div>
               </div>
+
+
             </TabsContent>
           </ScrollArea>
         </Tabs>
@@ -869,7 +933,7 @@ export const QuickShareDialog: React.FC<QuickShareDialogProps> = ({
           </Button>
           <Button
             onClick={handleCreate}
-            disabled={creating || !selectedDocument || (hasPassword && !password)}
+            disabled={creating || !selectedDocument || !permission || (hasPassword && !password)}
           >
             {creating ? 'Creating...' : 'Create Link'}
           </Button>

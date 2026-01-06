@@ -27,14 +27,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { supabase } from '@/integrations/supabase/client';
-import { 
-  FileText, 
-  Eye, 
-  Download, 
-  Share, 
-  MoreHorizontal, 
-  Star, 
-  Clock, 
+import {
+  FileText,
+  Eye,
+  Download,
+  Share,
+  MoreHorizontal,
+  Star,
+  Clock,
   Brain,
   Tag,
   Folder,
@@ -85,6 +85,7 @@ interface Document {
   insights?: DocumentInsight;
   tags?: DocumentTag[];
   folders?: SmartFolder[];
+  has_restrictions?: boolean;
 }
 
 interface DocumentInsight {
@@ -125,7 +126,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
   const { toast } = useToast();
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();
   const { makeDocumentAvailableOffline, isDocumentOffline, removeDocumentFromOffline } = useOfflineMode();
-  
+
   // Check Out and Transfer Dialog states
   const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
   const [showTransferDialog, setShowTransferDialog] = useState(false);
@@ -134,7 +135,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [offlineDocIds, setOfflineDocIds] = useState<Set<string>>(new Set());
   const [showEditorModal, setShowEditorModal] = useState(false);
-  
+
   // Delete confirmation dialog states
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showPermanentDeleteDialog, setShowPermanentDeleteDialog] = useState(false);
@@ -215,23 +216,23 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
   const handleDelete = async () => {
     if (!documentToDelete) return;
-    
+
     try {
       const response = await fetch(`http://localhost:8000/api/v1/documents/${documentToDelete.id}`, {
         method: 'DELETE',
       });
-      
+
       if (!response.ok) throw new Error('Delete failed');
-      
+
       toast({
         title: "Moved to recycle bin",
         description: `${documentToDelete.file_name} has been moved to recycle bin`,
       });
-      
+
       setShowDeleteDialog(false);
       setDocumentToDelete(null);
       setSelectedDocuments(new Set());
-      
+
       if (onRefresh) {
         await onRefresh();
       }
@@ -250,14 +251,14 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
       const response = await fetch(`http://localhost:8000/api/v1/documents/${document.id}/restore`, {
         method: 'POST',
       });
-      
+
       if (!response.ok) throw new Error('Restore failed');
-      
+
       toast({
         title: "Document restored",
         description: `${document.file_name} has been restored`,
       });
-      
+
       if (onRefresh) {
         await onRefresh();
       }
@@ -273,23 +274,23 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
   const handlePermanentDelete = async () => {
     if (!documentToDelete) return;
-    
+
     try {
       const response = await fetch(`http://localhost:8000/api/v1/documents/${documentToDelete.id}/permanent`, {
         method: 'DELETE',
       });
-      
+
       if (!response.ok) throw new Error('Permanent delete failed');
-      
+
       toast({
         title: "Document permanently deleted",
         description: `${documentToDelete.file_name} has been permanently deleted`,
       });
-      
+
       setShowPermanentDeleteDialog(false);
       setDocumentToDelete(null);
       setSelectedDocuments(new Set());
-      
+
       if (onRefresh) {
         await onRefresh();
       }
@@ -314,7 +315,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
         // Create download link directly from storage URL
         const response = await fetch(document.storage_url);
         if (!response.ok) throw new Error('Download failed');
-        
+
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const a = globalThis.document.createElement('a');
@@ -324,7 +325,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
         a.click();
         globalThis.document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
+
         toast({
           title: "Download started",
           description: `Downloading ${document.file_name}`,
@@ -458,451 +459,464 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
       {/* Documents Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {documents.map(document => (
-        <ContextMenu key={document.id}>
-          <ContextMenuTrigger asChild>
-            <Card 
-              className={`group hover:shadow-lg transition-all duration-200 cursor-pointer border hover:border-primary/50 ${
-                selectedDocuments.has(document.id) ? 'border-primary border-2 bg-primary/5' : 'bg-white'
-              }`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedDocuments(prev => {
-                  const newSet = new Set(prev);
-                  if (newSet.has(document.id)) {
-                    newSet.delete(document.id);
-                  } else {
-                    newSet.add(document.id);
-                  }
-                  return newSet;
-                });
-              }}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                onDocumentClick(document);
-              }}
-              tabIndex={0}
-            >
-              <CardContent className="p-4">
-                {/* Checkbox */}
-                <div className="absolute top-3 left-3 z-10">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedDocuments(prev => {
-                        const newSet = new Set(prev);
-                        if (newSet.has(document.id)) {
-                          newSet.delete(document.id);
-                        } else {
-                          newSet.add(document.id);
-                        }
-                        return newSet;
-                      });
-                    }}
-                    className="text-primary hover:text-primary/80 transition-colors"
-                  >
-                    {selectedDocuments.has(document.id) ? (
-                      <CheckCircle2 className="w-5 h-5" />
-                    ) : (
-                      <Circle className="w-5 h-5 text-muted-foreground hover:text-primary" />
-                    )}
-                  </button>
-                </div>
-
-                {/* Header */}
-            <div className="flex items-start justify-between mb-3 pl-8\">
-              <div className="flex items-center gap-2">
-                {getFileIcon(document.file_type)}
-                {document.insights && (
-                  <div className="flex items-center gap-1">
-                    <Brain className="w-3 h-3 text-blue-500" />
-                    <Star 
-                      className={`w-3 h-3 ${getImportanceColor(document.insights.importance_score)}`}
-                      fill="currentColor"
-                    />
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                {/* Star/Favorite Button */}
-                <StarButton 
-                  documentId={document.id} 
-                  size="sm"
-                />
-                
-                {/* Pin to Quick Access Button */}
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        className="h-7 w-7 p-0 hover:bg-primary/10"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isPinned(document.id)) {
-                            unpinDocument(document.id);
+        {documents.map(document => (
+          <ContextMenu key={document.id}>
+            <ContextMenuTrigger asChild>
+              <Card
+                className={`group hover:shadow-lg transition-all duration-200 cursor-pointer border hover:border-primary/50 ${selectedDocuments.has(document.id) ? 'border-primary border-2 bg-primary/5' : 'bg-white'
+                  }`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedDocuments(prev => {
+                    const newSet = new Set(prev);
+                    if (newSet.has(document.id)) {
+                      newSet.delete(document.id);
+                    } else {
+                      newSet.add(document.id);
+                    }
+                    return newSet;
+                  });
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  onDocumentClick(document);
+                }}
+                tabIndex={0}
+              >
+                <CardContent className="p-4">
+                  {/* Checkbox */}
+                  <div className="absolute top-3 left-3 z-10">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedDocuments(prev => {
+                          const newSet = new Set(prev);
+                          if (newSet.has(document.id)) {
+                            newSet.delete(document.id);
                           } else {
-                            pinDocument(document.id);
+                            newSet.add(document.id);
                           }
-                        }}
-                      >
-                        <Pin 
-                          className={`w-4 h-4 transition-all ${
-                            isPinned(document.id) 
-                              ? 'text-primary fill-primary rotate-45' 
-                              : 'text-muted-foreground hover:text-primary'
-                          }`}
-                        />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{isPinned(document.id) ? 'Unpin from Quick Access' : 'Pin to Quick Access'}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="opacity-0 group-hover:opacity-100 h-7 w-7 p-0"
-                      onClick={(e) => e.stopPropagation()}
+                          return newSet;
+                        });
+                      }}
+                      className="text-primary hover:text-primary/80 transition-colors"
                     >
-                      <MoreHorizontal className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation();
-                      onDocumentClick(document);
-                    }}>
-                      <Eye className="w-4 h-4 mr-2" />
-                      View
-                    </DropdownMenuItem>
-                    {(document.metadata as any)?.is_deleted ? (
-                      // Recycle bin options
-                      <>
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          handleRestore(document);
-                        }}>
-                          <RotateCcw className="w-4 h-4 mr-2" />
-                          Restore
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            initiateDelete(document);
-                          }}
-                          className="text-red-600"
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete Permanently
-                        </DropdownMenuItem>
-                      </>
-                    ) : (
-                      // Normal options
-                      <>
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          handleEdit(document);
-                        }}>
-                          <Edit className="w-4 h-4 mr-2" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          handleDownload(document);
-                        }}>
-                          <Download className="w-4 h-4 mr-2" />
-                          Download
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          handleShare(document);
-                        }}>
-                          <Share className="w-4 h-4 mr-2" />
-                          Share
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          handleMoveToFolder(document);
-                        }}>
-                          <FolderPlus className="w-4 h-4 mr-2" />
-                          Move to Folder
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDocument(document);
-                          setShowCheckOutDialog(true);
-                        }}>
-                          <Lock className="w-4 h-4 mr-2" />
-                          Check Out
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDocument(document);
-                          setShowTransferDialog(true);
-                        }}>
-                          <UserMinus className="w-4 h-4 mr-2" />
-                          Transfer Ownership
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDocument(document);
-                          setShowComplianceDialog(true);
-                        }}>
-                          <Shield className="w-4 h-4 mr-2" />
-                          Compliance Labels
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {/* Offline options */}
-                        {offlineDocIds.has(document.id) ? (
+                      {selectedDocuments.has(document.id) ? (
+                        <CheckCircle2 className="w-5 h-5" />
+                      ) : (
+                        <Circle className="w-5 h-5 text-muted-foreground hover:text-primary" />
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-3 pl-8\">
+                    <div className="flex items-center gap-2">
+                      {getFileIcon(document.file_type)}
+                      {document.insights && (
+                        <div className="flex items-center gap-1">
+                          <Brain className="w-3 h-3 text-blue-500" />
+                          <Star
+                            className={`w-3 h-3 ${getImportanceColor(document.insights.importance_score)}`}
+                            fill="currentColor"
+                          />
+                        </div>
+                      )}
+                      {document.has_restrictions && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge variant="outline" className="text-[10px] py-0 h-4 bg-amber-50 text-amber-700 border-amber-200 px-1 font-bold">
+                                <Shield className="w-2.5 h-2.5 mr-0.5" />
+                                RESTRICTED
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Access restrictions applied by rules</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {/* Star/Favorite Button */}
+                      <StarButton
+                        documentId={document.id}
+                        size="sm"
+                      />
+
+                      {/* Pin to Quick Access Button */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 hover:bg-primary/10"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isPinned(document.id)) {
+                                  unpinDocument(document.id);
+                                } else {
+                                  pinDocument(document.id);
+                                }
+                              }}
+                            >
+                              <Pin
+                                className={`w-4 h-4 transition-all ${isPinned(document.id)
+                                    ? 'text-primary fill-primary rotate-45'
+                                    : 'text-muted-foreground hover:text-primary'
+                                  }`}
+                              />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{isPinned(document.id) ? 'Unpin from Quick Access' : 'Pin to Quick Access'}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="opacity-0 group-hover:opacity-100 h-7 w-7 p-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
                           <DropdownMenuItem onClick={(e) => {
                             e.stopPropagation();
-                            handleRemoveOffline(document);
+                            onDocumentClick(document);
                           }}>
-                            <CloudOff className="w-4 h-4 mr-2" />
-                            Remove from Offline
+                            <Eye className="w-4 h-4 mr-2" />
+                            View
                           </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem onClick={(e) => {
-                            e.stopPropagation();
-                            handleMakeOffline(document);
-                          }}>
-                            <CloudDownload className="w-4 h-4 mr-2" />
-                            Make Available Offline
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            initiateDelete(document);
-                          }}
-                          className="text-red-600"
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </>
+                          {(document.metadata as any)?.is_deleted ? (
+                            // Recycle bin options
+                            <>
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                handleRestore(document);
+                              }}>
+                                <RotateCcw className="w-4 h-4 mr-2" />
+                                Restore
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  initiateDelete(document);
+                                }}
+                                className="text-red-600"
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete Permanently
+                              </DropdownMenuItem>
+                            </>
+                          ) : (
+                            // Normal options
+                            <>
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                handleEdit(document);
+                              }}>
+                                <Edit className="w-4 h-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownload(document);
+                              }}>
+                                <Download className="w-4 h-4 mr-2" />
+                                Download
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                handleShare(document);
+                              }}>
+                                <Share className="w-4 h-4 mr-2" />
+                                Share
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                handleMoveToFolder(document);
+                              }}>
+                                <FolderPlus className="w-4 h-4 mr-2" />
+                                Move to Folder
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedDocument(document);
+                                setShowCheckOutDialog(true);
+                              }}>
+                                <Lock className="w-4 h-4 mr-2" />
+                                Check Out
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedDocument(document);
+                                setShowTransferDialog(true);
+                              }}>
+                                <UserMinus className="w-4 h-4 mr-2" />
+                                Transfer Ownership
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedDocument(document);
+                                setShowComplianceDialog(true);
+                              }}>
+                                <Shield className="w-4 h-4 mr-2" />
+                                Compliance Labels
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              {/* Offline options */}
+                              {offlineDocIds.has(document.id) ? (
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveOffline(document);
+                                }}>
+                                  <CloudOff className="w-4 h-4 mr-2" />
+                                  Remove from Offline
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMakeOffline(document);
+                                }}>
+                                  <CloudDownload className="w-4 h-4 mr-2" />
+                                  Make Available Offline
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  initiateDelete(document);
+                                }}
+                                className="text-red-600"
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+
+                  {/* Title */}
+                  <div className="mb-3">
+                    <h3 className="font-medium text-sm truncate mb-1">
+                      {document.insights?.ai_generated_title || document.file_name}
+                    </h3>
+                    {document.file_name !== document.insights?.ai_generated_title && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {document.file_name}
+                      </p>
                     )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
+                  </div>
 
-            {/* Title */}
-            <div className="mb-3">
-              <h3 className="font-medium text-sm truncate mb-1">
-                {document.insights?.ai_generated_title || document.file_name}
-              </h3>
-              {document.file_name !== document.insights?.ai_generated_title && (
-                <p className="text-xs text-muted-foreground truncate">
-                  {document.file_name}
-                </p>
-              )}
-            </div>
+                  {/* AI Summary */}
+                  {document.insights?.summary && (
+                    <div className="mb-3">
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        {document.insights.summary}
+                      </p>
+                    </div>
+                  )}
 
-            {/* AI Summary */}
-            {document.insights?.summary && (
-              <div className="mb-3">
-                <p className="text-xs text-muted-foreground line-clamp-2">
-                  {document.insights.summary}
-                </p>
-              </div>
-            )}
+                  {/* Tags */}
+                  {document.tags && document.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      {document.tags.slice(0, 3).map(tag => (
+                        <Badge
+                          key={tag.id}
+                          variant="secondary"
+                          className="text-xs flex items-center gap-1"
+                        >
+                          {tag.is_ai_suggested && <Sparkles className="w-2 h-2" />}
+                          {tag.name}
+                        </Badge>
+                      ))}
+                      {document.tags.length > 3 && (
+                        <Badge variant="outline" className="text-xs">
+                          +{document.tags.length - 3}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
 
-            {/* Tags */}
-            {document.tags && document.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1 mb-3">
-                {document.tags.slice(0, 3).map(tag => (
-                  <Badge 
-                    key={tag.id} 
-                    variant="secondary" 
-                    className="text-xs flex items-center gap-1"
+                  {/* Folders */}
+                  {document.folders && document.folders.length > 0 && (
+                    <div className="flex items-center gap-1 mb-3">
+                      <Folder className="w-3 h-3 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground truncate">
+                        {document.folders[0].name}
+                        {document.folders.length > 1 && ` +${document.folders.length - 1}`}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Key Topics */}
+                  {document.insights?.key_topics && document.insights.key_topics.length > 0 && (
+                    <div className="mb-3">
+                      <div className="flex items-center gap-1 mb-1">
+                        <Tag className="w-3 h-3 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">Topics:</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {document.insights.key_topics.slice(0, 2).map((topic, index) => (
+                          <Badge key={index} variant="outline" className="text-xs">
+                            {topic}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Footer */}
+                  <div className="flex items-center justify-between pt-3 border-t">
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {formatDistanceToNow(new Date(document.created_at), { addSuffix: true })}
+                      </div>
+                      <span>{formatFileSize(document.file_size)}</span>
+                    </div>
+
+                    {document.insights?.estimated_reading_time && (
+                      <Badge variant="secondary" className="text-xs">
+                        {document.insights.estimated_reading_time}m read
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Processing Status */}
+                  {(document.metadata as any)?.is_pending_upload ? (
+                    <div className="mt-2">
+                      <Badge
+                        variant="outline"
+                        className="text-xs text-orange-600 border-orange-400 bg-orange-50"
+                      >
+                        <CloudUpload className="w-3 h-3 mr-1" />
+                        Queued for Upload
+                      </Badge>
+                    </div>
+                  ) : document.processing_status && document.processing_status !== 'completed' && (
+                    <div className="mt-2">
+                      <Badge
+                        variant={
+                          document.processing_status === 'processing' ? 'secondary' :
+                            document.processing_status === 'pending' ? 'outline' :
+                              'destructive'
+                        }
+                        className="text-xs"
+                      >
+                        {document.processing_status === 'processing' ? 'AI Processing...' :
+                          document.processing_status === 'pending' ? 'Pending Analysis' :
+                            'Processing Failed'}
+                      </Badge>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </ContextMenuTrigger>
+
+            {/* Right-click context menu - Full menu matching dropdown */}
+            <ContextMenuContent className="w-56">
+              <ContextMenuItem onClick={() => onDocumentClick(document)}>
+                <Eye className="w-4 h-4 mr-2" />
+                View
+              </ContextMenuItem>
+              {(document.metadata as any)?.is_deleted ? (
+                // Recycle bin context menu
+                <>
+                  <ContextMenuItem onClick={() => handleRestore(document)}>
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Restore
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    onClick={() => initiateDelete(document)}
+                    className="text-red-600"
                   >
-                    {tag.is_ai_suggested && <Sparkles className="w-2 h-2" />}
-                    {tag.name}
-                  </Badge>
-                ))}
-                {document.tags.length > 3 && (
-                  <Badge variant="outline" className="text-xs">
-                    +{document.tags.length - 3}
-                  </Badge>
-                )}
-              </div>
-            )}
-
-            {/* Folders */}
-            {document.folders && document.folders.length > 0 && (
-              <div className="flex items-center gap-1 mb-3">
-                <Folder className="w-3 h-3 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground truncate">
-                  {document.folders[0].name}
-                  {document.folders.length > 1 && ` +${document.folders.length - 1}`}
-                </span>
-              </div>
-            )}
-
-            {/* Key Topics */}
-            {document.insights?.key_topics && document.insights.key_topics.length > 0 && (
-              <div className="mb-3">
-                <div className="flex items-center gap-1 mb-1">
-                  <Tag className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">Topics:</span>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {document.insights.key_topics.slice(0, 2).map((topic, index) => (
-                    <Badge key={index} variant="outline" className="text-xs">
-                      {topic}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Footer */}
-            <div className="flex items-center justify-between pt-3 border-t">
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <div className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {formatDistanceToNow(new Date(document.created_at), { addSuffix: true })}
-                </div>
-                <span>{formatFileSize(document.file_size)}</span>
-              </div>
-              
-              {document.insights?.estimated_reading_time && (
-                <Badge variant="secondary" className="text-xs">
-                  {document.insights.estimated_reading_time}m read
-                </Badge>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete Permanently
+                  </ContextMenuItem>
+                </>
+              ) : (
+                // Normal context menu - Complete menu
+                <>
+                  <ContextMenuItem onClick={() => handleEdit(document)}>
+                    <Edit className="w-4 h-4 mr-2" />
+                    Edit
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => handleDownload(document)}>
+                    <Download className="w-4 h-4 mr-2" />
+                    Download
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => handleShare(document)}>
+                    <Share className="w-4 h-4 mr-2" />
+                    Share
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => handleMoveToFolder(document)}>
+                    <FolderPlus className="w-4 h-4 mr-2" />
+                    Move to Folder
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onClick={() => {
+                    setSelectedDocument(document);
+                    setShowCheckOutDialog(true);
+                  }}>
+                    <Lock className="w-4 h-4 mr-2" />
+                    Check Out
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => {
+                    setSelectedDocument(document);
+                    setShowTransferDialog(true);
+                  }}>
+                    <UserMinus className="w-4 h-4 mr-2" />
+                    Transfer Ownership
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => {
+                    setSelectedDocument(document);
+                    setShowComplianceDialog(true);
+                  }}>
+                    <Shield className="w-4 h-4 mr-2" />
+                    Compliance Labels
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  {offlineDocIds.has(document.id) ? (
+                    <ContextMenuItem onClick={() => handleRemoveOffline(document)}>
+                      <CloudOff className="w-4 h-4 mr-2" />
+                      Remove from Offline
+                    </ContextMenuItem>
+                  ) : (
+                    <ContextMenuItem onClick={() => handleMakeOffline(document)}>
+                      <CloudDownload className="w-4 h-4 mr-2" />
+                      Make Available Offline
+                    </ContextMenuItem>
+                  )}
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    onClick={() => initiateDelete(document)}
+                    className="text-red-600"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete
+                  </ContextMenuItem>
+                </>
               )}
-            </div>
+            </ContextMenuContent>
+          </ContextMenu>
+        ))}
 
-            {/* Processing Status */}
-            {(document.metadata as any)?.is_pending_upload ? (
-              <div className="mt-2">
-                <Badge 
-                  variant="outline"
-                  className="text-xs text-orange-600 border-orange-400 bg-orange-50"
-                >
-                  <CloudUpload className="w-3 h-3 mr-1" />
-                  Queued for Upload
-                </Badge>
-              </div>
-            ) : document.processing_status && document.processing_status !== 'completed' && (
-              <div className="mt-2">
-                <Badge 
-                  variant={
-                    document.processing_status === 'processing' ? 'secondary' : 
-                    document.processing_status === 'pending' ? 'outline' :
-                    'destructive'
-                  }
-                  className="text-xs"
-                >
-                  {document.processing_status === 'processing' ? 'AI Processing...' : 
-                   document.processing_status === 'pending' ? 'Pending Analysis' :
-                   'Processing Failed'}
-                </Badge>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-          </ContextMenuTrigger>
-          
-          {/* Right-click context menu - Full menu matching dropdown */}
-          <ContextMenuContent className="w-56">
-            <ContextMenuItem onClick={() => onDocumentClick(document)}>
-              <Eye className="w-4 h-4 mr-2" />
-              View
-            </ContextMenuItem>
-            {(document.metadata as any)?.is_deleted ? (
-              // Recycle bin context menu
-              <>
-                <ContextMenuItem onClick={() => handleRestore(document)}>
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Restore
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem 
-                  onClick={() => initiateDelete(document)}
-                  className="text-red-600"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete Permanently
-                </ContextMenuItem>
-              </>
-            ) : (
-              // Normal context menu - Complete menu
-              <>
-                <ContextMenuItem onClick={() => handleEdit(document)}>
-                  <Edit className="w-4 h-4 mr-2" />
-                  Edit
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => handleDownload(document)}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Download
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => handleShare(document)}>
-                  <Share className="w-4 h-4 mr-2" />
-                  Share
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => handleMoveToFolder(document)}>
-                  <FolderPlus className="w-4 h-4 mr-2" />
-                  Move to Folder
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={() => {
-                  setSelectedDocument(document);
-                  setShowCheckOutDialog(true);
-                }}>
-                  <Lock className="w-4 h-4 mr-2" />
-                  Check Out
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => {
-                  setSelectedDocument(document);
-                  setShowTransferDialog(true);
-                }}>
-                  <UserMinus className="w-4 h-4 mr-2" />
-                  Transfer Ownership
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => {
-                  setSelectedDocument(document);
-                  setShowComplianceDialog(true);
-                }}>
-                  <Shield className="w-4 h-4 mr-2" />
-                  Compliance Labels
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                {offlineDocIds.has(document.id) ? (
-                  <ContextMenuItem onClick={() => handleRemoveOffline(document)}>
-                    <CloudOff className="w-4 h-4 mr-2" />
-                    Remove from Offline
-                  </ContextMenuItem>
-                ) : (
-                  <ContextMenuItem onClick={() => handleMakeOffline(document)}>
-                    <CloudDownload className="w-4 h-4 mr-2" />
-                    Make Available Offline
-                  </ContextMenuItem>
-                )}
-                <ContextMenuSeparator />
-                <ContextMenuItem 
-                  onClick={() => initiateDelete(document)}
-                  className="text-red-600"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete
-                </ContextMenuItem>
-              </>
-            )}
-          </ContextMenuContent>
-        </ContextMenu>
-      ))}
-      
       </div>
       {/* End Grid */}
 
@@ -938,7 +952,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      
+
       {/* Other Dialogs */}
       {selectedDocument && (
         <>
@@ -954,7 +968,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
               });
             }}
           />
-          
+
           <TransferOwnershipDialog
             open={showTransferDialog}
             onOpenChange={setShowTransferDialog}
@@ -986,7 +1000,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
               onRefresh?.();
             }}
           />
-          
+
           <ApplyComplianceLabelDialog
             open={showComplianceDialog}
             onOpenChange={setShowComplianceDialog}

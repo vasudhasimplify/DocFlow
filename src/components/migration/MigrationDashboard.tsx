@@ -31,6 +31,7 @@ import { MigrationItemsList } from './MigrationItemsList';
 import { MigrationMetricsPanel } from './MigrationMetricsPanel';
 import { IdentityMappingPanel } from './IdentityMappingPanel';
 import { CredentialsPanel } from './CredentialsPanel';
+import { PermissionTransferLog } from './PermissionTransferLog';
 import type { MigrationJob, SourceSystem } from '@/types/migration';
 
 export function MigrationDashboard() {
@@ -209,40 +210,49 @@ export function MigrationDashboard() {
             {/* Job Details */}
             <div className="lg:col-span-2">
               {selectedJob ? (
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        {getSourceIcon(selectedJob.source_system)}
-                        <div>
-                          <CardTitle>{selectedJob.name}</CardTitle>
-                          <CardDescription>
-                            {selectedJob.source_system?.replace('_', ' ') || 'Unknown'} → SimplifyDrive
-                          </CardDescription>
+                <>
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {getSourceIcon(selectedJob.source_system)}
+                          <div>
+                            <CardTitle>{selectedJob.name}</CardTitle>
+                            <CardDescription>
+                              {selectedJob.source_system?.replace('_', ' ') || 'Unknown'} → SimplifyDrive
+                            </CardDescription>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {selectedJob.status === 'failed' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => retryFailed(selectedJob.id)}
+                            >
+                              <RotateCcw className="h-4 w-4 mr-1" />
+                              Retry Failed
+                            </Button>
+                          )}
                         </div>
                       </div>
-                      <div className="flex gap-2">
-                        {selectedJob.status === 'failed' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => retryFailed(selectedJob.id)}
-                          >
-                            <RotateCcw className="h-4 w-4 mr-1" />
-                            Retry Failed
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <MigrationItemsList
-                      items={jobItems}
+                    </CardHeader>
+                    <CardContent>
+                      <MigrationItemsList
+                        items={jobItems}
+                        isLoading={itemsLoading}
+                        job={selectedJob}
+                      />
+                    </CardContent>
+                  </Card>
+                  {/* Permission Transfer Log */}
+                  <div className="mt-4">
+                    <PermissionTransferLog
+                      auditLogs={auditLogs}
                       isLoading={itemsLoading}
-                      job={selectedJob}
                     />
-                  </CardContent>
-                </Card>
+                  </div>
+                </>
               ) : (
                 <Card>
                   <CardContent className="py-16 text-center text-muted-foreground">
@@ -279,6 +289,6 @@ export function MigrationDashboard() {
         credentials={credentials}
         isLoading={isCreating}
       />
-    </div>
+    </div >
   );
 }

@@ -14,7 +14,7 @@ interface UseDocumentsOptions {
 
 export function useDocuments(options: UseDocumentsOptions = {}) {
   const { sortBy = 'created_at', sortOrder = 'desc', selectedFolder = 'all' } = options;
-  
+
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOfflineMode, setIsOfflineMode] = useState(!navigator.onLine);
@@ -24,10 +24,10 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
   useEffect(() => {
     const handleOnline = () => setIsOfflineMode(false);
     const handleOffline = () => setIsOfflineMode(true);
-    
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -39,7 +39,7 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
     try {
       console.log('📴 Fetching offline documents from IndexedDB...');
       const offlineDocs = await getAllOfflineDocuments();
-      
+
       const processedDocuments: Document[] = offlineDocs.map((doc) => ({
         id: doc.id,
         file_name: doc.file_name,
@@ -49,8 +49,8 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         updated_at: doc.updated_at,
         extracted_text: doc.extracted_text || '',
         processing_status: doc.processing_status || 'completed',
-        metadata: { 
-          ...doc.metadata, 
+        metadata: {
+          ...doc.metadata,
           is_offline: true,
           is_pending_upload: doc.metadata?.is_pending_upload || false,
         },
@@ -60,10 +60,10 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         tags: [],
         folders: []
       }));
-      
+
       console.log('📴 Loaded', processedDocuments.length, 'offline documents (including pending uploads)');
       setDocuments(processedDocuments);
-      
+
       if (processedDocuments.length > 0) {
         const pendingCount = processedDocuments.filter(d => d.metadata?.is_pending_upload).length;
         if (pendingCount > 0) {
@@ -93,10 +93,10 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
       await fetchOfflineDocuments();
       return;
     }
-    
+
     try {
       const { data: user, error: userError } = await supabase.auth.getUser();
-      
+
       // If auth fails (network error), try offline mode
       if (userError || !user.user) {
         console.log('❌ Auth failed, falling back to offline mode:', userError?.message);
@@ -111,17 +111,17 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         console.log('🗑️ Fetching deleted documents from API...');
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
         const response = await fetch(`${API_BASE_URL}/api/v1/documents/${user.user.id}/deleted`);
-        
+
         if (!response.ok) {
           throw new Error('Failed to fetch deleted documents');
         }
-        
+
         const data = await response.json();
         console.log('🗑️ Deleted documents response:', data);
-        
+
         const processedDocuments: Document[] = (data.documents || []).map((doc: any) => {
           const displayName = doc.file_name || doc.original_name || doc.name || doc.file_path?.split('/').pop() || 'Unknown';
-          
+
           return {
             id: doc.id,
             file_name: displayName,
@@ -139,7 +139,7 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
             folders: []
           };
         });
-        
+
         console.log('🗑️ Processed deleted documents:', processedDocuments.length);
         setDocuments(processedDocuments);
         return;
@@ -147,20 +147,38 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
 
       // Otherwise fetch regular (non-deleted) documents
       console.log('📊 useDocuments: Fetching documents. selectedFolder:', selectedFolder);
-      
+
+      // First, get document IDs that are shared with this user via external_shares
+      const { data: sharedDocs } = await supabase
+        .from('external_shares')
+        .select('resource_id')
+        .eq('guest_email', user.user.email)
+        .eq('resource_type', 'document')
+        .eq('status', 'accepted');
+
+      const sharedDocIds = sharedDocs?.map(s => s.resource_id) || [];
+      console.log('📤 Found', sharedDocIds.length, 'documents shared with user');
+
+      // Build query for owned documents
       let query = supabase
         .from('documents')
         .select('*')
-        .or(`uploaded_by.eq.${user.user.id},user_id.eq.${user.user.id}`)
         .eq('is_deleted', false);
+
+      // Include both owned documents AND shared documents
+      if (sharedDocIds.length > 0) {
+        query = query.or(`uploaded_by.eq.${user.user.id},user_id.eq.${user.user.id},id.in.(${sharedDocIds.join(',')})`);
+      } else {
+        query = query.or(`uploaded_by.eq.${user.user.id},user_id.eq.${user.user.id}`);
+      }
 
       // If a specific folder is selected (not 'all' or special folders), filter by folder
       if (selectedFolder && selectedFolder !== 'all' && selectedFolder !== 'media-browser' && selectedFolder !== 'recycle-bin') {
         console.log('📁 Fetching documents for specific folder:', selectedFolder);
-        
+
         // Get document IDs from both document_shortcuts AND document_folder_relationships
         const documentIdSet = new Set<string>();
-        
+
         // Check document_shortcuts (manual assignments)
         const { data: shortcuts, error: shortcutsError } = await supabase
           .from('document_shortcuts')
@@ -172,7 +190,7 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         } else {
           shortcuts?.forEach(s => documentIdSet.add(s.document_id));
         }
-        
+
         // Check document_folder_relationships (AI-assigned)
         const { data: relationships, error: relError } = await supabase
           .from('document_folder_relationships')
@@ -217,7 +235,7 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
       // Fetch folder relationships for all documents
       const documentIds = documentsData?.map((doc: any) => doc.id) || [];
       let foldersByDocument: { [key: string]: any[] } = {};
-      
+
       if (documentIds.length > 0) {
         const { data: shortcuts } = await supabase
           .from('document_shortcuts')
@@ -245,18 +263,31 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         });
       }
 
+      // Fetch restriction counts for all documents
+      let restrictionCounts: { [key: string]: number } = {};
+      if (documentIds.length > 0) {
+        const { data: applications } = await supabase
+          .from('content_rule_applications')
+          .select('document_id')
+          .in('document_id', documentIds);
+
+        applications?.forEach((app: any) => {
+          restrictionCounts[app.document_id] = (restrictionCounts[app.document_id] || 0) + 1;
+        });
+      }
+
       // Generate signed URLs for documents with storage_path
       const documentsWithUrls = await Promise.all(
         (documentsData || []).map(async (doc: any) => {
           let storageUrl = doc.original_url || undefined;
-          
+
           // Generate signed URL from storage_path for offline downloads (valid for 1 hour)
           if (!storageUrl && doc.storage_path) {
             try {
               const { data, error } = await supabase.storage
                 .from('documents')
                 .createSignedUrl(doc.storage_path, 3600); // 1 hour expiry
-              
+
               if (!error && data?.signedUrl) {
                 storageUrl = data.signedUrl;
               }
@@ -264,14 +295,14 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
               console.warn('Failed to generate signed URL for:', doc.storage_path);
             }
           }
-          
+
           return { ...doc, storageUrl };
         })
       );
 
       const processedDocuments: Document[] = documentsWithUrls.map((doc: any) => {
         const displayName = doc.file_name || doc.original_name || doc.name || doc.file_path?.split('/').pop() || 'Unknown';
-        
+
         // Transform analysis_result from database to insights format
         const analysisResult = doc.analysis_result;
         const insights = analysisResult && Object.keys(analysisResult).length > 0 ? {
@@ -282,7 +313,7 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
           ai_generated_title: analysisResult.ai_generated_title || displayName,
           suggested_actions: analysisResult.suggested_actions || []
         } : undefined;
-        
+
         return {
           id: doc.id,
           file_name: displayName,
@@ -297,21 +328,23 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
           storage_path: doc.storage_path,
           insights: insights,
           tags: [],
-          folders: foldersByDocument[doc.id] || []
+          folders: foldersByDocument[doc.id] || [],
+          has_restrictions: (restrictionCounts[doc.id] || 0) > 0,
+          restriction_count: restrictionCounts[doc.id] || 0
         };
       });
       console.log('📊 useDocuments: Processed documents count:', processedDocuments.length);
       console.log('📊 useDocuments: Sample document:', processedDocuments[0]);
-      
+
       // Also fetch pending uploads from IndexedDB (even when online)
       // so they remain visible with "Queued for Upload" badge
       try {
         const offlineDocs = await getAllOfflineDocuments();
         const pendingUploads = offlineDocs.filter(doc => doc.metadata?.is_pending_upload);
-        
+
         if (pendingUploads.length > 0) {
           console.log('📤 Found', pendingUploads.length, 'pending uploads in IndexedDB');
-          
+
           // Convert to Document format
           const pendingDocuments: Document[] = pendingUploads.map((doc) => ({
             id: doc.id,
@@ -322,8 +355,8 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
             updated_at: doc.updated_at,
             extracted_text: doc.extracted_text || '',
             processing_status: 'pending',
-            metadata: { 
-              ...doc.metadata, 
+            metadata: {
+              ...doc.metadata,
               is_pending_upload: true,
             },
             storage_url: doc.storage_url,
@@ -332,7 +365,7 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
             tags: [],
             folders: []
           }));
-          
+
           // Merge with Supabase documents (pending uploads first)
           setDocuments([...pendingDocuments, ...processedDocuments]);
         } else {
@@ -342,11 +375,11 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         console.warn('Could not fetch pending uploads from IndexedDB:', offlineError);
         setDocuments(processedDocuments);
       }
-      
+
       setLoading(false);
     } catch (error) {
       console.error('Error fetching from server:', error);
-      
+
       // If fetch fails (network error), try offline mode
       console.log('📴 Server fetch failed, trying offline fallback...');
       try {
@@ -373,7 +406,7 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
     const totalDocs = documents.length;
     const processedDocs = documents.filter(doc => doc.processing_status === 'completed').length;
     const totalSize = documents.reduce((sum, doc) => sum + doc.file_size, 0);
-    const avgImportance = totalDocs > 0 
+    const avgImportance = totalDocs > 0
       ? documents.reduce((sum, doc) => sum + (doc.insights?.importance_score || 0), 0) / totalDocs
       : 0;
 

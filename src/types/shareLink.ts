@@ -1,6 +1,6 @@
 // ============= Enhanced Link Sharing Types =============
 
-export type ShareLinkPermission = 'view' | 'download' | 'edit';
+export type ShareLinkPermission = 'view' | 'comment' | 'download' | 'edit';
 
 export interface EnhancedShareLink {
   id: string;
@@ -31,8 +31,10 @@ export interface EnhancedShareLink {
   expires_at?: string;
 
   // Tracking
-  notify_on_access: boolean;
   track_views: boolean;
+  notify_on_access: boolean;
+
+  // Watermark settings
   watermark_enabled: boolean;
   watermark_text?: string;
 
@@ -106,8 +108,10 @@ export interface CreateShareLinkParams {
   max_uses?: number;
   expires_in_hours?: number;
 
-  // Tracking
+  // Tracking & Notifications
   notify_on_access?: boolean;
+
+  // Watermark
   watermark_enabled?: boolean;
   watermark_text?: string;
 }
@@ -123,6 +127,12 @@ export const SHARE_LINK_PERMISSION_INFO: Record<ShareLinkPermission, {
     description: 'Can view the document but cannot make changes',
     icon: 'Eye',
     color: 'hsl(var(--chart-1))'
+  },
+  comment: {
+    label: 'Can Comment',
+    description: 'Can view and add comments to the document',
+    icon: 'MessageSquare',
+    color: 'hsl(var(--chart-4))'
   },
   download: {
     label: 'Can Download',

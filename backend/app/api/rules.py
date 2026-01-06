@@ -28,8 +28,6 @@ class CreateRuleRequest(BaseModel):
     restrict_print: bool = False
     restrict_share: bool = False
     restrict_external_share: bool = False
-    watermark_required: bool = False
-    notify_on_match: bool = False
     
     is_active: bool = True
     priority: int = 100
@@ -49,8 +47,6 @@ class RuleResponse(BaseModel):
     restrict_print: bool
     restrict_share: bool
     restrict_external_share: bool
-    watermark_required: bool
-    notify_on_match: bool
     
     auto_apply_permission: Optional[str]
     auto_apply_tags: List[str]
@@ -275,48 +271,75 @@ async def match_documents_to_rule(rule_id: str, user_id: str):
         matched_count = 0
         
         for doc in documents:
-            is_match = True  # Start assuming match, then check each criterion
             matched_criteria = {}
             
             print(f"  🔍 Checking document: {doc.get('file_name')}")
             
-            # ALL criteria must match (AND logic)
-            
-            # Check file type match - REQUIRED if specified
+            # File type is a FILTER (must match if specified)
             if rule.get('file_types') and len(rule['file_types']) > 0:
                 doc_extension = doc.get('file_type', '').replace('application/', '').replace('text/', '')
                 print(f"    File type check: rule wants {rule['file_types']}, doc has '{doc_extension}'")
                 file_type_matches = any(ft.lower() in doc_extension.lower() or doc_extension.lower() in ft.lower() for ft in rule['file_types'])
                 if not file_type_matches:
-                    print(f"    ❌ File type FAILED")
-                    is_match = False
+                    print(f"    ❌ File type FAILED - skipping document")
                     continue  # Skip this document
                 print(f"    ✅ File type PASSED")
                 matched_criteria['file_type'] = doc_extension
             
-            # Check name pattern match - REQUIRED if specified
-            if is_match and rule.get('name_patterns') and len(rule['name_patterns']) > 0:
+            # Name patterns and content keywords use OR logic
+            # Document matches if EITHER name matches OR content contains keywords
+            name_pattern_matched = False
+            content_keyword_matched = False
+            
+            # Check name pattern match (optional - part of OR)
+            if rule.get('name_patterns') and len(rule['name_patterns']) > 0:
                 doc_name = doc.get('file_name', '').lower()
                 print(f"    Name pattern check: rule wants {rule['name_patterns']}, doc name is '{doc_name}'")
-                name_matches = any(pattern.lower() in doc_name for pattern in rule['name_patterns'])
-                if not name_matches:
-                    print(f"    ❌ Name pattern FAILED")
-                    is_match = False
-                    continue  # Skip this document
-                print(f"    ✅ Name pattern PASSED")
-                matched_criteria['name_patterns'] = rule['name_patterns']
+                name_pattern_matched = any(pattern.lower() in doc_name for pattern in rule['name_patterns'])
+                if name_pattern_matched:
+                    print(f"    ✅ Name pattern PASSED")
+                    matched_criteria['name_patterns'] = rule['name_patterns']
+                else:
+                    print(f"    ⚪ Name pattern not matched (will check content keywords)")
             
-            # Check content keywords - REQUIRED if specified
-            if is_match and rule.get('content_keywords') and len(rule['content_keywords']) > 0:
-                doc_content = doc.get('extracted_text', '').lower()
-                # All keywords must be present in content
-                keywords_match = all(keyword.lower() in doc_content for keyword in rule['content_keywords'])
-                if not keywords_match:
-                    is_match = False
-                    continue  # Skip this document
-                matched_criteria['content_keywords'] = rule['content_keywords']
+            # Check content keywords (optional - part of OR)
+            if rule.get('content_keywords') and len(rule['content_keywords']) > 0:
+                extracted_text = (doc.get('extracted_text') or '').lower()
+                # Also search in analysis_result (convert JSON to string for search)
+                analysis_result = doc.get('analysis_result')
+                analysis_text = ''
+                if analysis_result:
+                    import json
+                    try:
+                        analysis_text = json.dumps(analysis_result).lower()
+                    except:
+                        analysis_text = str(analysis_result).lower()
+                
+                combined_content = extracted_text + ' ' + analysis_text
+                print(f"    Content keyword check: extracted_text={len(extracted_text)} chars, analysis_result={len(analysis_text)} chars")
+                
+                # Any keyword must be present
+                content_keyword_matched = any(keyword.lower() in combined_content for keyword in rule['content_keywords'])
+                if content_keyword_matched:
+                    print(f"    ✅ Content keyword PASSED - found match in content")
+                    matched_criteria['content_keywords'] = rule['content_keywords']
+                else:
+                    print(f"    ⚪ Content keyword not matched")
             
-            # Check size range - REQUIRED if specified
+            # Determine if document matches using OR logic for name/content criteria
+            has_name_or_content_criteria = (
+                (rule.get('name_patterns') and len(rule['name_patterns']) > 0) or
+                (rule.get('content_keywords') and len(rule['content_keywords']) > 0)
+            )
+            
+            if has_name_or_content_criteria:
+                # If there are name/content criteria, at least one must match
+                is_match = name_pattern_matched or content_keyword_matched
+            else:
+                # No name/content criteria specified - match based on file type only
+                is_match = True
+            
+            # Check size range - still uses AND logic (additional filter)
             if is_match and (rule.get('size_min_bytes') or rule.get('size_max_bytes')):
                 doc_size = doc.get('file_size', 0)
                 size_matches = True
@@ -326,6 +349,7 @@ async def match_documents_to_rule(rule_id: str, user_id: str):
                     size_matches = False
                 if not size_matches:
                     is_match = False
+                    print(f"    ❌ Size check FAILED")
                     continue
                 matched_criteria['size'] = doc_size
             
@@ -349,7 +373,6 @@ async def match_documents_to_rule(rule_id: str, user_id: str):
                             'restrict_print': rule.get('restrict_print', False),
                             'restrict_share': rule.get('restrict_share', False),
                             'restrict_external_share': rule.get('restrict_external_share', False),
-                            'watermark_required': rule.get('watermark_required', False),
                         }
                     }
                     
