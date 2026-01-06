@@ -32,7 +32,7 @@ except ImportError:
 
 # Try to import Google Generative AI SDK
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_SDK_AVAILABLE = True
 except ImportError:
     GEMINI_SDK_AVAILABLE = False
@@ -53,13 +53,14 @@ class LLMClient:
             if not gemini_api_key:
                 raise RuntimeError("Missing GEMINI_API_KEY in backend/.env for gemini_direct provider")
             if not GEMINI_SDK_AVAILABLE:
-                raise RuntimeError("google-generativeai package not installed. Run: pip install google-generativeai")
+                raise RuntimeError("google-genai package not installed. Run: pip install google-genai")
             
-            # Configure Gemini SDK
-            genai.configure(api_key=gemini_api_key)
-            self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
-            self.extraction_model = "gemini-2.0-flash"
-            logger.info("🔧 Using Direct Gemini API provider (gemini-2.0-flash)")
+            # Configure Gemini SDK with new Client API
+            self.gemini_client = genai.Client(api_key=gemini_api_key)
+            # Read model from environment variable, default to gemini-2.5-flash
+            self.gemini_model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            self.extraction_model = self.gemini_model_name
+            logger.info(f"🔧 Using Direct Gemini API provider ({self.gemini_model_name})")
             
             # Set dummy values for LiteLLM (not used)
             self.litellm_api_url = ""
@@ -75,7 +76,8 @@ class LLMClient:
             self.litellm_api_key = env_vars["LITELLM_API_KEY"]
             self.litellm_header_name = env_vars["LITELLM_HEADER_NAME"]
             self.litellm_auth_scheme = env_vars["LITELLM_AUTH_SCHEME"]
-            self.gemini_model = None
+            self.gemini_client = None
+            self.gemini_model_name = None
             logger.info("🔧 Using LiteLLM provider")
             
             # Model configuration - read from .env
@@ -659,7 +661,7 @@ class LLMClient:
         """Execute the actual synchronous LLM API call"""
         try:
             # Log which provider is being used for this call
-            if self.provider == "gemini_direct" and self.gemini_model:
+            if self.provider == "gemini_direct" and self.gemini_client:
                 logger.info(f"🔧 Using Direct Gemini API for {task} (model: {model_to_use})")
                 return self._execute_gemini_direct_call(prompt, image_data, response_format, task, document_name, start_time, content_type)
             else:
@@ -830,14 +832,38 @@ class LLMClient:
                         gen_config_params["response_schema"] = gemini_schema
                         logger.debug(f"📋 Using native response_schema: {json.dumps(gemini_schema, indent=2)[:200]}...")
                     
-                    response = self.gemini_model.generate_content(
-                        content_parts,
-                        generation_config=genai.types.GenerationConfig(**gen_config_params)
+                    # Create config for new API
+                    config = genai.types.GenerateContentConfig(
+                        temperature=gen_config_params.get("temperature"),
+                        max_output_tokens=gen_config_params.get("max_output_tokens"),
+                        response_mime_type=gen_config_params.get("response_mime_type"),
+                        response_schema=gen_config_params.get("response_schema")
+                    )
+                    
+                    response = self.gemini_client.models.generate_content(
+                        model=self.gemini_model_name,
+                        contents=content_parts,
+                        config=config
                     )
                     api_duration = time.time() - api_start
                     
                     # Log timing
                     logger.info(f"⏱️ Gemini Direct API call: {api_duration:.2f}s")
+                    
+                    # Check for truncation (finish_reason)
+                    finish_reason = "stop"
+                    if response.candidates and len(response.candidates) > 0:
+                        candidate = response.candidates[0]
+                        if hasattr(candidate, 'finish_reason'):
+                            # Map Gemini finish reasons to OpenAI format
+                            gemini_finish_reason = str(candidate.finish_reason).upper()
+                            if 'MAX_TOKENS' in gemini_finish_reason or 'LENGTH' in gemini_finish_reason:
+                                finish_reason = "length"
+                                logger.warning(f"⚠️ Response was truncated due to max_tokens limit. Consider increasing LLM_MAX_OUTPUT_TOKENS.")
+                            elif 'STOP' in gemini_finish_reason:
+                                finish_reason = "stop"
+                            else:
+                                logger.info(f"📋 Finish reason: {gemini_finish_reason}")
                     
                     # Extract response text
                     response_text = response.text
@@ -846,7 +872,7 @@ class LLMClient:
                     result = {
                         "choices": [{
                             "message": {"content": response_text},
-                            "finish_reason": "stop"
+                            "finish_reason": finish_reason
                         }],
                         "usage": {
                             "prompt_tokens": response.usage_metadata.prompt_token_count if response.usage_metadata else 0,

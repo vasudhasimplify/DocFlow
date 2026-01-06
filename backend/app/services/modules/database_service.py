@@ -9,53 +9,21 @@ import os
 from datetime import datetime
 import uuid
 
-try:
-    from supabase import create_client
-    SUPABASE_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"Supabase import failed: {e}")
-    create_client = None
-    SUPABASE_AVAILABLE = False
+# Use the singleton Supabase client for connection pooling
+from app.core.supabase_client import get_supabase_client, SUPABASE_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
 class DatabaseService:
-    """Service for database operations"""
+    """Service for database operations - uses shared connection pool"""
     
     def __init__(self):
-        self.supabase = self._initialize_supabase()
-
-    def _initialize_supabase(self):
-        """Initialize Supabase client"""
-        try:
-            if not SUPABASE_AVAILABLE:
-                logger.warning("Supabase not available, database operations will be disabled")
-                return None
-
-            supabase_url = os.getenv("SUPABASE_URL")
-            supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-
-            if not supabase_url or not supabase_key:
-                logger.warning("Supabase credentials not found, database operations will be disabled")
-                return None
-
-            # Try to create client with minimal parameters to avoid proxy issues
-            try:
-                supabase = create_client(supabase_url, supabase_key)
-                logger.info("✅ Supabase client initialized successfully")
-                return supabase
-            except TypeError as e:
-                if 'proxy' in str(e):
-                    logger.warning("Supabase client proxy parameter issue, trying alternative initialization")
-                    # Try without any additional parameters
-                    supabase = create_client(supabase_url, supabase_key)
-                    return supabase
-                else:
-                    raise e
-
-        except Exception as e:
-            logger.error(f"Failed to initialize Supabase client: {e}")
-            return None
+        # Use the singleton client instead of creating a new one
+        self.supabase = get_supabase_client()
+        if self.supabase:
+            logger.debug("DatabaseService using shared Supabase client (connection pooling)")
+        else:
+            logger.warning("DatabaseService: Supabase not available")
 
     async def save_document_chunks(
         self,
@@ -382,7 +350,7 @@ class DatabaseService:
                 "storage_path": storage_path or f"inline://{uuid.uuid4()}",
                 "original_url": None,
                 "upload_source": "manual",
-                "processing_status": "completed",
+                "processing_status": "processing",  # Start as processing, will update to completed after chunks saved
                 "analysis_result": safe_result,
                 "extracted_text": extracted_text,  # Store extracted text for chatbot embeddings
                 "created_at": datetime.now().isoformat()
@@ -400,6 +368,18 @@ class DatabaseService:
             
             document_id = document_response.data[0].get("id")
             logger.info(f"✅ Document saved with ID: {document_id}")
+            
+            # Add document to processing queue (will be updated by orchestrator)
+            try:
+                from app.services.modules.processing_queue_service import ProcessingQueueService
+                queue_service = ProcessingQueueService()
+                queue_id = queue_service.create_queue_entry(document_id, user_id)
+                if queue_id:
+                    logger.info(f"✅ Document {document_id} added to processing queue with ID: {queue_id}")
+                else:
+                    logger.warning(f"⚠️ Could not add document {document_id} to processing queue")
+            except Exception as queue_error:
+                logger.warning(f"⚠️ Error adding to processing queue: {queue_error}")
             
             # Create Version 1 record in document_versions for version comparison feature
             # Use raw_pdf_text_for_versions if available (for consistent comparison with OnlyOffice edits)
@@ -436,6 +416,29 @@ class DatabaseService:
                     logger.info(f"✅ Document chunks saved successfully")
                 else:
                     logger.warning(f"⚠️ Failed to save document chunks")
+            
+            # Update processing status to completed now that everything is saved
+            try:
+                self.supabase.table("documents").update({
+                    "processing_status": "completed"
+                }).eq("id", document_id).execute()
+                logger.info(f"✅ Document {document_id} processing_status updated to 'completed'")
+                
+                # Update processing queue to completed
+                try:
+                    from app.services.modules.processing_queue_service import ProcessingQueueService
+                    queue_service = ProcessingQueueService()
+                    queue_service.mark_completed(document_id, {
+                        'extracted_text_length': len(extracted_text) if extracted_text else 0,
+                        'chunks_count': len(chunks_data) if chunks_data else 0
+                    })
+                    queue_service.update_search_index_queue(document_id, 'completed')
+                    logger.info(f"✅ Processing queue updated to completed for document {document_id}")
+                except Exception as queue_error:
+                    logger.warning(f"⚠️ Could not update processing queue: {queue_error}")
+                    
+            except Exception as status_error:
+                logger.warning(f"⚠️ Could not update processing_status: {status_error}")
             
             return {"id": document_id}
 
@@ -671,6 +674,17 @@ class DatabaseService:
             
             document_id = document_response.data[0].get("id")
             logger.info(f"✅ Failed processing record saved with ID: {document_id}")
+            
+            # Mark as failed in processing queue
+            try:
+                from app.services.modules.processing_queue_service import ProcessingQueueService
+                queue_service = ProcessingQueueService()
+                queue_service.create_queue_entry(document_id, user_id)
+                queue_service.mark_failed(document_id, error_message)
+                queue_service.update_search_index_queue(document_id, 'failed')
+                logger.info(f"✅ Processing queue marked as failed for document {document_id}")
+            except Exception as queue_error:
+                logger.warning(f"⚠️ Could not update processing queue: {queue_error}")
             
             return {"id": document_id}
             

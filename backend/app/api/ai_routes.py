@@ -6,9 +6,11 @@ from typing import Optional, Dict, Any, List
 import logging
 import os
 import json
-import google.generativeai as genai
+from google import genai
 from datetime import datetime
-from supabase import create_client, Client
+
+# Use the singleton Supabase client for connection pooling
+from app.core.supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -16,22 +18,14 @@ router = APIRouter(prefix="/api/ai", tags=["AI Analysis"])
 
 # Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+gemini_client = None
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Configure Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-supabase: Optional[Client] = None
 
-if SUPABASE_URL and SUPABASE_KEY:
-    try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        logger.info("✅ Supabase client initialized for AI routes")
-    except Exception as e:
-        logger.error(f"Failed to initialize Supabase client: {e}")
-else:
-    logger.warning("⚠️ SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured - comparison history will not be saved")
+def get_supabase():
+    """Get the shared Supabase client (connection pooling)"""
+    return get_supabase_client()
 
 
 class AIAnalyzeRequest(BaseModel):
@@ -87,6 +81,8 @@ async def analyze_with_ai(request: AIAnalyzeRequest):
     Saves the analysis to database for future retrieval.
     """
     try:
+        supabase = get_supabase()  # Get shared client
+        
         # Check for existing analysis first (for version comparisons)
         if (supabase and request.user_id and request.comparison_type == "ai" 
             and request.base_version_id and request.compare_version_id):
@@ -118,12 +114,13 @@ async def analyze_with_ai(request: AIAnalyzeRequest):
             model_used = "fallback"
         else:
             # Use Gemini for analysis
-            model = genai.GenerativeModel('gemini-2.5-flash')
-            
             system_prompt = get_system_prompt(request.context)
             full_prompt = f"{system_prompt}\n\n{request.prompt}"
             
-            response = model.generate_content(full_prompt)
+            response = gemini_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=full_prompt
+            )
             
             analysis_text = response.text if response.text else "Unable to generate analysis."
             model_used = "gemini-2.5-flash"
@@ -274,6 +271,7 @@ async def get_analysis_history(user_id: str, limit: int = 50):
     Get comparison history for a user (includes all comparisons and AI analyses).
     """
     try:
+        supabase = get_supabase()  # Get shared client
         if not supabase:
             raise HTTPException(status_code=503, detail="Database not available")
         
@@ -294,6 +292,7 @@ async def get_analysis_by_id(analysis_id: str, user_id: str):
     Get a specific comparison by ID.
     """
     try:
+        supabase = get_supabase()  # Get shared client
         if not supabase:
             raise HTTPException(status_code=503, detail="Database not available")
         
@@ -317,6 +316,7 @@ async def delete_comparison_history(comparison_id: str, user_id: str):
     Delete a specific comparison from history.
     """
     try:
+        supabase = get_supabase()  # Get shared client
         if not supabase:
             raise HTTPException(status_code=503, detail="Database not available")
         
@@ -350,6 +350,7 @@ async def get_comparison_analysis(
     Get comparison for a specific version or document comparison.
     """
     try:
+        supabase = get_supabase()  # Get shared client
         if not supabase:
             return None
         
@@ -396,6 +397,7 @@ async def save_comparison(request: SaveComparisonRequest):
     Save a comparison to history (without AI analysis).
     """
     try:
+        supabase = get_supabase()  # Get shared client
         if not supabase:
             raise HTTPException(status_code=503, detail="Database not available")
         
@@ -448,6 +450,7 @@ async def compare_versions(request: VersionCompareRequest):
     falling back to text comparison for non-structured content.
     """
     try:
+        supabase = get_supabase()  # Get shared client
         if not supabase:
             raise HTTPException(status_code=503, detail="Database not available")
         
@@ -511,6 +514,7 @@ async def delete_comparison(comparison_id: str, user_id: str):
     Delete a comparison from history.
     """
     try:
+        supabase = get_supabase()  # Get shared client
         if not supabase:
             raise HTTPException(status_code=503, detail="Database not available")
         

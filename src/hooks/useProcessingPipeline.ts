@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -17,9 +17,13 @@ export interface ProcessingQueueItem {
   progress_percent: number;
   stage_metadata: Record<string, any>;
   documents?: {
+    id?: string;
     name?: string;
     file_name?: string;
     file_type?: string;
+    processing_status?: string;
+    extracted_text?: string;
+    analysis_result?: any;
   };
 }
 
@@ -41,7 +45,15 @@ export function useProcessingPipeline() {
   const [processingQueue, setProcessingQueue] = useState<ProcessingQueueItem[]>([]);
   const [searchQueue, setSearchQueue] = useState<SearchIndexItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncStats, setSyncStats] = useState<{
+    totalDocuments: number;
+    processedDocuments: number;
+    pendingDocuments: number;
+    avgProcessingTime: number;
+    successRate: number;
+  }>({ totalDocuments: 0, processedDocuments: 0, pendingDocuments: 0, avgProcessingTime: 0, successRate: 100 });
   const { toast } = useToast();
+  const [subscriptionActive, setSubscriptionActive] = useState(false);
 
   // Fetch processing queue status
   const fetchProcessingQueue = useCallback(async () => {
@@ -50,15 +62,17 @@ export function useProcessingPipeline() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // OPTIMIZATION: Only fetch minimal document info needed for display
+      // Excludes extracted_text and analysis_result which can be MBs
       const { data, error } = await (supabase
         .from('document_processing_queue')
         .select(`
           *,
-          documents:document_id (name, file_name, file_type)
+          documents:document_id (id, file_name, file_type, processing_status)
         `)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .limit(100) as any);
+        .limit(50) as any);
 
       if (error) {
         // Table might not exist yet
@@ -85,7 +99,7 @@ export function useProcessingPipeline() {
         .from('search_index_queue')
         .select(`
           *,
-          documents:document_id (title)
+          documents:document_id (id, file_name)
         `)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
@@ -102,6 +116,170 @@ export function useProcessingPipeline() {
       console.error('Error fetching search queue:', error);
     }
   }, []);
+
+  // SYNC queue with actual document status - FIX for stuck items
+  const syncQueueWithDocuments = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      let syncedCount = 0;
+      let removedCount = 0;
+
+      // Get all queue items that aren't completed
+      const pendingItems = processingQueue.filter(
+        item => item.stage !== 'completed' && item.stage !== 'failed'
+      );
+
+      // OPTIMIZATION: Batch fetch document statuses instead of relying on joined data
+      const pendingDocIds = pendingItems.map(item => item.document_id).filter(Boolean);
+      
+      if (pendingDocIds.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      // Only fetch the fields needed to determine if processing is complete
+      const { data: docStatuses } = await (supabase
+        .from('documents')
+        .select('id, processing_status')
+        .in('id', pendingDocIds) as any);
+
+      const statusMap = new Map(docStatuses?.map((d: any) => [d.id, d]) || []);
+
+      for (const item of pendingItems) {
+        const docStatus = statusMap.get(item.document_id);
+        
+        if (!docStatus) {
+          // Document doesn't exist, remove from queue
+          await (supabase
+            .from('document_processing_queue')
+            .delete()
+            .eq('id', item.id) as any);
+          removedCount++;
+          continue;
+        }
+
+        // Determine if document is processed based on status
+        const isProcessed = docStatus.processing_status === 'completed';
+
+        if (isProcessed) {
+          // Document is actually processed, update queue to completed
+          await (supabase
+            .from('document_processing_queue')
+            .update({
+              stage: 'completed',
+              progress_percent: 100,
+              started_at: item.started_at || item.created_at,
+              completed_at: new Date().toISOString(),
+            } as any)
+            .eq('id', item.id) as any);
+          
+          // Also update search index queue
+          await (supabase
+            .from('search_index_queue')
+            .update({
+              status: 'completed',
+              processed_at: new Date().toISOString(),
+            } as any)
+            .eq('document_id', item.document_id) as any);
+          
+          syncedCount++;
+        }
+      }
+
+      await fetchProcessingQueue();
+      await fetchSearchQueue();
+
+      if (syncedCount > 0 || removedCount > 0) {
+        toast({
+          title: "Queue synchronized",
+          description: `${syncedCount} items marked complete, ${removedCount} orphaned items removed.`,
+        });
+      } else {
+        toast({
+          title: "Queue is in sync",
+          description: "All queue items match document status.",
+        });
+      }
+    } catch (error: any) {
+      console.error('Error syncing queue:', error);
+      toast({
+        title: "Sync failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [processingQueue, fetchProcessingQueue, fetchSearchQueue, toast]);
+
+  // Clear all completed items from queue
+  const clearCompleted = useCallback(async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      await (supabase
+        .from('document_processing_queue')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('stage', 'completed') as any);
+
+      await (supabase
+        .from('search_index_queue')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('status', 'completed') as any);
+
+      await fetchProcessingQueue();
+      await fetchSearchQueue();
+
+      toast({
+        title: "Cleared completed",
+        description: "All completed items removed from queue.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error clearing",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  }, [fetchProcessingQueue, fetchSearchQueue, toast]);
+
+  // Clear all items from queue
+  const clearAll = useCallback(async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      await (supabase
+        .from('document_processing_queue')
+        .delete()
+        .eq('user_id', user.id) as any);
+
+      await (supabase
+        .from('search_index_queue')
+        .delete()
+        .eq('user_id', user.id) as any);
+
+      await fetchProcessingQueue();
+      await fetchSearchQueue();
+
+      toast({
+        title: "Queue cleared",
+        description: "All items removed from processing queue.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error clearing queue",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  }, [fetchProcessingQueue, fetchSearchQueue, toast]);
 
   // Add document to processing queue
   const queueDocumentForProcessing = useCallback(async (
@@ -318,10 +496,70 @@ export function useProcessingPipeline() {
     }
   }, [processingQueue, fetchProcessingQueue, fetchSearchQueue, toast]);
 
+  // Setup real-time subscription and event listeners
+  useEffect(() => {
+    const setupSubscription = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || subscriptionActive) return;
+
+      // Subscribe to processing queue changes
+      const channel = supabase
+        .channel('processing_queue_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'document_processing_queue',
+            filter: `user_id=eq.${user.id}`,
+          },
+          (payload) => {
+            console.log('🔄 Processing queue changed:', payload);
+            fetchProcessingQueue();
+            fetchSearchQueue();
+          }
+        )
+        .subscribe();
+
+      setSubscriptionActive(true);
+
+      // Listen for upload events to refresh immediately
+      const handleUploadStarted = () => {
+        console.log('📤 Upload started - refreshing queue');
+        fetchProcessingQueue();
+        fetchSearchQueue();
+      };
+
+      const handleUploadCompleted = () => {
+        console.log('✅ Upload completed - refreshing queue');
+        setTimeout(() => {
+          fetchProcessingQueue();
+          fetchSearchQueue();
+        }, 500);
+      };
+
+      window.addEventListener('upload-started', handleUploadStarted);
+      window.addEventListener('upload-completed', handleUploadCompleted);
+
+      return () => {
+        channel.unsubscribe();
+        window.removeEventListener('upload-started', handleUploadStarted);
+        window.removeEventListener('upload-completed', handleUploadCompleted);
+        setSubscriptionActive(false);
+      };
+    };
+
+    const cleanup = setupSubscription();
+    return () => {
+      cleanup.then(fn => fn?.());
+    };
+  }, [fetchProcessingQueue, fetchSearchQueue, subscriptionActive]);
+
   return {
     processingQueue,
     searchQueue,
     loading,
+    syncStats,
     queueDocumentForProcessing,
     queueForSearchIndex,
     getDocumentStatus,
@@ -330,6 +568,9 @@ export function useProcessingPipeline() {
     cancelProcessing,
     simulateProcessing,
     simulateFullProcessing,
+    syncQueueWithDocuments,
+    clearCompleted,
+    clearAll,
     refresh: () => {
       fetchProcessingQueue();
       fetchSearchQueue();

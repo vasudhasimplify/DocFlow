@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     
     # LLM Output Configuration
+    # Gemini 2.5 Flash supports up to 65536 output tokens
+    # Increase this if you see JSON truncation errors
     LLM_MAX_OUTPUT_TOKENS: int = 16384  # Max output tokens for LLM responses (increase for complex pages)
 
     # Supabase Configuration (read from backend/.env)

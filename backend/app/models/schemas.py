@@ -7,6 +7,7 @@ class DocumentAnalysisRequest(BaseModel):
     documentName: Optional[str] = None
     userId: Optional[str] = None
     saveToDatabase: bool = False
+    documentId: Optional[str] = None  # If provided, update existing document instead of creating new
     enhancedTemplates: Optional[List[Dict[str, Any]]] = None
     maxWorkers: Optional[int] = None  # Number of parallel async workers for LLM API calls (I/O-bound)
     maxThreads: Optional[int] = None  # Number of parallel threads for PDF conversion (CPU-bound)

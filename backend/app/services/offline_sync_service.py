@@ -165,8 +165,10 @@ class OfflineSyncService:
         
         logger.info(f"🔧 Resolving conflict for document {document_id} with strategy: {resolution}")
         
-        # Get current server version
-        response = self.supabase.table('documents').select('*').eq('id', document_id).eq('user_id', user_id).single().execute()
+        # Get current server version - OPTIMIZATION: Only fetch needed fields for conflict resolution
+        response = self.supabase.table('documents').select(
+            'id, file_name, file_type, file_size, created_at, updated_at, processing_status, metadata, storage_url, storage_path, user_id'
+        ).eq('id', document_id).eq('user_id', user_id).single().execute()
         
         if not response.data:
             raise ValueError(f"Document {document_id} not found")

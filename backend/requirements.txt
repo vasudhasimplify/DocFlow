@@ -42,7 +42,7 @@ supabase-functions==2.24.0
 propcache==0.4.1
 pycparser==2.23
 pydantic-core==2.41.5
-pydantic-settings==2.1.0
+pydantic-settings>=2.3
 pydantic==2.12.4
 email-validator>=2.0.0
 pymupdf
@@ -64,7 +64,7 @@ watchfiles==1.1.1
 websockets==15.0.1
 yarl==1.22.0
 langsmith==0.1.129
-google-generativeai>=0.8.0
+google-genai>=1.0.0
 
 # Google Drive Migration
 google-api-python-client==2.108.0

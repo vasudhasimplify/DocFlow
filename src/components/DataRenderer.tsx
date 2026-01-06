@@ -883,6 +883,11 @@ export const DataRenderer: React.FC<DataRendererProps> = ({
             }
           } else {
             parsedValue.forEach((item, idx) => {
+              // Skip null/undefined items that might come from malformed JSON
+              if (!item || typeof item !== 'object') {
+                console.warn(`Skipping invalid item at index ${idx}:`, item);
+                return;
+              }
               const subsectionFields: Array<{ name: string; originalName?: string; value: any }> = [];
               Object.entries(item as Record<string, any>).forEach(([k, v]) => {
                 if (isSectionTitleKey(k)) return;

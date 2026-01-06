@@ -47,6 +47,7 @@ class DocumentAnalysisService:
         templates: Optional[List[Dict[str, Any]]] = None,
         save_to_database: bool = True,
         user_id: Optional[str] = None,
+        document_id: Optional[str] = None,  # If provided, document already exists - skip creating new
         max_workers: Optional[int] = None,
         max_threads: Optional[int] = None,
         yolo_signature_enabled: Optional[bool] = None,
@@ -102,6 +103,8 @@ class DocumentAnalysisService:
             # AUTO-SAVE: Save extracted data immediately WITH vector embeddings
             # Generate embeddings for semantic search and chatbot querying
             # ALL embeddings are stored in document_chunks table (no duplicates)
+            # If document_id is provided, the document already exists (created by frontend)
+            # so we UPDATE instead of creating a new one (prevents duplicate queue entries)
             # =========================================================================
             auto_saved_document = None
             chunks_data = None
@@ -143,15 +146,30 @@ class DocumentAnalysisService:
                             logger.error(f"❌ Error generating vector embedding: {e}")
                             chunks_data = None
                     
-                    logger.info("💾 AUTO-SAVE: Saving extracted data to database (with embeddings)...")
-                    auto_saved_document = await self.database_service.save_document_to_database(
-                        document_data, processed_result, task, user_id, document_name, 
-                        chunks_data=chunks_data  # All embeddings go to document_chunks table
-                    )
-                    if auto_saved_document:
-                        logger.info(f"✅ AUTO-SAVE: Document saved with ID: {auto_saved_document.get('id')}")
+                    # If document_id is provided, document already exists (created by frontend)
+                    # Update it instead of creating a new one (avoids duplicate queue entries)
+                    if document_id:
+                        logger.info(f"💾 AUTO-SAVE: Updating existing document {document_id} (frontend already created it)")
+                        auto_saved_document = await self.database_service.update_document_in_database(
+                            document_id=document_id,
+                            result=processed_result,
+                            user_id=user_id,
+                            chunks_data=chunks_data
+                        )
+                        if auto_saved_document:
+                            logger.info(f"✅ AUTO-SAVE: Document {document_id} updated successfully")
+                        else:
+                            logger.warning(f"⚠️ AUTO-SAVE: Failed to update document {document_id}")
                     else:
-                        logger.warning("⚠️ AUTO-SAVE: Failed to save document")
+                        logger.info("💾 AUTO-SAVE: Saving new document to database (with embeddings)...")
+                        auto_saved_document = await self.database_service.save_document_to_database(
+                            document_data, processed_result, task, user_id, document_name, 
+                            chunks_data=chunks_data  # All embeddings go to document_chunks table
+                        )
+                        if auto_saved_document:
+                            logger.info(f"✅ AUTO-SAVE: Document saved with ID: {auto_saved_document.get('id')}")
+                        else:
+                            logger.warning("⚠️ AUTO-SAVE: Failed to save document")
                 except Exception as e:
                     logger.error(f"❌ AUTO-SAVE error: {e}")
                     auto_saved_document = None
@@ -196,13 +214,16 @@ class DocumentAnalysisService:
                     manual_chunks_data = None
                 
                 # If auto-save already happened, update with new embeddings; otherwise save fresh
-                if auto_saved_document and auto_saved_document.get("id"):
+                # Also handle case where document_id was provided from frontend
+                target_document_id = (auto_saved_document.get("id") if auto_saved_document else None) or document_id
+                
+                if target_document_id:
                     # Update existing document with new embeddings (user may have edited data)
                     manual_saved_document = await self.database_service.update_document_in_database(
-                        auto_saved_document["id"], processed_result, user_id, manual_chunks_data
+                        target_document_id, processed_result, user_id, manual_chunks_data
                     )
                 else:
-                    # Save fresh with embeddings
+                    # Save fresh with embeddings (no existing document)
                     manual_saved_document = await self.database_service.save_document_to_database(
                         document_data, processed_result, task, user_id, document_name, manual_chunks_data
                     )

@@ -469,33 +469,18 @@ class OnlyOfficeCallback(BaseModel):
 async def save_document_to_supabase(document_id: str, file_bytes: bytes, file_name: str):
     """Save the edited document to Supabase as a new version"""
     import os
-    from supabase import create_client
     from datetime import datetime
     import uuid
-    from dotenv import load_dotenv
     
-    # Load .env file
-    load_dotenv()
+    # Use the singleton Supabase client for connection pooling
+    from app.core.supabase_client import get_supabase_client
     
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
-    
-    # Try loading from parent directory .env if not found
-    if not supabase_url or not supabase_key:
-        import pathlib
-        parent_env = pathlib.Path(__file__).parent.parent.parent.parent / '.env'
-        if parent_env.exists():
-            load_dotenv(parent_env)
-            supabase_url = os.getenv("VITE_SUPABASE_URL")
-            supabase_key = os.getenv("VITE_SUPABASE_ANON_KEY")
-    
-    if not supabase_url or not supabase_key:
-        logger.error(f"Supabase credentials not found. URL: {bool(supabase_url)}, Key: {bool(supabase_key)}")
-        logger.error(f"Checked env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_SERVICE_KEY, SUPABASE_KEY")
+    supabase = get_supabase_client()
+    if not supabase:
+        logger.error("Supabase client not available")
         return False
     
-    logger.info(f"Connecting to Supabase: {supabase_url[:30]}...")
-    supabase = create_client(supabase_url, supabase_key)
+    logger.info("Using shared Supabase client (connection pooling)")
     
     try:
         # Get current document info

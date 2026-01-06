@@ -166,6 +166,27 @@ export const deleteOfflineDocument = async (id: string): Promise<void> => {
   await database.delete('documents', id);
 };
 
+// Clear old stuck pending uploads (older than maxAgeMs, default 1 hour)
+export const clearOldPendingUploads = async (maxAgeMs: number = 60 * 60 * 1000): Promise<number> => {
+  const database = await initOfflineDB();
+  const docs = await database.getAll('documents');
+  const now = Date.now();
+  let cleared = 0;
+  
+  for (const doc of docs) {
+    if (doc.metadata?.is_pending_upload) {
+      const createdAt = new Date(doc.created_at).getTime();
+      if (now - createdAt > maxAgeMs) {
+        await database.delete('documents', doc.id);
+        cleared++;
+        console.log('🗑️ Cleared old stuck pending upload:', doc.file_name);
+      }
+    }
+  }
+  
+  return cleared;
+};
+
 export const toggleDocumentFavorite = async (id: string): Promise<void> => {
   const database = await initOfflineDB();
   const doc = await database.get('documents', id);
