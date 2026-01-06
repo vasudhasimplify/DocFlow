@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -53,6 +53,7 @@ export function useProcessingPipeline() {
     successRate: number;
   }>({ totalDocuments: 0, processedDocuments: 0, pendingDocuments: 0, avgProcessingTime: 0, successRate: 100 });
   const { toast } = useToast();
+  const [subscriptionActive, setSubscriptionActive] = useState(false);
 
   // Fetch processing queue status
   const fetchProcessingQueue = useCallback(async () => {
@@ -61,15 +62,17 @@ export function useProcessingPipeline() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // OPTIMIZATION: Only fetch minimal document info needed for display
+      // Excludes extracted_text and analysis_result which can be MBs
       const { data, error } = await (supabase
         .from('document_processing_queue')
         .select(`
           *,
-          documents:document_id (id, file_name, file_type, processing_status, extracted_text, analysis_result)
+          documents:document_id (id, file_name, file_type, processing_status)
         `)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .limit(100) as any);
+        .limit(50) as any);
 
       if (error) {
         // Table might not exist yet
@@ -96,7 +99,7 @@ export function useProcessingPipeline() {
         .from('search_index_queue')
         .select(`
           *,
-          documents:document_id (title)
+          documents:document_id (id, file_name)
         `)
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
@@ -129,11 +132,26 @@ export function useProcessingPipeline() {
         item => item.stage !== 'completed' && item.stage !== 'failed'
       );
 
+      // OPTIMIZATION: Batch fetch document statuses instead of relying on joined data
+      const pendingDocIds = pendingItems.map(item => item.document_id).filter(Boolean);
+      
+      if (pendingDocIds.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      // Only fetch the fields needed to determine if processing is complete
+      const { data: docStatuses } = await (supabase
+        .from('documents')
+        .select('id, processing_status')
+        .in('id', pendingDocIds) as any);
+
+      const statusMap = new Map(docStatuses?.map((d: any) => [d.id, d]) || []);
+
       for (const item of pendingItems) {
-        // Check actual document status
-        const doc = item.documents;
+        const docStatus = statusMap.get(item.document_id);
         
-        if (!doc || !doc.id) {
+        if (!docStatus) {
           // Document doesn't exist, remove from queue
           await (supabase
             .from('document_processing_queue')
@@ -143,10 +161,8 @@ export function useProcessingPipeline() {
           continue;
         }
 
-        // Determine actual processing status based on document data
-        const hasExtractedText = doc.extracted_text && doc.extracted_text.length > 0;
-        const hasAnalysisResult = doc.analysis_result && Object.keys(doc.analysis_result).length > 0;
-        const isProcessed = doc.processing_status === 'completed' || hasExtractedText || hasAnalysisResult;
+        // Determine if document is processed based on status
+        const isProcessed = docStatus.processing_status === 'completed';
 
         if (isProcessed) {
           // Document is actually processed, update queue to completed
@@ -479,6 +495,65 @@ export function useProcessingPipeline() {
       console.error('Error completing processing:', error);
     }
   }, [processingQueue, fetchProcessingQueue, fetchSearchQueue, toast]);
+
+  // Setup real-time subscription and event listeners
+  useEffect(() => {
+    const setupSubscription = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || subscriptionActive) return;
+
+      // Subscribe to processing queue changes
+      const channel = supabase
+        .channel('processing_queue_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'document_processing_queue',
+            filter: `user_id=eq.${user.id}`,
+          },
+          (payload) => {
+            console.log('🔄 Processing queue changed:', payload);
+            fetchProcessingQueue();
+            fetchSearchQueue();
+          }
+        )
+        .subscribe();
+
+      setSubscriptionActive(true);
+
+      // Listen for upload events to refresh immediately
+      const handleUploadStarted = () => {
+        console.log('📤 Upload started - refreshing queue');
+        fetchProcessingQueue();
+        fetchSearchQueue();
+      };
+
+      const handleUploadCompleted = () => {
+        console.log('✅ Upload completed - refreshing queue');
+        setTimeout(() => {
+          fetchProcessingQueue();
+          fetchSearchQueue();
+        }, 500);
+      };
+
+      window.addEventListener('upload-started', handleUploadStarted);
+      window.addEventListener('upload-completed', handleUploadCompleted);
+
+      return () => {
+        channel.unsubscribe();
+        window.removeEventListener('upload-started', handleUploadStarted);
+        window.removeEventListener('upload-completed', handleUploadCompleted);
+        setSubscriptionActive(false);
+      };
+    };
+
+    const cleanup = setupSubscription();
+    return () => {
+      cleanup.then(fn => fn?.());
+    };
+  }, [fetchProcessingQueue, fetchSearchQueue, subscriptionActive]);
 
   return {
     processingQueue,

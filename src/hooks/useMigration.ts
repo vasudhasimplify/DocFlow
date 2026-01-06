@@ -19,8 +19,10 @@ export function useMigration() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [isPollingEnabled, setIsPollingEnabled] = useState(false); // OPTIMIZATION: Only poll when actively viewing
 
   // Fetch all migration jobs from backend API
+  // OPTIMIZATION: Only poll when user is on migration page and has active jobs
   const { data: jobs = [], isLoading: jobsLoading, refetch: refetchJobs } = useQuery({
     queryKey: ['migration-jobs'],
     queryFn: async () => {
@@ -37,7 +39,7 @@ export function useMigration() {
       const data = await response.json();
       return data as MigrationJob[];
     },
-    refetchInterval: 3000  // Poll every 3 seconds to catch status updates
+    refetchInterval: isPollingEnabled ? 5000 : false  // OPTIMIZATION: Only poll when enabled, increased to 5s
   });
 
   // Fetch items for selected job
@@ -48,16 +50,16 @@ export function useMigration() {
 
       const { data, error } = await supabase
         .from('migration_items')
-        .select('*')
+        .select('id, job_id, source_path, destination_path, status, file_size, mime_type, error_message, created_at, processed_at')
         .eq('job_id', selectedJobId)
         .order('created_at', { ascending: false })
-        .limit(100);
+        .limit(50);
 
       if (error) throw error;
       return data as MigrationItem[];
     },
     enabled: !!selectedJobId,
-    refetchInterval: 3000  // Poll every 3 seconds
+    refetchInterval: isPollingEnabled && selectedJobId ? 5000 : false  // OPTIMIZATION: Conditional polling
   });
 
   // Fetch metrics for selected job
@@ -71,13 +73,13 @@ export function useMigration() {
         .select('*')
         .eq('job_id', selectedJobId)
         .order('recorded_at', { ascending: false })
-        .limit(60);
+        .limit(30);
 
       if (error) throw error;
       return data as MigrationMetrics[];
     },
     enabled: !!selectedJobId,
-    refetchInterval: 5000
+    refetchInterval: isPollingEnabled && selectedJobId ? 10000 : false  // OPTIMIZATION: Increased to 10s
   });
 
   // Fetch audit logs
@@ -368,6 +370,11 @@ export function useMigration() {
     saveIdentityMapping: saveIdentityMappingMutation.mutate,
     refetchJobs,
     refetchItems,
+    
+    // OPTIMIZATION: Polling control - call when entering/leaving migration page
+    enablePolling: () => setIsPollingEnabled(true),
+    disablePolling: () => setIsPollingEnabled(false),
+    isPollingEnabled,
 
     // Helpers
     getJobStats,

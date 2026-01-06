@@ -10,51 +10,26 @@ from datetime import datetime
 import json
 from dotenv import load_dotenv
 
-try:
-    from supabase import create_client
-except Exception:  # pragma: no cover
-    create_client = None  # type: ignore
+# Use the singleton Supabase client for connection pooling
+from app.core.supabase_client import get_supabase_client
 
 from .embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
 class SemanticSearchService:
-    """Service for semantic search using vector embeddings."""
+    """Service for semantic search using vector embeddings - uses shared connection pool."""
     
     def __init__(self):
         """Initialize the semantic search service."""
-        self.supabase = self._initialize_supabase()
+        # Use the singleton client instead of creating a new one
+        self.supabase = get_supabase_client()
         self.embedding_service = EmbeddingService()
         
-        logger.info("✅ SemanticSearchService initialized")
-    
-    def _initialize_supabase(self):
-        """Initialize Supabase client."""
-        try:
-            # Load environment variables from backend/.env file
-            backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            env_file_path = os.path.join(backend_dir, ".env")
-            load_dotenv(env_file_path)
-            
-            supabase_url = os.getenv("SUPABASE_URL")
-            supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-            
-            if not supabase_url or not supabase_key:
-                logger.warning("Supabase credentials not found, semantic search will be disabled")
-                return None
-            
-            if create_client is None:
-                logger.warning("Supabase client not available, semantic search will be disabled")
-                return None
-            
-            supabase = create_client(supabase_url, supabase_key)
-            logger.info("✅ Supabase client initialized for semantic search")
-            return supabase
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize Supabase client: {e}")
-            return None
+        if self.supabase:
+            logger.info("✅ SemanticSearchService using shared Supabase client (connection pooling)")
+        else:
+            logger.warning("SemanticSearchService: Supabase not available")
     
     async def search_documents(
         self,
@@ -234,7 +209,10 @@ class SemanticSearchService:
         try:
             logger.info("🔄 Falling back to text search")
             
-            query = self.supabase.table("documents").select("*").eq("user_id", user_id)
+            # OPTIMIZATION: Only select needed columns, exclude large text fields
+            query = self.supabase.table("documents").select(
+                "id, file_name, file_type, file_size, created_at, updated_at, processing_status, metadata, storage_url, storage_path"
+            ).eq("user_id", user_id)
             
             if filters:
                 if filters.get("file_type"):

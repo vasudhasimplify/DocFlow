@@ -24,11 +24,13 @@ def calculate_and_log_cost(usage: Dict[str, int], model_name: str = "Gemini 2.5 
         usage: Dictionary with 'prompt_tokens', 'completion_tokens', and 'total_tokens'
         model_name: Name of the model being used (default: "Gemini 2.5 Flash")
     """
-    # Gemini 2.5 Flash pricing: Input tokens: $0.10 per million, Output tokens: $0.40 per million
+    # Gemini 2.5 Flash pricing (Official - January 2026)
+    # Input: $0.30 per 1M tokens
+    # Output: $2.50 per 1M tokens
     # Exchange rate: 1 USD = 83.5 INR (approximate, can be updated)
     USD_TO_INR_RATE = 83.5
-    INPUT_COST_PER_MILLION_USD = 0.10
-    OUTPUT_COST_PER_MILLION_USD = 0.40
+    INPUT_COST_PER_MILLION_USD = 0.30
+    OUTPUT_COST_PER_MILLION_USD = 2.50
     
     prompt_tokens = usage.get("prompt_tokens", 0)
     completion_tokens = usage.get("completion_tokens", 0)

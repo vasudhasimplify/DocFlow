@@ -43,17 +43,14 @@ class TransferResponse(BaseModel):
 # ============================================================================
 
 def get_supabase_client():
-    """Get Supabase client from app state"""
-    from supabase import create_client
-    import os
+    """Get shared Supabase client (connection pooling)"""
+    from app.core.supabase_client import get_supabase_client as _get_client
     
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY")
-    
-    if not supabase_url or not supabase_key:
+    client = _get_client()
+    if not client:
         raise HTTPException(status_code=500, detail="Supabase not configured")
     
-    return create_client(supabase_url, supabase_key)
+    return client
 
 
 async def get_current_user_id(request) -> str:

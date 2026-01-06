@@ -233,20 +233,114 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
 
       updateFileStatus(uploadFile.id, { status: 'processing', progress: 50 });
 
-      // Determine if we need backend processing (RAG or Classification)
-      const needsBackendProcessing = enableRAG || enableClassification;
+      // CREATE DOCUMENT RECORD FIRST (so we have document_id for queue)
+      // This allows us to add to processing queue immediately
       let documentData: any = null;
       let extractedText = '';
+      
+      // Determine document type
+      const docType = getDocumentType(uploadFile.file.type);
+      
+      // Create initial document record
+      const { data: initialDoc, error: docError } = await supabase
+        .from('documents')
+        .insert({
+          file_name: uploadFile.file.name,
+          storage_path: uploadData.path,
+          file_size: uploadFile.file.size,
+          file_type: uploadFile.file.type || 'application/octet-stream',
+          document_type: docType,
+          user_id: user.user.id,
+          extracted_text: '',
+          upload_source: 'manual',
+          processing_status: 'processing',
+          metadata: {
+            originalFileName: uploadFile.file.name,
+            uploadedAt: new Date().toISOString(),
+            fileSize: uploadFile.file.size,
+            mimeType: uploadFile.file.type,
+          }
+        })
+        .select()
+        .single();
+
+      if (docError || !initialDoc) {
+        throw new Error(`Failed to create document record: ${docError?.message}`);
+      }
+
+      documentData = initialDoc;
+      console.log('📄 Document record created:', documentData.id);
+
+      // ADD TO PROCESSING QUEUE IMMEDIATELY (before processing starts)
+      // Check for existing entry first to prevent duplicates
+      try {
+        const { data: existingQueueEntry } = await supabase
+          .from('document_processing_queue')
+          .select('id')
+          .eq('document_id', documentData.id)
+          .maybeSingle();
+
+        if (!existingQueueEntry) {
+          const { error: queueError } = await supabase
+            .from('document_processing_queue')
+            .insert({
+              document_id: documentData.id,
+              user_id: user.user.id,
+              stage: 'uploaded',
+              priority: 100,
+              progress_percent: 0,
+              stage_metadata: {}
+            });
+
+          if (queueError) {
+            console.warn('Could not add to processing queue:', queueError);
+          } else {
+            console.log('✅ Added to processing queue:', documentData.id);
+          }
+        } else {
+          console.log('📋 Queue entry already exists for:', documentData.id);
+        }
+
+        // Also add to search index queue (check for existing first)
+        const { data: existingSearchEntry } = await supabase
+          .from('search_index_queue')
+          .select('id')
+          .eq('document_id', documentData.id)
+          .maybeSingle();
+
+        if (!existingSearchEntry) {
+          await supabase
+            .from('search_index_queue')
+            .insert({
+              document_id: documentData.id,
+              user_id: user.user.id,
+              operation: 'index',
+              status: 'pending',
+              priority: 100
+            });
+        }
+      } catch (queueAddError) {
+        console.warn('Error adding to queue:', queueAddError);
+      }
+
+      // Determine if we need backend processing (RAG or Classification)
+      const needsBackendProcessing = enableRAG || enableClassification;
       let extractedData: any = null;
 
       if (needsBackendProcessing) {
-        // Backend will handle document save with processing, embeddings, and classification
+        // Backend will process and update the document
         try {
           updateFileStatus(uploadFile.id, { status: 'processing', progress: 55 });
           
-          // Dispatch event to show processing banner
-          console.log('📤 Dispatching upload-started event (backend processing)');
-          window.dispatchEvent(new CustomEvent('upload-started', { detail: { count: 1 } }));
+          // NOTE: Don't dispatch upload-started here - the document with processing_status='processing'
+          // will already be counted in SimplifyDrive's processingDocs array
+          console.log('📤 Backend processing started (will be counted via processing_status)');
+
+          // Update queue stage to text_extraction
+          await supabase
+            .from('document_processing_queue')
+            .update({ stage: 'text_extraction', progress_percent: 33 })
+            .eq('document_id', documentData.id);
 
           // Convert file to base64
           const reader = new FileReader();
@@ -255,7 +349,7 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
             reader.readAsDataURL(uploadFile.file);
           });
 
-          // Start backend analysis (don't await yet)
+          // Call backend with document_id for queue updates
           const analysisPromise = fetch(`${API_BASE_URL}/api/v1/analyze-document`, {
             method: 'POST',
             headers: {
@@ -264,29 +358,29 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
             body: JSON.stringify({
               documentData: fileBase64,
               documentName: uploadFile.file.name,
-              task: 'without_template_extraction', // Extraction without template matching
+              task: 'without_template_extraction',
               userId: user.user.id,
-              saveToDatabase: true, // Backend saves when RAG/classification enabled
+              saveToDatabase: true,
+              documentId: documentData.id, // Pass document_id for backend to update
               yoloSignatureEnabled: false,
               yoloFaceEnabled: false
             }),
           });
           
-          // Trigger documents-changed event immediately to show processing status
+          // Trigger documents-changed event immediately
           setTimeout(() => {
             window.dispatchEvent(new Event('documents-changed'));
           }, 500);
           
-          // Now wait for the analysis to complete
           const analysisResponse = await analysisPromise;
 
           if (analysisResponse.ok) {
             const analysisResult = await analysisResponse.json();
             extractedData = analysisResult.extractedData || {};
             extractedText = analysisResult.extractedText || '';
-            documentData = analysisResult.savedDocument; // Get document saved by backend
-            console.log('Document processed and saved by backend:', {
-              documentId: documentData?.id,
+            // Document already exists, backend updated it
+            console.log('Document processed by backend:', {
+              documentId: documentData.id,
               textLength: extractedText.length,
               hasData: !!extractedData
             });
@@ -298,12 +392,11 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
           throw new Error(`Backend processing failed: ${analysisError.message}`);
         }
       } else {
-        // Simple upload: Frontend saves directly without backend processing
-        // Dispatch event to show processing banner for simple uploads too
+        // Simple upload: No backend processing, just update document status
         console.log('📤 Dispatching upload-started event (simple upload)');
         window.dispatchEvent(new CustomEvent('upload-started', { detail: { count: 1 } }));
         
-        // Try to extract text locally for better auto-classification
+        // Try to extract text locally
         try {
           extractedText = await extractTextFromFile(uploadFile.file);
         } catch (e) {
@@ -312,41 +405,21 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
 
         updateFileStatus(uploadFile.id, { progress: 70 });
 
-        // Get relative path for folder uploads
-        const relativePath = (uploadFile.file as any).webkitRelativePath || '';
-
-        // Save document to database directly from frontend
-        const { data: insertedData, error: insertError } = await supabase
+        // Update document with extracted text
+        await supabase
           .from('documents')
-          .insert({
-            file_name: uploadFile.file.name,
-            storage_path: uploadData.path,
-            file_size: uploadFile.file.size,
-            file_type: uploadFile.file.type || 'application/octet-stream',
-            document_type: getDocumentType(uploadFile.file.type),
-            user_id: user.user.id,
+          .update({
             extracted_text: extractedText || '',
-            upload_source: 'manual',
             processing_status: 'pending',
             metadata: {
-              originalFileName: uploadFile.file.name,
-              uploadedAt: new Date().toISOString(),
-              fileSize: uploadFile.file.size,
-              mimeType: uploadFile.file.type,
-              relativePath: relativePath,
+              ...(documentData.metadata || {}),
               ragEnabled: false,
               classificationEnabled: false
             }
           })
-          .select()
-          .single();
+          .eq('id', documentData.id);
 
-        if (insertError) {
-          throw new Error(`Database save failed: ${insertError.message}`);
-        }
-
-        documentData = insertedData;
-        console.log('Document saved by frontend (simple upload):', documentData?.id);
+        console.log('Document updated (simple upload):', documentData.id);
 
         // Create Version 1 record
         try {
@@ -483,6 +556,31 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
         });
       } catch (ruleErr) {
         console.error('Failed to apply access rules:', ruleErr);
+      }
+
+      // Mark processing queue as completed
+      try {
+        await supabase
+          .from('document_processing_queue')
+          .update({
+            stage: 'completed',
+            progress_percent: 100,
+            completed_at: new Date().toISOString()
+          })
+          .eq('document_id', documentData.id);
+        
+        // Also update search index queue
+        await supabase
+          .from('search_index_queue')
+          .update({
+            status: 'completed',
+            processed_at: new Date().toISOString()
+          })
+          .eq('document_id', documentData.id);
+          
+        console.log('✅ Processing queue marked as completed for:', documentData.id);
+      } catch (queueUpdateError) {
+        console.warn('Could not update processing queue:', queueUpdateError);
       }
 
       updateFileStatus(uploadFile.id, {

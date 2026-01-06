@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, DragEvent } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -85,17 +85,105 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [editingFolder, setEditingFolder] = useState<SmartFolder | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [recycleBinCount, setRecycleBinCount] = useState(0);
   const { toast } = useToast();
+
+  // Handle drop on folder
+  const handleDrop = async (e: DragEvent<HTMLDivElement>, folderId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverFolderId(null);
+    
+    try {
+      const data = JSON.parse(e.dataTransfer.getData('application/json'));
+      if (!data.documentId) return;
+      
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) {
+        toast({
+          title: "Error",
+          description: "Please log in to move documents",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Check if document is already in folder
+      const { data: existing } = await supabase
+        .from('document_shortcuts')
+        .select('id')
+        .eq('document_id', data.documentId)
+        .eq('folder_id', folderId)
+        .single();
+
+      if (existing) {
+        toast({
+          title: "Already in Folder",
+          description: "This document is already in this folder",
+        });
+        return;
+      }
+
+      // Add document to folder
+      const { error } = await supabase
+        .from('document_shortcuts')
+        .insert({
+          document_id: data.documentId,
+          folder_id: folderId,
+          user_id: user.user.id
+        });
+
+      if (error) throw error;
+
+      const folder = folders.find(f => f.id === folderId);
+      toast({
+        title: "📁 Moved to Folder",
+        description: `${data.documentName} added to ${folder?.name || 'folder'}`,
+      });
+
+      // Refresh folders to update counts
+      fetchSmartFolders();
+    } catch (error) {
+      console.error('Error moving document to folder:', error);
+      toast({
+        title: "Error",
+        description: "Failed to move document to folder",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>, folderId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverFolderId(folderId);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOverFolderId(null);
+  };
 
   useEffect(() => {
     fetchSmartFolders();
     
-    // Set up interval to refresh folder counts every 3 seconds when component is mounted
+    // Set up interval to refresh folder counts every 5 seconds when component is mounted
     const interval = setInterval(() => {
       fetchSmartFolders();
-    }, 3000);
+    }, 5000);
     
-    return () => clearInterval(interval);
+    // Listen for document deletion events to refresh immediately
+    const handleDocumentDeleted = () => {
+      fetchSmartFolders();
+    };
+    window.addEventListener('document-deleted', handleDocumentDeleted);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('document-deleted', handleDocumentDeleted);
+    };
   }, []);
 
   const fetchSmartFolders = async () => {
@@ -103,11 +191,13 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) return;
 
+      // OPTIMIZATION: Only fetch needed columns and add reasonable limit
       const { data, error } = await supabase
         .from('smart_folders')
-        .select('*')
+        .select('id, name, description, icon, folder_color, document_count, order_index, created_at, filter_rules')
         .eq('user_id', user.user.id)
-        .order('order_index', { ascending: false });
+        .order('order_index', { ascending: false })
+        .limit(100);
 
       if (error) {
         // If table doesn't exist, just set empty folders
@@ -123,34 +213,54 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
       const folderIds = data?.map(f => f.id) || [];
       
       // Try document_folder_relationships first (used by smart folder AI)
+      // Join with documents to exclude deleted ones
       let countsByFolder: { [key: string]: number } = {};
       
       const { data: relationships, error: relError } = await supabase
         .from('document_folder_relationships')
-        .select('folder_id')
+        .select('folder_id, documents!inner(id, metadata)')
         .in('folder_id', folderIds);
 
       if (!relError && relationships) {
-        relationships.forEach(rel => {
-          countsByFolder[rel.folder_id] = (countsByFolder[rel.folder_id] || 0) + 1;
+        relationships.forEach((rel: any) => {
+          // Only count if document is not deleted
+          const isDeleted = rel.documents?.metadata?.is_deleted === true;
+          if (!isDeleted) {
+            countsByFolder[rel.folder_id] = (countsByFolder[rel.folder_id] || 0) + 1;
+          }
         });
       }
       
       // Also check document_shortcuts for manually assigned documents
+      // Join with documents to exclude deleted ones
       const { data: shortcuts } = await supabase
         .from('document_shortcuts')
-        .select('folder_id')
+        .select('folder_id, documents!inner(id, metadata)')
         .in('folder_id', folderIds);
       
       if (shortcuts) {
-        shortcuts.forEach(shortcut => {
-          countsByFolder[shortcut.folder_id] = (countsByFolder[shortcut.folder_id] || 0) + 1;
+        shortcuts.forEach((shortcut: any) => {
+          // Only count if document is not deleted
+          const isDeleted = shortcut.documents?.metadata?.is_deleted === true;
+          if (!isDeleted) {
+            countsByFolder[shortcut.folder_id] = (countsByFolder[shortcut.folder_id] || 0) + 1;
+          }
         });
       }
 
-      // Update folders with actual counts
+      // Fetch recycle bin count (deleted documents)
+      const { count: deletedCount } = await supabase
+        .from('documents')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.user.id)
+        .eq('metadata->>is_deleted', 'true');
+      
+      setRecycleBinCount(deletedCount || 0);
+
+      // Update folders with actual counts and normalize field names
       const foldersWithCounts = data?.map(folder => ({
         ...folder,
+        color: (folder as any).folder_color || folder.color || '#6366f1', // Map folder_color to color
         document_count: countsByFolder[folder.id] || 0
       })) || [];
 
@@ -445,7 +555,17 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
       ) : (
         <div className="space-y-2">
           {folders.map((folder, index) => (
-            <div key={folder.id} className="flex items-center gap-2 w-full">
+            <div 
+              key={folder.id} 
+              className={`flex items-center gap-2 w-full transition-all duration-200 ${
+                dragOverFolderId === folder.id 
+                  ? 'bg-primary/20 rounded-lg ring-2 ring-primary ring-offset-2 scale-[1.02]' 
+                  : ''
+              }`}
+              onDrop={(e) => handleDrop(e, folder.id)}
+              onDragOver={(e) => handleDragOver(e, folder.id)}
+              onDragLeave={handleDragLeave}
+            >
               <div className="flex flex-col gap-1 flex-shrink-0">
                 <Button
                   variant="outline"
@@ -558,14 +678,21 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
           onFolderSelect('recycle-bin');
         }}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 w-full">
           <div className="p-1 bg-red-100 dark:bg-red-900 rounded">
             <Trash2 className="w-4 h-4 text-red-600" />
           </div>
-          <div className="text-left">
+          <div className="text-left flex-1">
             <div className="font-medium">Recycle Bin</div>
-            <div className="text-xs text-muted-foreground">Deleted documents</div>
+            <div className="text-xs text-muted-foreground">
+              {recycleBinCount === 0 ? 'No deleted documents' : `${recycleBinCount} deleted document${recycleBinCount > 1 ? 's' : ''}`}
+            </div>
           </div>
+          {recycleBinCount > 0 && (
+            <Badge variant="secondary" className="bg-red-100 text-red-700 text-xs">
+              {recycleBinCount}
+            </Badge>
+          )}
         </div>
       </Button>
 

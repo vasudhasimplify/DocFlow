@@ -230,6 +230,7 @@ async def analyze_document(request: DocumentAnalysisRequest):
             document_name=request.documentName,
             user_id=request.userId,
             save_to_database=request.saveToDatabase,
+            document_id=request.documentId,  # Pass document ID if already created by frontend
             templates=request.enhancedTemplates,
             max_workers=request.maxWorkers,
             max_threads=request.maxThreads,

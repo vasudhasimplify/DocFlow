@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, DragEvent } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -141,7 +141,50 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
   const [focusedDocumentId, setFocusedDocumentId] = useState<string | null>(null);
   const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set());
+  const [draggingDocument, setDraggingDocument] = useState<Document | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+
+  // Handle drag start for document cards
+  const handleDragStart = (e: DragEvent<HTMLDivElement>, document: Document) => {
+    setDraggingDocument(document);
+    e.dataTransfer.setData('application/json', JSON.stringify({
+      documentId: document.id,
+      documentName: document.file_name
+    }));
+    e.dataTransfer.effectAllowed = 'move';
+    
+    // Create custom drag image
+    const dragPreview = globalThis.document.createElement('div');
+    dragPreview.className = 'bg-primary text-primary-foreground px-4 py-2 rounded-lg shadow-xl flex items-center gap-2 text-sm font-medium';
+    dragPreview.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+      <span>${document.file_name.length > 25 ? document.file_name.substring(0, 25) + '...' : document.file_name}</span>
+    `;
+    dragPreview.style.position = 'absolute';
+    dragPreview.style.top = '-1000px';
+    dragPreview.style.left = '-1000px';
+    dragPreview.style.zIndex = '9999';
+    globalThis.document.body.appendChild(dragPreview);
+    
+    e.dataTransfer.setDragImage(dragPreview, 20, 20);
+    
+    // Clean up the preview element after a short delay
+    setTimeout(() => {
+      globalThis.document.body.removeChild(dragPreview);
+    }, 0);
+    
+    // Add visual feedback to the original element
+    if (e.currentTarget) {
+      e.currentTarget.style.opacity = '0.5';
+    }
+  };
+
+  const handleDragEnd = (e: DragEvent<HTMLDivElement>) => {
+    setDraggingDocument(null);
+    if (e.currentTarget) {
+      e.currentTarget.style.opacity = '1';
+    }
+  };
 
   // Handle edit document
   const handleEdit = (document: Document) => {
@@ -232,6 +275,9 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
       setDocumentToDelete(null);
       setSelectedDocuments(new Set());
       
+      // Emit event to refresh folder counts
+      window.dispatchEvent(new CustomEvent('document-deleted'));
+      
       if (onRefresh) {
         await onRefresh();
       }
@@ -289,6 +335,9 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
       setShowPermanentDeleteDialog(false);
       setDocumentToDelete(null);
       setSelectedDocuments(new Set());
+      
+      // Emit event to refresh folder counts
+      window.dispatchEvent(new CustomEvent('document-deleted'));
       
       if (onRefresh) {
         await onRefresh();
@@ -462,9 +511,12 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
         <ContextMenu key={document.id}>
           <ContextMenuTrigger asChild>
             <Card 
-              className={`group hover:shadow-lg transition-all duration-200 cursor-pointer border hover:border-primary/50 ${
+              className={`group hover:shadow-lg transition-all duration-200 cursor-grab active:cursor-grabbing border hover:border-primary/50 ${
                 selectedDocuments.has(document.id) ? 'border-primary border-2 bg-primary/5' : 'bg-white'
-              }`}
+              } ${draggingDocument?.id === document.id ? 'opacity-50 scale-95' : ''}`}
+              draggable
+              onDragStart={(e) => handleDragStart(e, document)}
+              onDragEnd={handleDragEnd}
               onClick={(e) => {
                 e.stopPropagation();
                 setSelectedDocuments(prev => {

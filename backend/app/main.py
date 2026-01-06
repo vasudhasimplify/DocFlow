@@ -186,6 +186,11 @@ async def shutdown_event():
             _cancellation_tokens.clear()
             logger.info("✅ Cancellation tokens cleared")
         
+        # Cleanup Supabase connection pool
+        from .core.supabase_client import reset_client
+        reset_client()
+        logger.info("✅ Supabase connection pool cleaned up")
+        
         logger.info("✅ Shutdown cleanup complete")
     except Exception as e:
         logger.error(f"❌ Error during shutdown cleanup: {e}")
@@ -197,6 +202,47 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "document-analysis-api"}
+
+@app.get("/health/database")
+async def database_health_check():
+    """
+    Health check endpoint for database connection.
+    Shows connection pool status and tests database connectivity.
+    """
+    try:
+        from .core.supabase_client import get_supabase_client, get_connection_status
+        
+        # Get connection pool status
+        status = get_connection_status()
+        
+        # Test actual connectivity
+        client = get_supabase_client()
+        db_test_result = "unknown"
+        
+        if client:
+            try:
+                # Simple test query
+                result = client.table('documents').select('id').limit(1).execute()
+                db_test_result = "connected"
+            except Exception as e:
+                db_test_result = f"error: {str(e)[:100]}"
+        else:
+            db_test_result = "client_not_available"
+        
+        return {
+            "status": "healthy" if db_test_result == "connected" else "degraded",
+            "database": {
+                "test_result": db_test_result,
+                **status
+            },
+            "message": "Supabase singleton connection pool active" if status["initialized"] else "Supabase not initialized"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "database": {"error": str(e)},
+            "message": "Failed to check database health"
+        }
 
 if __name__ == "__main__":
     uvicorn.run(

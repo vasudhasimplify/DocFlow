@@ -9,6 +9,7 @@ import threading
 from typing import Optional, Dict, Any, Tuple, List
 from datetime import datetime
 import uuid
+from app.services.modules.processing_queue_service import ProcessingQueueService
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class DocumentProcessingOrchestrator:
         self.document_analyzer = document_analyzer
         self.bucket_manager = bucket_manager
         self.database_service = database_service
+        self.queue_service = ProcessingQueueService()
         
     async def process_document(
         self,
@@ -62,17 +64,26 @@ class DocumentProcessingOrchestrator:
             filename: Original filename
             user_id: User ID for storage
             template_id: Optional template ID
-            options: Additional processing options
+            options: Additional processing options (can include document_id for queue tracking)
             
         Returns:
             Complete processing result with type and extracted data
         """
         start_time = datetime.now()
         processing_id = str(uuid.uuid4())
+        document_id = options.get('document_id') if options else None
         
         logger.info(f"[{processing_id}] Starting parallel document processing for: {filename}")
         
         try:
+            # Stage 1: Virus scan (placeholder - would integrate with actual scanner)
+            if document_id:
+                self.queue_service.update_stage(document_id, 'virus_scan')
+            
+            # Stage 2: Text extraction and type detection (parallel)
+            if document_id:
+                self.queue_service.update_stage(document_id, 'text_extraction')
+            
             # Run type detection and extraction in parallel
             type_result, extraction_result = await self._parallel_process(
                 pdf_bytes=pdf_bytes,
@@ -88,6 +99,13 @@ class DocumentProcessingOrchestrator:
             
             logger.info(f"[{processing_id}] Detected type: {document_type} (confidence: {type_result.get('confidence', 0):.2f})")
             
+            # Stage 3: Classification
+            if document_id:
+                self.queue_service.update_stage(document_id, 'classification', {
+                    'document_type': document_type,
+                    'confidence': type_result.get('confidence', 0)
+                })
+            
             # Upload to type-specific bucket
             upload_result = await self._upload_to_bucket(
                 pdf_bytes=pdf_bytes,
@@ -96,6 +114,10 @@ class DocumentProcessingOrchestrator:
                 document_type=document_type,
                 bucket_name=bucket_name
             )
+            
+            # Stage 4: Embedding
+            if document_id:
+                self.queue_service.update_stage(document_id, 'embedding')
             
             # Combine results
             combined_result = {
@@ -110,6 +132,10 @@ class DocumentProcessingOrchestrator:
             
             # Save to database with document type
             if extraction_result.get("success"):
+                # Stage 5: Indexing
+                if document_id:
+                    self.queue_service.update_stage(document_id, 'indexing')
+                
                 await self._save_to_database(
                     user_id=user_id,
                     filename=filename,
@@ -117,6 +143,15 @@ class DocumentProcessingOrchestrator:
                     extraction_result=extraction_result,
                     storage_result=upload_result
                 )
+                
+                # Stage 6: Completed
+                if document_id:
+                    self.queue_service.mark_completed(document_id, {
+                        'processing_time_ms': combined_result['processing_time_ms'],
+                        'document_type': document_type
+                    })
+                    # Also update search index queue
+                    self.queue_service.update_search_index_queue(document_id, 'completed')
             
             logger.info(f"[{processing_id}] Processing complete in {combined_result['processing_time_ms']:.0f}ms")
             
@@ -124,6 +159,12 @@ class DocumentProcessingOrchestrator:
             
         except Exception as e:
             logger.error(f"[{processing_id}] Error in document processing: {e}")
+            
+            # Mark as failed in queue
+            if document_id:
+                self.queue_service.mark_failed(document_id, str(e))
+                self.queue_service.update_search_index_queue(document_id, 'failed')
+            
             return {
                 "processing_id": processing_id,
                 "filename": filename,
@@ -203,6 +244,7 @@ class DocumentProcessingOrchestrator:
                 templates=options.get("templates"),
                 save_to_database=False,  # We'll save with document_type later
                 user_id=user_id,
+                document_id=options.get("document_id"),  # Pass document_id if provided
                 max_workers=options.get("max_workers"),
                 max_threads=options.get("max_threads"),
                 yolo_signature_enabled=options.get("yolo_signature_enabled"),
@@ -277,12 +319,13 @@ class DocumentProcessingOrchestrator:
             saved_doc = extraction_result.get("savedDocument")
             if saved_doc and saved_doc.get("id"):
                 doc_id = saved_doc["id"]
-                # Update the document with document_type
+                # Update the document with document_type AND processing_status
                 if self.database_service.supabase:
                     self.database_service.supabase.table("documents").update({
-                        "document_type": document_type
+                        "document_type": document_type,
+                        "processing_status": "completed"  # Mark processing as complete!
                     }).eq("id", doc_id).execute()
-                    logger.info(f"Document {doc_id} updated with type: {document_type}")
+                    logger.info(f"Document {doc_id} updated with type: {document_type}, status: completed")
             else:
                 logger.info(f"No saved document to update with type: {document_type}")
             
@@ -336,6 +379,7 @@ class DocumentProcessingOrchestrator:
         document_name: Optional[str] = None,
         user_id: str = "",
         save_to_database: bool = True,
+        document_id: Optional[str] = None,  # If provided, document already exists - skip creating new
         templates: Optional[List[Dict[str, Any]]] = None,
         max_workers: Optional[int] = None,
         max_threads: Optional[int] = None,
@@ -372,7 +416,8 @@ class DocumentProcessingOrchestrator:
                 "yolo_face_enabled": yolo_face_enabled,
                 "cancellation_token": cancellation_token,
                 "request_id": request_id,
-                "save_to_database": save_to_database
+                "save_to_database": save_to_database,
+                "document_id": document_id  # Pass document_id for update instead of create
             }
 
             # Call the new process_document method

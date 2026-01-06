@@ -90,6 +90,8 @@ export function SimplifyDrive() {
   const [activeUploadsCount, setActiveUploadsCount] = useState(0);
 
   // Auto-refresh documents while actively processing or uploading
+  // OPTIMIZED: Increased interval from 2s to 5s to reduce database load
+  // A typical document takes 60-90 seconds to process, so 5s polling is sufficient
   React.useEffect(() => {
     const hasProcessingDocs = documents.some(doc => 
       doc.processing_status === 'processing'
@@ -98,7 +100,7 @@ export function SimplifyDrive() {
     if (hasProcessingDocs || activeUploadsCount > 0) {
       const interval = setInterval(() => {
         refetch();
-      }, 2000); // Refresh every 2 seconds
+      }, 5000); // Refresh every 5 seconds (was 2 seconds - too frequent)
 
       return () => clearInterval(interval);
     }

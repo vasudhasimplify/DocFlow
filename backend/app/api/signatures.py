@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from supabase import create_client, Client
 import os
 import io
 import base64
@@ -17,21 +16,18 @@ import fitz  # PyMuPDF
 from datetime import datetime
 from app.services.email import send_signature_request_email
 
+# Use the singleton Supabase client for connection pooling
+from app.core.supabase_client import get_supabase_client
+
 router = APIRouter(prefix="/api/signatures", tags=["signatures"])
 
-# Lazy-loaded Supabase client to avoid initialization issues
-_supabase_client = None
 
-def get_supabase() -> Client:
-    """Get or create Supabase client (lazy loading)"""
-    global _supabase_client
-    if _supabase_client is None:
-        SUPABASE_URL = os.getenv("SUPABASE_URL")
-        SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-            raise HTTPException(status_code=500, detail="Supabase configuration missing")
-        _supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-    return _supabase_client
+def get_supabase():
+    """Get shared Supabase client (connection pooling)"""
+    client = get_supabase_client()
+    if not client:
+        raise HTTPException(status_code=500, detail="Supabase configuration missing")
+    return client
 
 
 class SendSignatureEmailsRequest(BaseModel):

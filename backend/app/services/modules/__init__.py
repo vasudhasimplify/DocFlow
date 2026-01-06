@@ -11,6 +11,7 @@ from .document_analysis_refactored import DocumentAnalysisService
 from .document_type_detector import DocumentTypeDetector
 from .bucket_manager import BucketManager
 from .document_processing_orchestrator import DocumentProcessingOrchestrator
+from .processing_queue_service import ProcessingQueueService
 
 __all__ = [
     "LLMClient",
@@ -20,5 +21,6 @@ __all__ = [
     "DocumentAnalysisService",
     "DocumentTypeDetector",
     "BucketManager",
-    "DocumentProcessingOrchestrator"
+    "DocumentProcessingOrchestrator",
+    "ProcessingQueueService"
 ]
