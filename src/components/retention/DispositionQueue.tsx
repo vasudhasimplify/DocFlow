@@ -176,9 +176,9 @@ export const DispositionQueue: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="p-6">
       {/* Header Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-6 shrink-0">
+      <div className="grid grid-cols-4 gap-4 mb-6">
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
             <div className="p-2 rounded-lg bg-yellow-500/10">
@@ -232,7 +232,7 @@ export const DispositionQueue: React.FC = () => {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-4 mb-4 shrink-0">
+      <div className="flex items-center gap-4 mb-4">
         <Checkbox
           checked={selectedDocs.length === filteredDocs.length && filteredDocs.length > 0}
           onCheckedChange={handleSelectAll}
@@ -290,9 +290,8 @@ export const DispositionQueue: React.FC = () => {
       </div>
 
       {/* Queue List */}
-      <ScrollArea className="flex-1">
-        <div className="space-y-2">
-          {filteredDocs.map((doc) => {
+      <div className="space-y-2">
+        {filteredDocs.map((doc) => {
             const policy = policies.find(p => p.id === doc.policy_id);
             const isExpired = new Date(doc.retention_end_date) <= new Date();
             const ActionIcon = getActionIcon(doc.disposition_action || 'review');
@@ -388,8 +387,7 @@ export const DispositionQueue: React.FC = () => {
               <p className="text-sm">No documents pending disposition</p>
             </div>
           )}
-        </div>
-      </ScrollArea>
+      </div>
 
       {/* Bulk Action Dialog */}
       <Dialog open={bulkActionDialog} onOpenChange={setBulkActionDialog}>

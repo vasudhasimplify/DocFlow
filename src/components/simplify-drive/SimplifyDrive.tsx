@@ -1,10 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import React, { useState, useCallback, useEffect } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useToast } from '@/hooks/use-toast';
 import { useOfflineMode } from '@/hooks/useOfflineMode';
 import { useSearchParams, useLocation } from 'react-router-dom';
-import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 
 import { FeatureNavigation } from './components/FeatureNavigation';
@@ -77,12 +75,14 @@ export function SimplifyDrive() {
   const [showOfflinePanel, setShowOfflinePanel] = useState(false);
   const [showSyncDialog, setShowSyncDialog] = useState(false);
 
-  // URL Search Params for deep linking
-  const [searchParams] = useSearchParams();
-  const location = useLocation();
-
   const { toast } = useToast();
-  const { status: offlineStatus, syncPendingChanges } = useOfflineMode();
+  const { 
+    status: offlineStatus, 
+    syncPendingChanges,
+    getPendingUploadsData,
+    syncSelectedUploads,
+    closeSyncDialog,
+  } = useOfflineMode();
   const { trackAccess } = useQuickAccess();
 
   // Handle legal hold filter from navigation state
@@ -140,13 +140,6 @@ export function SimplifyDrive() {
       }
     }
   }, [searchParams, documents]);
-  const { 
-    status: offlineStatus, 
-    syncPendingChanges,
-    getPendingUploadsData,
-    syncSelectedUploads,
-    closeSyncDialog,
-  } = useOfflineMode();
 
   // Pending uploads state
   const [pendingUploads, setPendingUploads] = useState<any[]>([]);
@@ -246,14 +239,12 @@ export function SimplifyDrive() {
   }, [refetch]);
 
   // Handlers
-  const handleDocumentProcessed = useCallback(async (documentId: string) => {
   const handleDocumentProcessed = useCallback((_documentId: string) => {
     setShowUploadModal(false);
     refetch();
     toast({
       title: "Document uploaded successfully",
       description: "Your document has been processed and organized automatically. Matching workflows will start automatically.",
-      description: "Your document has been processed and saved",
     });
     
     // The backend WorkflowTriggerService automatically handles workflow matching and starting

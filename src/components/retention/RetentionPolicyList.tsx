@@ -78,9 +78,9 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="p-6">
       {/* Toolbar */}
-      <div className="flex items-center gap-4 mb-4 shrink-0">
+      <div className="flex items-center gap-4 mb-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -110,7 +110,7 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
 
       {/* Policy Templates */}
       {templates.length > 0 && (
-        <div className="mb-6 shrink-0">
+        <div className="mb-6">
           <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
             <Shield className="h-4 w-4" />
             Quick Start Templates
@@ -140,8 +140,7 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
       )}
 
       {/* Policies List */}
-      <ScrollArea className="flex-1">
-        <div className="space-y-3">
+      <div className="space-y-3">
           {filteredPolicies.map((policy) => {
             const DispositionIcon = getDispositionIcon(policy.disposition_action);
             const triggerType = TRIGGER_TYPES.find(t => t.value === policy.trigger_type);
@@ -258,8 +257,7 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
               </Button>
             </div>
           )}
-        </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 };

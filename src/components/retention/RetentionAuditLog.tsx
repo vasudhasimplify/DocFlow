@@ -217,9 +217,9 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
   };
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="p-6">
       {/* Toolbar */}
-      <div className="flex items-center gap-4 mb-4 shrink-0">
+      <div className="flex items-center gap-4 mb-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -287,8 +287,7 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
       </div>
 
       {/* Log List */}
-      <ScrollArea className="flex-1">
-        <div className="space-y-2">
+      <div className="space-y-2">
           {filteredLogs.map((log) => {
             const ActionIcon = getActionIcon(log.action);
             const colorClasses = getActionColor(log.action);
@@ -381,8 +380,7 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
               <p className="text-sm">Disposition activities will be logged here</p>
             </div>
           )}
-        </div>
-      </ScrollArea>
+      </div>
 
       {/* Document Viewer Dialog */}
       <DocumentViewer

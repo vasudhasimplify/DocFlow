@@ -437,9 +437,9 @@ export const RetentionDashboard: React.FC = () => {
   ];
 
   return (
-    <div className="h-full flex flex-col bg-background">
+    <div className="bg-background">
       {/* Header */}
-      <div className="border-b p-6 shrink-0">
+      <div className="border-b p-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -490,7 +490,7 @@ export const RetentionDashboard: React.FC = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="p-6 border-b shrink-0">
+      <div className="p-6 border-b">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {statCards.map((stat) => (
             <Card key={stat.title} className={cn("relative overflow-hidden", stat.alert && "ring-2 ring-orange-500/50")}>
@@ -520,8 +520,8 @@ export const RetentionDashboard: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
-        <div className="border-b px-6 shrink-0">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <div className="border-b px-6">
           <TabsList className="h-12">
             <TabsTrigger value="overview" className="gap-2">
               <FileText className="h-4 w-4" />
@@ -558,8 +558,8 @@ export const RetentionDashboard: React.FC = () => {
           </TabsList>
         </div>
 
-        <div className="flex-1 overflow-hidden">
-          <TabsContent value="overview" className="h-full m-0">
+        <div>
+          <TabsContent value="overview" className="m-0">
             <RetentionOverview
               policies={policies}
               documentStatuses={documentStatuses}
@@ -569,7 +569,7 @@ export const RetentionDashboard: React.FC = () => {
             />
           </TabsContent>
 
-          <TabsContent value="policies" className="h-full m-0">
+          <TabsContent value="policies" className="m-0">
             <RetentionPolicyList 
               policies={policies}
               templates={templates}
@@ -582,15 +582,15 @@ export const RetentionDashboard: React.FC = () => {
             />
           </TabsContent>
 
-          <TabsContent value="documents" className="h-full m-0">
+          <TabsContent value="documents" className="m-0">
             <DocumentRetentionList />
           </TabsContent>
 
-          <TabsContent value="disposition" className="h-full m-0">
+          <TabsContent value="disposition" className="m-0">
             <DispositionQueue />
           </TabsContent>
 
-          <TabsContent value="holds" className="h-full m-0">
+          <TabsContent value="holds" className="m-0">
             <LegalHoldsList 
               holds={legalHolds}
               onCreateHold={() => setShowCreateHold(true)}
@@ -598,7 +598,7 @@ export const RetentionDashboard: React.FC = () => {
             />
           </TabsContent>
 
-          <TabsContent value="audit" className="h-full m-0">
+          <TabsContent value="audit" className="m-0">
             <RetentionAuditLog logs={auditLogs} />
           </TabsContent>
         </div>

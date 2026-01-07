@@ -133,9 +133,9 @@ export const DocumentRetentionList: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="p-6">
       {/* Toolbar */}
-      <div className="flex items-center gap-4 mb-4 shrink-0">
+      <div className="flex items-center gap-4 mb-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -198,8 +198,7 @@ export const DocumentRetentionList: React.FC = () => {
       </div>
 
       {/* Document List */}
-      <ScrollArea className="flex-1">
-        <div className="space-y-2">
+      <div className="space-y-2">
           {sortedDocs.map((doc) => {
             const policy = policies.find(p => p.id === doc.policy_id);
             const daysRemaining = getDaysRemaining(doc.retention_end_date);
@@ -384,8 +383,7 @@ export const DocumentRetentionList: React.FC = () => {
               <p className="text-sm">Documents with retention policies will appear here</p>
             </div>
           )}
-        </div>
-      </ScrollArea>
+      </div>
 
       {/* View Document Dialog */}
       <Dialog open={!!viewDocumentId} onOpenChange={() => setViewDocumentId(null)}>

@@ -107,17 +107,13 @@ export function useDocumentFiltering({
         doc.tags?.some(tag => tag.name.toLowerCase().includes(searchLower)) ||
         // Search in document type
         doc.file_type?.toLowerCase().includes(searchLower);
+      
       // Legal hold filter - filter by document IDs
       if (legalHoldDocumentIds.length > 0) {
         if (!legalHoldDocumentIds.includes(doc.id)) {
           return false;
         }
       }
-
-      const matchesSearch = cleanSearchQuery === '' || 
-        doc.file_name.toLowerCase().includes(cleanSearchQuery.toLowerCase()) ||
-        doc.extracted_text?.toLowerCase().includes(cleanSearchQuery.toLowerCase()) ||
-        doc.insights?.summary?.toLowerCase().includes(cleanSearchQuery.toLowerCase());
 
       // Debug: Log search results for non-empty queries
       if (searchQuery && searchQuery.length > 2) {

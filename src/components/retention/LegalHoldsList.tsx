@@ -78,9 +78,9 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="p-6">
       {/* Toolbar */}
-      <div className="flex items-center gap-4 mb-4 shrink-0">
+      <div className="flex items-center gap-4 mb-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -110,7 +110,7 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
       </div>
 
       {/* Warning Banner */}
-      <Card className="mb-4 bg-purple-500/10 border-purple-500/30 shrink-0">
+      <Card className="mb-4 bg-purple-500/10 border-purple-500/30">
         <CardContent className="p-4 flex items-center gap-3">
           <AlertTriangle className="h-5 w-5 text-purple-500" />
           <div>
@@ -123,8 +123,7 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
       </Card>
 
       {/* Holds List */}
-      <ScrollArea className="flex-1">
-        <div className="space-y-3">
+      <div className="space-y-3">
           {filteredHolds.map((hold) => (
             <Card key={hold.id} className={cn(hold.status !== 'active' && "opacity-60")}>
               <CardContent className="p-4">
@@ -226,8 +225,7 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
               </Button>
             </div>
           )}
-        </div>
-      </ScrollArea>
+      </div>
 
       {/* Release Dialog */}
       <Dialog open={releaseDialogOpen} onOpenChange={setReleaseDialogOpen}>

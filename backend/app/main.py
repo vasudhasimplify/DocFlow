@@ -235,9 +235,9 @@ async def run_workflow_scheduler():
             logger.error(f"❌ Scheduler error: {str(e)}")
             logger.error(traceback.format_exc())
         
-        # Wait 60 seconds before next check
-        logger.info("⏳ Waiting 60 seconds until next check...")
-        await asyncio.sleep(60.0)
+        # Wait 2 hours before next check
+        logger.info("⏳ Waiting 2 hours until next check...")
+        await asyncio.sleep(7200.0)  # 2 hours = 7200 seconds
     
     logger.info("🛑 Scheduler stopped")
 

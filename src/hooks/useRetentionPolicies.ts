@@ -70,13 +70,30 @@ export const useRetentionPolicies = () => {
       }
 
       if (holdsRes.data) {
-        setLegalHolds(holdsRes.data.map(h => ({
-          ...h,
-          document_ids: h.document_ids || [],
-          folder_ids: h.folder_ids || [],
-          search_criteria: (h.search_criteria as Record<string, unknown>) || undefined,
-          metadata: (h.metadata as Record<string, unknown>) || {},
-        })) as LegalHold[]);
+        // Fetch custodians for all holds
+        const holdsWithCustodians = await Promise.all(
+          holdsRes.data.map(async (h) => {
+            const { data: custodians } = await supabase
+              .from('legal_hold_custodians')
+              .select('*')
+              .eq('hold_id', h.id);
+            
+            const primaryCustodian = custodians?.[0];
+            
+            return {
+              ...h,
+              document_ids: h.document_ids || [],
+              folder_ids: h.folder_ids || [],
+              search_criteria: (h.search_criteria as Record<string, unknown>) || undefined,
+              metadata: (h.metadata as Record<string, unknown>) || {},
+              // Map first custodian to the old fields for backward compatibility
+              custodian_name: primaryCustodian?.name || h.custodian_name,
+              custodian_email: primaryCustodian?.email || h.custodian_email,
+            };
+          })
+        );
+        
+        setLegalHolds(holdsWithCustodians as LegalHold[]);
       }
 
       if (statusesRes.data) {

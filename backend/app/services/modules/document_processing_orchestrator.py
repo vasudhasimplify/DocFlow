@@ -447,8 +447,7 @@ class DocumentProcessingOrchestrator:
                 "cancellation_token": cancellation_token,
                 "request_id": request_id,
                 "save_to_database": save_to_database,
-                "document_id": document_id  # Pass document_id for update instead of create
-                "save_to_database": save_to_database,
+                "document_id": document_id,  # Pass document_id for update instead of create
                 "skip_workflow_trigger": skip_workflow_trigger
             }
 

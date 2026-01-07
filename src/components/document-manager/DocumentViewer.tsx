@@ -13,8 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, ExternalLink, X, Tags, ChevronRight, ChevronLeft, CloudOff, ShieldAlert, GitBranch, Sparkles, Loader2, Plus, ChevronDown } from 'lucide-react';
-import { Download, ExternalLink, X, Tags, ChevronRight, ChevronLeft, CloudOff, ShieldAlert, Droplets } from 'lucide-react';
+import { Download, ExternalLink, X, Tags, ChevronRight, ChevronLeft, CloudOff, ShieldAlert, GitBranch, Sparkles, Loader2, Plus, ChevronDown, Droplets } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { DocumentMetadataEditor } from '@/components/metadata';
 import { useContentAccessRules } from '@/hooks/useContentAccessRules';

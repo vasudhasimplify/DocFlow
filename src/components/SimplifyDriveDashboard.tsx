@@ -88,7 +88,7 @@ export const SimplifyDriveDashboard: React.FC = () => {
   const activeFeature = featureTabs.find(t => t.id === activeTab);
 
   return (
-    <div className="min-h-dvh flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-background">
       {/* Feature Navigation */}
       <div className="border-b bg-card/50 sticky top-0 z-40">
         <div className="px-4 py-3">
