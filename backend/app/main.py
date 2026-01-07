@@ -8,6 +8,7 @@ from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 from pathlib import Path
 from datetime import datetime, timedelta
+import asyncio
 
 # Load environment variables before importing settings
 backend_dir = Path(__file__).parent.parent
@@ -25,9 +26,13 @@ from .api.guest import router as guest_router
 from .api.signatures import router as signatures_router
 from .api.watermarks import router as watermarks_router
 from .api.migration import router as migration_router
+from .api.retention import router as retention_router
+from .api.legal_holds import router as legal_holds_router
 from .api.document_editor import router as document_editor_router
 from .api.ai_routes import router as ai_router
 from .api.scanner_routes import router as scanner_router
+from .api.workflows import router as workflows_router
+from .api.document_fields import router as document_fields_router
 from .core.config import settings
 
 # Configure logging with both console and file handlers
@@ -141,7 +146,13 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this properly for production
+    allow_origins=[
+        "http://localhost:4173",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:4173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -158,9 +169,104 @@ app.include_router(guest_router)
 app.include_router(signatures_router)
 app.include_router(watermarks_router)
 app.include_router(migration_router)
+app.include_router(retention_router)
+app.include_router(legal_holds_router)
 app.include_router(document_editor_router, prefix="/api")
 app.include_router(ai_router)
 app.include_router(scanner_router)
+app.include_router(workflows_router)
+app.include_router(document_fields_router, prefix="/api")
+
+# ============================================================================
+# WORKFLOW SCHEDULER BACKGROUND TASK
+# ============================================================================
+
+scheduler_task = None
+scheduler_stop_event = asyncio.Event()
+
+async def run_workflow_scheduler():
+    """Background task to check and execute scheduled workflows every minute"""
+    import sys
+    print(">>> SCHEDULER FUNCTION STARTED <<<", file=sys.stderr, flush=True)
+    
+    from supabase import create_client
+    from .services.workflow_scheduler import WorkflowScheduler
+    from .core.config import settings
+    import traceback
+    
+    print(">>> IMPORTS COMPLETED <<<", file=sys.stderr, flush=True)
+    logger.info("🕐 Starting workflow scheduler background task")
+    
+    try:
+        # Initialize Supabase client for scheduler
+        supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+        scheduler = WorkflowScheduler(supabase)
+        logger.info("✅ Scheduler initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize scheduler: {str(e)}")
+        logger.error(traceback.format_exc())
+        return
+    
+    check_count = 0
+    while True:  # Run forever in the daemon thread
+        try:
+            check_count += 1
+            logger.info(f"🔄 Scheduler check #{check_count}")
+            
+            # Run scheduler check (includes both scheduled workflows and escalations)
+            result = scheduler.check_and_execute_schedules()
+            
+            # Log schedule results
+            schedule_result = result.get('schedules', {})
+            if schedule_result.get('executed', 0) > 0:
+                logger.info(f"⚡ Scheduler executed {schedule_result['executed']} workflows")
+            
+            if schedule_result.get('errors'):
+                logger.warning(f"⚠️ Scheduler had {len(schedule_result['errors'])} errors")
+            
+            # Log escalation results
+            escalation_result = result.get('escalations', {})
+            if escalation_result.get('escalations_triggered', 0) > 0:
+                logger.info(f"🚨 Triggered {escalation_result['escalations_triggered']} escalations, executed {escalation_result.get('actions_executed', 0)} actions")
+            else:
+                logger.info(f"✓ Scheduler check #{check_count} complete - no escalations triggered")
+            
+        except Exception as e:
+            logger.error(f"❌ Scheduler error: {str(e)}")
+            logger.error(traceback.format_exc())
+        
+        # Wait 2 hours before next check
+        logger.info("⏳ Waiting 2 hours until next check...")
+        await asyncio.sleep(7200.0)  # 2 hours = 7200 seconds
+    
+    logger.info("🛑 Scheduler stopped")
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on application startup"""
+    global scheduler_task
+    import threading
+    
+    def run_scheduler_thread():
+        """Run the scheduler in a separate thread with its own event loop"""
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(run_workflow_scheduler())
+        except Exception as e:
+            logger.error(f"❌ Scheduler thread error: {e}")
+        finally:
+            loop.close()
+    
+    try:
+        logger.info("🚀 Starting background tasks...")
+        # Start scheduler in a separate thread
+        scheduler_thread = threading.Thread(target=run_scheduler_thread, daemon=True)
+        scheduler_thread.start()
+        logger.info("✅ Workflow scheduler started in background thread")
+    except Exception as e:
+        logger.error(f"❌ Failed to start background tasks: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -168,8 +274,20 @@ async def shutdown_event():
     CRITICAL FIX #5: Cleanup on application shutdown
     Closes async HTTP clients and other resources to prevent memory leaks
     """
+    global scheduler_task
     try:
         logger.info("🛑 Application shutting down - cleaning up resources...")
+        
+        # Stop scheduler task
+        if scheduler_task:
+            logger.info("🕐 Stopping workflow scheduler...")
+            scheduler_stop_event.set()
+            try:
+                await asyncio.wait_for(scheduler_task, timeout=5.0)
+                logger.info("✅ Workflow scheduler stopped")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Scheduler stop timeout, cancelling task")
+                scheduler_task.cancel()
         
         # Close async HTTP client from LLMClient
         from .api.routes import llm_client

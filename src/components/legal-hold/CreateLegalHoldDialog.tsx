@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -39,18 +40,24 @@ import {
 } from 'lucide-react';
 import type { CreateLegalHoldParams, HoldScope } from '@/types/legalHold';
 import { MATTER_TYPES, HOLD_SCOPE_OPTIONS } from '@/types/legalHold';
+import { supabase } from '@/integrations/supabase/client';
 
 interface CreateLegalHoldDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreateHold: (params: CreateLegalHoldParams) => Promise<any>;
+  onUpdateHold?: (holdId: string, params: Partial<CreateLegalHoldParams>) => Promise<any>;
+  initialData?: any; // EnhancedLegalHold for editing
 }
 
 export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
   open,
   onOpenChange,
-  onCreateHold
+  onCreateHold,
+  onUpdateHold,
+  initialData
 }) => {
+  const isEditing = !!initialData;
   const [step, setStep] = useState(1);
   const [creating, setCreating] = useState(false);
 
@@ -60,16 +67,34 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
   const [matterName, setMatterName] = useState('');
   const [matterType, setMatterType] = useState<CreateLegalHoldParams['matter_type']>('litigation');
   const [caseNumber, setCaseNumber] = useState('');
+  const [issuingAttorney, setIssuingAttorney] = useState('');
   const [holdReason, setHoldReason] = useState('');
+  const [issueDate, setIssueDate] = useState('');
+  const [effectiveDate, setEffectiveDate] = useState('');
+  const [anticipatedEndDate, setAnticipatedEndDate] = useState('');
 
   // Step 2: Scope
   const [scope, setScope] = useState<HoldScope>('search_criteria');
   const [keywords, setKeywords] = useState('');
   const [dateRangeStart, setDateRangeStart] = useState('');
   const [dateRangeEnd, setDateRangeEnd] = useState('');
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
+  const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([]);
+  const [selectedFolderNames, setSelectedFolderNames] = useState<string[]>([]);
+  
+  // For fetching and displaying options
+  const [availableDocuments, setAvailableDocuments] = useState<any[]>([]);
+  const [availableFolders, setAvailableFolders] = useState<string[]>([]);
+  const [documentSearchQuery, setDocumentSearchQuery] = useState('');
+  const [folderSearchQuery, setFolderSearchQuery] = useState('');
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [loadingFolders, setLoadingFolders] = useState(false);
+  const [documentsError, setDocumentsError] = useState<string>('');
+  const [foldersError, setFoldersError] = useState<string>('');
 
   // Step 3: Custodians
-  const [custodianEmails, setCustodianEmails] = useState<string[]>([]);
+  const [custodians, setCustodians] = useState<Array<{ name: string; email: string }>>([]);
+  const [newCustodianName, setNewCustodianName] = useState('');
   const [newCustodianEmail, setNewCustodianEmail] = useState('');
 
   // Step 4: Settings
@@ -82,6 +107,116 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
   const [legalTeamEmail, setLegalTeamEmail] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
 
+  // Populate form with initialData when editing
+  useEffect(() => {
+    if (initialData && open) {
+      console.log('Populating form with initialData:', initialData);
+      
+      setName(initialData.name || '');
+      setMatterId(initialData.matter_id || '');
+      setMatterName(initialData.matter_name || '');
+      setMatterType(initialData.matter_type || 'litigation');
+      setCaseNumber(initialData.case_number || '');
+      setIssuingAttorney(initialData.issuing_attorney || '');
+      setHoldReason(initialData.hold_reason || '');
+      setIssueDate(initialData.issue_date ? initialData.issue_date.split('T')[0] : '');
+      setEffectiveDate(initialData.effective_date ? initialData.effective_date.split('T')[0] : '');
+      setAnticipatedEndDate(initialData.anticipated_end_date ? initialData.anticipated_end_date.split('T')[0] : '');
+      setScope(initialData.scope || 'search_criteria');
+      
+      // Handle scope_details - might be string or object
+      const scopeDetails = typeof initialData.scope_details === 'string' 
+        ? JSON.parse(initialData.scope_details) 
+        : initialData.scope_details;
+      
+      if (scopeDetails) {
+        setKeywords((scopeDetails.keywords || []).join(', '));
+        if (scopeDetails.date_range) {
+          setDateRangeStart(scopeDetails.date_range.start || '');
+          setDateRangeEnd(scopeDetails.date_range.end || '');
+        }
+        if (scopeDetails.document_ids) {
+          setSelectedDocumentIds(scopeDetails.document_ids);
+        }
+        if (scopeDetails.folder_names) {
+          setSelectedFolderNames(scopeDetails.folder_names);
+        }
+      }
+      
+      setCustodians((initialData.custodians || []).map((c: any) => ({
+        name: c.name || c.email.split('@')[0], 
+        email: c.email
+      })));
+      setRequiresAcknowledgment(initialData.requires_acknowledgment ?? true);
+      setAcknowledgmentDeadline(initialData.acknowledgment_deadline_days || 5);
+      setSendReminders(initialData.send_reminders ?? true);
+      setReminderFrequency(initialData.reminder_frequency_days || 7);
+      setEscalationEnabled(initialData.escalation_enabled ?? true);
+      setEscalationAfterDays(initialData.escalation_after_days || 14);
+      
+      // Handle legal_team_emails - might be string or array
+      const legalEmails = typeof initialData.legal_team_emails === 'string'
+        ? JSON.parse(initialData.legal_team_emails)
+        : initialData.legal_team_emails;
+      setLegalTeamEmail((legalEmails || [])[0] || '');
+      
+      setInternalNotes(initialData.internal_notes || '');
+      
+      console.log('Form populated - matterName:', initialData.matter_name, 'caseNumber:', initialData.case_number);
+    } else if (!open) {
+      resetForm();
+    }
+  }, [initialData, open]);
+
+  // Fetch available documents when specific_documents scope is selected
+  useEffect(() => {
+    // Only fetch if we don't already have data and dialog is open
+    if (scope === 'specific_documents' && open && availableDocuments.length === 0 && !loadingDocuments) {
+      setLoadingDocuments(true);
+      setDocumentsError('');
+      supabase
+        .from('documents')
+        .select('id, file_name, file_type, file_size, created_at, metadata')
+        .order('created_at', { ascending: false })
+        .limit(100)
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('Error fetching documents:', error);
+            setDocumentsError('Failed to load documents. Please check permissions or try again later.');
+            setAvailableDocuments([]);
+          } else if (data) {
+            setAvailableDocuments(data);
+          }
+          setLoadingDocuments(false);
+        });
+    }
+  }, [scope, open, availableDocuments.length, loadingDocuments]);
+
+  // Fetch available folders when folder scope is selected
+  useEffect(() => {
+    // Only fetch if we don't already have data and dialog is open
+    if (scope === 'folder' && open && availableFolders.length === 0 && !loadingFolders) {
+      setLoadingFolders(true);
+      setFoldersError('');
+      supabase
+        .from('smart_folders')
+        .select('id, name')
+        .order('name', { ascending: true })
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('Error fetching folders:', error);
+            setFoldersError('Failed to load folders. Please check permissions or try again later.');
+            setAvailableFolders([]);
+          } else if (data) {
+            // Extract folder names
+            const folderNames = data.map(f => f.name);
+            setAvailableFolders(folderNames);
+          }
+          setLoadingFolders(false);
+        });
+    }
+  }, [scope, open, availableFolders.length, loadingFolders]);
+
   const handleCreate = async () => {
     setCreating(true);
     try {
@@ -90,15 +225,22 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
         matter_id: matterId,
         matter_name: matterName,
         matter_type: matterType,
+        case_number: caseNumber || undefined,
+        issuing_attorney: issuingAttorney,
         hold_reason: holdReason,
+        issue_date: issueDate || undefined,
+        effective_date: effectiveDate || undefined,
+        anticipated_end_date: anticipatedEndDate || undefined,
         scope,
         scope_details: {
           keywords: keywords.split(',').map(k => k.trim()).filter(Boolean),
           date_range: dateRangeStart && dateRangeEnd 
             ? { start: dateRangeStart, end: dateRangeEnd }
-            : undefined
+            : undefined,
+          document_ids: selectedDocumentIds.length > 0 ? selectedDocumentIds : undefined,
+          folder_names: selectedFolderNames.length > 0 ? selectedFolderNames : undefined
         },
-        custodian_emails: custodianEmails,
+        custodian_emails: custodians.map(c => c.email),
         requires_acknowledgment: requiresAcknowledgment,
         acknowledgment_deadline_days: acknowledgmentDeadline,
         send_reminders: sendReminders,
@@ -109,7 +251,12 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
         internal_notes: internalNotes
       };
 
-      await onCreateHold(params);
+      if (isEditing && onUpdateHold && initialData) {
+        await onUpdateHold(initialData.id, params);
+      } else {
+        await onCreateHold(params);
+      }
+      
       onOpenChange(false);
       resetForm();
     } finally {
@@ -124,12 +271,20 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
     setMatterName('');
     setMatterType('litigation');
     setCaseNumber('');
+    setIssuingAttorney('');
     setHoldReason('');
+    setIssueDate('');
+    setEffectiveDate('');
+    setAnticipatedEndDate('');
     setScope('search_criteria');
     setKeywords('');
     setDateRangeStart('');
     setDateRangeEnd('');
-    setCustodianEmails([]);
+    setSelectedDocumentIds([]);
+    setSelectedFolderIds([]);
+    setSelectedFolderNames([]);
+    setCustodians([]);
+    setNewCustodianName('');
     setNewCustodianEmail('');
     setRequiresAcknowledgment(true);
     setAcknowledgmentDeadline(5);
@@ -139,11 +294,17 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
     setEscalationAfterDays(14);
     setLegalTeamEmail('');
     setInternalNotes('');
+    // Clear cached data to force fresh fetch next time
+    setAvailableDocuments([]);
+    setAvailableFolders([]);
+    setDocumentSearchQuery('');
+    setFolderSearchQuery('');
   };
 
   const addCustodian = () => {
-    if (newCustodianEmail && !custodianEmails.includes(newCustodianEmail)) {
-      setCustodianEmails([...custodianEmails, newCustodianEmail]);
+    if (newCustodianEmail && newCustodianName && !custodians.some(c => c.email === newCustodianEmail)) {
+      setCustodians([...custodians, { name: newCustodianName, email: newCustodianEmail }]);
+      setNewCustodianName('');
       setNewCustodianEmail('');
     }
   };
@@ -184,7 +345,7 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Scale className="w-5 h-5 text-purple-600" />
-            Create Legal Hold
+            {isEditing ? 'Edit Legal Hold' : 'Create Legal Hold'}
           </DialogTitle>
           <DialogDescription>
             {step === 1 && 'Enter matter information and hold details'}
@@ -241,6 +402,16 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="issuingAttorney">Issuing Attorney</Label>
+                <Input
+                  id="issuingAttorney"
+                  placeholder="e.g., John Smith, Esq."
+                  value={issuingAttorney}
+                  onChange={(e) => setIssuingAttorney(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="matterName">Matter Name *</Label>
                 <Input
                   id="matterName"
@@ -267,6 +438,39 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
                       <span className="text-sm font-medium">{type.label}</span>
                     </button>
                   ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="issueDate">Issue Date</Label>
+                  <Input
+                    id="issueDate"
+                    type="date"
+                    value={issueDate}
+                    onChange={(e) => setIssueDate(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">When the hold was issued</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="effectiveDate">Effective Date</Label>
+                  <Input
+                    id="effectiveDate"
+                    type="date"
+                    value={effectiveDate}
+                    onChange={(e) => setEffectiveDate(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">When the hold takes effect</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="anticipatedEndDate">Anticipated End Date</Label>
+                  <Input
+                    id="anticipatedEndDate"
+                    type="date"
+                    value={anticipatedEndDate}
+                    onChange={(e) => setAnticipatedEndDate(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Expected release date</p>
                 </div>
               </div>
 
@@ -363,6 +567,161 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
                   </div>
                 </div>
               )}
+
+              {scope === 'specific_documents' && (
+                <div className="space-y-4">
+                  <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                    <p className="text-sm text-blue-600 font-medium">Document Selection</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Select individual documents to place on legal hold
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Search Documents</Label>
+                    <Input
+                      placeholder="Search by name or type..."
+                      value={documentSearchQuery}
+                      onChange={(e) => setDocumentSearchQuery(e.target.value)}
+                    />
+                  </div>
+
+                  {loadingDocuments ? (
+                    <div className="text-center py-8 text-muted-foreground">Loading documents...</div>
+                  ) : documentsError ? (
+                    <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+                      <p className="text-sm text-destructive font-medium">Error Loading Documents</p>
+                      <p className="text-xs text-muted-foreground mt-1">{documentsError}</p>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Run the SQL file: <code>add_documents_rls_policy.sql</code> in Supabase Dashboard
+                      </p>
+                    </div>
+                  ) : (
+                    <ScrollArea className="h-[300px] border rounded-lg p-4">
+                      <div className="space-y-2">
+                        {availableDocuments
+                          .filter(doc => 
+                            documentSearchQuery === '' || 
+                            doc.file_name.toLowerCase().includes(documentSearchQuery.toLowerCase()) ||
+                            doc.file_type?.toLowerCase().includes(documentSearchQuery.toLowerCase())
+                          )
+                          .map((doc) => (
+                            <div key={doc.id} className="flex items-center gap-3 p-2 hover:bg-muted rounded">
+                              <Checkbox
+                                checked={selectedDocumentIds.includes(doc.id)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setSelectedDocumentIds([...selectedDocumentIds, doc.id]);
+                                  } else {
+                                    setSelectedDocumentIds(selectedDocumentIds.filter(id => id !== doc.id));
+                                  }
+                                }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{doc.file_name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {doc.folder && `${doc.folder} • `}
+                                  {doc.file_type || 'Unknown type'} • 
+                                  {(doc.file_size / 1024).toFixed(1)} KB
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        {availableDocuments.length === 0 && (
+                          <p className="text-center text-sm text-muted-foreground py-4">No documents found</p>
+                        )}
+                      </div>
+                    </ScrollArea>
+                  )}
+                  
+                  <p className="text-xs text-muted-foreground">
+                    {selectedDocumentIds.length} document(s) selected
+                  </p>
+                </div>
+              )}
+
+              {scope === 'folder' && (
+                <div className="space-y-4">
+                  <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                    <p className="text-sm text-blue-600 font-medium">Folder Selection</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      All documents within the selected folders will be protected
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Search Folders</Label>
+                    <Input
+                      placeholder="Search folder names..."
+                      value={folderSearchQuery}
+                      onChange={(e) => setFolderSearchQuery(e.target.value)}
+                    />
+                  </div>
+
+                  {loadingFolders ? (
+                    <div className="text-center py-8 text-muted-foreground">Loading folders...</div>
+                  ) : foldersError ? (
+                    <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+                      <p className="text-sm text-destructive font-medium">Error Loading Folders</p>
+                      <p className="text-xs text-muted-foreground mt-1">{foldersError}</p>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Run the SQL file: <code>add_documents_rls_policy.sql</code> in Supabase Dashboard
+                      </p>
+                    </div>
+                  ) : (
+                    <ScrollArea className="h-[300px] border rounded-lg p-4">
+                      <div className="space-y-2">
+                        {availableFolders
+                          .filter(folder => 
+                            folderSearchQuery === '' || 
+                            folder.toLowerCase().includes(folderSearchQuery.toLowerCase())
+                          )
+                          .map((folder) => (
+                            <div key={folder} className="flex items-center gap-3 p-2 hover:bg-muted rounded">
+                              <Checkbox
+                                checked={selectedFolderNames.includes(folder)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setSelectedFolderNames([...selectedFolderNames, folder]);
+                                  } else {
+                                    setSelectedFolderNames(selectedFolderNames.filter(f => f !== folder));
+                                  }
+                                }}
+                              />
+                              <Folder className="w-4 h-4 text-blue-600" />
+                              <div className="flex-1">
+                                <p className="text-sm font-medium">{folder}</p>
+                              </div>
+                            </div>
+                          ))}
+                        {availableFolders.length === 0 && (
+                          <p className="text-center text-sm text-muted-foreground py-4">No folders found</p>
+                        )}
+                      </div>
+                    </ScrollArea>
+                  )}
+                  
+                  <p className="text-xs text-muted-foreground">
+                    {selectedFolderNames.length} folder(s) selected
+                  </p>
+                </div>
+              )}
+
+              {scope === 'custodian_content' && (
+                <div className="space-y-4">
+                  <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+                    <p className="text-sm text-purple-600 font-medium">Custodian Content Protection</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      All documents created, uploaded, or owned by the custodians you specify in the next step will be automatically protected.
+                      This includes all past and future documents.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+                    <Shield className="w-4 h-4 text-purple-600" />
+                    <p className="text-sm">Documents will be linked after adding custodians in Step 3</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -384,11 +743,19 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
                 <Label>Add Custodians</Label>
                 <div className="flex gap-2">
                   <Input
+                    placeholder="Custodian Name"
+                    value={newCustodianName}
+                    onChange={(e) => setNewCustodianName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addCustodian()}
+                    className="flex-1"
+                  />
+                  <Input
                     type="email"
                     placeholder="custodian@company.com"
                     value={newCustodianEmail}
                     onChange={(e) => setNewCustodianEmail(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && addCustodian()}
+                    className="flex-1"
                   />
                   <Button onClick={addCustodian} variant="outline">
                     <Plus className="w-4 h-4" />
@@ -396,24 +763,30 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
                 </div>
               </div>
 
-              {custodianEmails.length > 0 && (
+              {custodians.length > 0 && (
                 <div className="space-y-2">
-                  <Label>Added Custodians ({custodianEmails.length})</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {custodianEmails.map((email) => (
-                      <Badge key={email} variant="secondary" className="gap-1 py-1">
-                        <User className="w-3 h-3" />
-                        {email}
-                        <button onClick={() => setCustodianEmails(custodianEmails.filter(e => e !== email))}>
-                          <X className="w-3 h-3" />
+                  <Label>Added Custodians ({custodians.length})</Label>
+                  <div className="space-y-2">
+                    {custodians.map((custodian, index) => (
+                      <div key={index} className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+                        <User className="w-4 h-4 text-muted-foreground" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{custodian.name}</p>
+                          <p className="text-xs text-muted-foreground">{custodian.email}</p>
+                        </div>
+                        <button 
+                          onClick={() => setCustodians(custodians.filter((_, i) => i !== index))}
+                          className="text-destructive hover:bg-destructive/10 p-1 rounded"
+                        >
+                          <X className="w-4 h-4" />
                         </button>
-                      </Badge>
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {custodianEmails.length === 0 && (
+              {custodians.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">
                   <User className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p>No custodians added yet</p>
@@ -558,7 +931,9 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
               disabled={creating}
               className="bg-purple-600 hover:bg-purple-700"
             >
-              {creating ? 'Creating...' : 'Create Legal Hold'}
+              {creating 
+                ? (isEditing ? 'Updating...' : 'Creating...') 
+                : (isEditing ? 'Update Legal Hold' : 'Create Legal Hold')}
             </Button>
           )}
         </DialogFooter>

@@ -54,7 +54,8 @@ class DocumentAnalysisService:
         yolo_face_enabled: Optional[bool] = None,
         cancellation_token: Optional[Any] = None,
         request_id: Optional[str] = None,
-        document_type: Optional[str] = None
+        document_type: Optional[str] = None,
+        skip_workflow_trigger: bool = False
     ) -> DocumentAnalysisResponse:
         """
         Main entry point for document analysis
@@ -170,6 +171,16 @@ class DocumentAnalysisService:
                             logger.info(f"✅ AUTO-SAVE: Document saved with ID: {auto_saved_document.get('id')}")
                         else:
                             logger.warning("⚠️ AUTO-SAVE: Failed to save document")
+                    logger.info("💾 AUTO-SAVE: Saving extracted data to database (with embeddings)...")
+                    auto_saved_document = await self.database_service.save_document_to_database(
+                        document_data, processed_result, task, user_id, document_name, 
+                        chunks_data=chunks_data,  # All embeddings go to document_chunks table
+                        skip_workflow_trigger=skip_workflow_trigger
+                    )
+                    if auto_saved_document:
+                        logger.info(f"✅ AUTO-SAVE: Document saved with ID: {auto_saved_document.get('id')}")
+                    else:
+                        logger.warning("⚠️ AUTO-SAVE: Failed to save document")
                 except Exception as e:
                     logger.error(f"❌ AUTO-SAVE error: {e}")
                     auto_saved_document = None

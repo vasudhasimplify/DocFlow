@@ -6,3 +6,4 @@ export { CreateWorkflowDialog } from './CreateWorkflowDialog';
 export { CreateEscalationRuleDialog } from './CreateEscalationRuleDialog';
 export { WorkflowAnalyticsDashboard } from './WorkflowAnalyticsDashboard';
 export { VisualWorkflowBuilder } from './VisualWorkflowBuilder';
+export { StartWorkflowDialog } from './StartWorkflowDialog';

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, File, UploadFile
 from typing import Dict, Any, Optional, List
 import logging
 from datetime import datetime
@@ -238,7 +238,8 @@ async def analyze_document(request: DocumentAnalysisRequest):
             yolo_face_enabled=request.yoloFaceEnabled,
             cancellation_token=cancellation_event,
             request_id=request_id,
-            document_type=request.documentType
+            document_type=request.documentType,
+            skip_workflow_trigger=request.skipWorkflowTrigger
         )
         
         logger.info(f"Document analysis completed successfully for task: {request.task} (Request ID: {request_id})")
@@ -1114,24 +1115,23 @@ async def warmup_connections():
 # ============================================================================
 
 @analyze_router.post("/detect-document-type", response_model=DetectDocumentTypeResponse)
-async def detect_document_type(
-    file: bytes = Depends(lambda: None),
-    request: DetectDocumentTypeRequest = None
-):
+async def detect_document_type(file: UploadFile = File(...)):
     """
     Detect document type from uploaded PDF.
     Uses LLM to analyze first 2 pages and classify the document.
     """
     try:
-        from fastapi import File, UploadFile
-        logger.info(f"📄 Document type detection requested for: {request.filename if request else 'unknown'}")
+        logger.info(f"📄 Document type detection requested for: {file.filename}")
         
-        if not file:
+        # Read file bytes
+        file_bytes = await file.read()
+        
+        if not file_bytes:
             raise HTTPException(status_code=400, detail="No file provided")
         
         result = await document_type_detector.detect_type(
-            pdf_bytes=file,
-            filename=request.filename if request else "document.pdf"
+            file_bytes=file_bytes,
+            filename=file.filename or "document.pdf"
         )
         
         logger.info(f"✅ Document type detected: {result['document_type']} (confidence: {result['confidence']:.2f})")

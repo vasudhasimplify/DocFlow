@@ -78,6 +78,10 @@ export interface WorkflowInstance {
   current_step_index?: number;
   escalation_count?: number;
   step_instances?: StepInstance[];
+  // Phase 1: Document extraction
+  extracted_data?: Record<string, any>;
+  extraction_status?: 'extracted' | 'failed' | 'no_schema' | 'not_ready' | 'error';
+  data_status?: string;
 }
 
 export interface ExportConfig {
@@ -232,6 +236,11 @@ export interface EscalationRule {
   priority: Priority;
   conditions: EscalationCondition[];
   actions: EscalationActionConfig[];
+  trigger_after_hours: number;
+  trigger_after_minutes?: number;
+  repeat_every_hours?: number;
+  repeat_every_minutes?: number;
+  max_escalations: number;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -269,12 +278,17 @@ export interface EscalationHistory {
 export interface WorkflowStats {
   total_workflows: number;
   active_workflows: number;
+  draft_workflows?: number;
   running_instances: number;
   completed_today: number;
+  completed_this_month?: number;
   pending_approvals: number;
   overdue_tasks: number;
+  overdue_steps?: number;
   avg_completion_time: number;
+  average_completion_time_hours?: number;
   escalation_rate: number;
+  sla_compliance_rate?: number;
 }
 
 // Configuration objects
@@ -325,7 +339,7 @@ export const WORKFLOW_TEMPLATES = [
     id: 'document_approval',
     name: 'Document Approval',
     description: 'Standard document review and approval workflow',
-    category: 'document',
+    category: 'approval',
     steps: ['Submit', 'Review', 'Approve', 'Publish']
   },
   {
@@ -343,10 +357,10 @@ export const WORKFLOW_TEMPLATES = [
     steps: ['Draft Review', 'Legal Review', 'Executive Approval', 'Sign']
   },
   {
-    id: 'employee_onboarding',
-    name: 'Employee Onboarding',
-    description: 'New employee document collection and approval',
-    category: 'hr',
-    steps: ['Submit Documents', 'HR Review', 'Manager Approval', 'Complete']
+    id: 'hr_onboarding',
+    name: 'HR Onboarding',
+    description: 'Employee onboarding documentation workflow',
+    category: 'HR',
+    steps: ['Document Collection', 'HR Review', 'Manager Approval', 'IT Setup', 'Complete']
   }
 ];

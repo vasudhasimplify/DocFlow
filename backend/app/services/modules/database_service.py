@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional
 import os
 from datetime import datetime
 import uuid
+import asyncio
 
 # Use the singleton Supabase client for connection pooling
 from app.core.supabase_client import get_supabase_client, SUPABASE_AVAILABLE
@@ -144,7 +145,8 @@ class DatabaseService:
         task: str,
         user_id: str,
         document_name: Optional[str] = None,
-        chunks_data: Optional[List[Dict[str, Any]]] = None
+        chunks_data: Optional[List[Dict[str, Any]]] = None,
+        skip_workflow_trigger: bool = False
     ) -> Optional[Dict[str, Any]]:
         """Save document analysis result to database"""
         if not self.supabase:
@@ -439,6 +441,51 @@ class DatabaseService:
                     
             except Exception as status_error:
                 logger.warning(f"⚠️ Could not update processing_status: {status_error}")
+            
+            # WORKFLOW TRIGGER: Check for document_upload workflows (only if not skipped)
+            if not skip_workflow_trigger:
+                try:
+                    from ..workflow_trigger_service import WorkflowTriggerService
+                    from .document_type_detector import DocumentTypeDetector
+                    
+                    logger.info(f"🔍 WORKFLOW CHECK: Starting workflow trigger check for document {document_id}")
+                    
+                    # Detect document type
+                    detector = DocumentTypeDetector()
+                    doc_type_result = await detector.detect_document_type(
+                        text_sample=safe_result.get("text", "")[:5000],
+                        analysis_result=safe_result
+                    )
+                    document_type = doc_type_result.get("document_type", "general")
+                    logger.info(f"📋 DETECTED DOCUMENT TYPE: {document_type}")
+                    
+                    # Check for workflows and trigger them
+                    trigger_service = WorkflowTriggerService(self.supabase)
+                    triggered_workflows = await trigger_service.check_and_trigger_on_document_upload(
+                        document_id=document_id,
+                        document_type=document_type,
+                        document_name=inferred_file_name or "unknown",
+                        user_id=user_id,
+                        extracted_data=safe_result.get("hierarchical_data")
+                    )
+                    
+                    if triggered_workflows:
+                        logger.info(f"✅ SUCCESS: Auto-triggered {len(triggered_workflows)} workflow(s)")
+                        for wf in triggered_workflows:
+                            logger.info(f"   - Workflow Instance ID: {wf.get('id')}")
+                    else:
+                        logger.warning(f"⚠️ NO WORKFLOWS TRIGGERED: No active workflows found matching document type '{document_type}'")
+                        logger.info("💡 TIP: Check if you have:")
+                        logger.info("   1. Created workflows with trigger_type='document_upload'")
+                        logger.info("   2. Set workflow status='active'")
+                        logger.info(f"   3. Added '{document_type}' to trigger_config.document_types")
+                        logger.info("   4. Assigned emails to workflow steps")
+                except Exception as trigger_error:
+                    logger.error(f"❌ ERROR checking workflow triggers: {str(trigger_error)}")
+                    logger.exception("Full traceback:")
+                    # Don't fail document save if trigger fails
+            else:
+                logger.info("⏭️ Skipping workflow trigger (user disabled auto-start)")
             
             return {"id": document_id}
 

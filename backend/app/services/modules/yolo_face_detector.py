@@ -10,7 +10,12 @@ import logging
 import os
 from typing import List, Dict, Any, Optional
 from PIL import Image
-import numpy as np
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
 
 logger = logging.getLogger(__name__)
 

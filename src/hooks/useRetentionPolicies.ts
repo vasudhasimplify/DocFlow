@@ -70,13 +70,30 @@ export const useRetentionPolicies = () => {
       }
 
       if (holdsRes.data) {
-        setLegalHolds(holdsRes.data.map(h => ({
-          ...h,
-          document_ids: h.document_ids || [],
-          folder_ids: h.folder_ids || [],
-          search_criteria: (h.search_criteria as Record<string, unknown>) || undefined,
-          metadata: (h.metadata as Record<string, unknown>) || {},
-        })) as LegalHold[]);
+        // Fetch custodians for all holds
+        const holdsWithCustodians = await Promise.all(
+          holdsRes.data.map(async (h) => {
+            const { data: custodians } = await supabase
+              .from('legal_hold_custodians')
+              .select('*')
+              .eq('hold_id', h.id);
+            
+            const primaryCustodian = custodians?.[0];
+            
+            return {
+              ...h,
+              document_ids: h.document_ids || [],
+              folder_ids: h.folder_ids || [],
+              search_criteria: (h.search_criteria as Record<string, unknown>) || undefined,
+              metadata: (h.metadata as Record<string, unknown>) || {},
+              // Map first custodian to the old fields for backward compatibility
+              custodian_name: primaryCustodian?.name || h.custodian_name,
+              custodian_email: primaryCustodian?.email || h.custodian_email,
+            };
+          })
+        );
+        
+        setLegalHolds(holdsWithCustodians as LegalHold[]);
       }
 
       if (statusesRes.data) {
@@ -263,12 +280,79 @@ export const useRetentionPolicies = () => {
 
       if (error) throw error;
 
+      // Create custodian record if custodian info provided
+      const hasName = hold.custodian_name && hold.custodian_name.trim().length > 0;
+      const hasEmail = hold.custodian_email && hold.custodian_email.trim().length > 0;
+      
+      console.log('🔍 Retention hold custodian check:', {
+        holdId: data.id,
+        custodian_name: hold.custodian_name,
+        custodian_email: hold.custodian_email,
+        hasName,
+        hasEmail,
+        willCreateCustodian: data && (hasName || hasEmail)
+      });
+      
+      if (data && (hasName || hasEmail)) {
+        console.log('🔒 Creating custodian record for retention legal hold:', data.id);
+        
+        const custodianName = hold.custodian_name?.trim() || hold.custodian_email?.split('@')[0].replace(/[._]/g, ' ') || 'Custodian';
+        const custodianEmail = hold.custodian_email?.trim() || `${hold.custodian_name?.toLowerCase().replace(/\s+/g, '.')}@example.com`;
+        
+        const { data: custodianData, error: custError } = await supabase
+          .from('legal_hold_custodians')
+          .insert({
+            hold_id: data.id,
+            name: custodianName,
+            email: custodianEmail,
+            status: 'pending',
+            added_by: user.id
+          })
+          .select();
+        
+        if (custError) {
+          console.error('❌ Failed to create custodian record:', custError);
+        } else {
+          console.log('✅ Custodian record created:', custodianData);
+        }
+      } else {
+        console.log('⚠️ No custodian info provided or data is null, skipping custodian creation');
+      }
+
       toast({ title: 'Success', description: 'Legal hold created' });
       fetchData();
       return data;
     } catch (error) {
       console.error('Error creating legal hold:', error);
       toast({ title: 'Error', description: 'Failed to create legal hold', variant: 'destructive' });
+      throw error;
+    }
+  };
+
+  // Update a legal hold
+  const updateLegalHold = async (id: string, updates: Partial<Omit<LegalHold, 'id' | 'user_id' | 'created_at' | 'updated_at'>>) => {
+    try {
+      const { error } = await supabase
+        .from('legal_holds')
+        .update({
+          name: updates.name,
+          description: updates.description,
+          hold_reason: updates.hold_reason,
+          matter_id: updates.matter_id,
+          custodian_name: updates.custodian_name,
+          custodian_email: updates.custodian_email,
+          end_date: updates.end_date,
+          notes: updates.notes,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      toast({ title: 'Success', description: 'Legal hold updated' });
+      fetchData();
+    } catch (error) {
+      console.error('Error updating legal hold:', error);
+      toast({ title: 'Error', description: 'Failed to update legal hold', variant: 'destructive' });
       throw error;
     }
   };
@@ -461,6 +545,7 @@ export const useRetentionPolicies = () => {
     deletePolicy,
     createFromTemplate,
     createLegalHold,
+    updateLegalHold,
     releaseLegalHold,
     applyPolicyToDocument,
     disposeDocument,

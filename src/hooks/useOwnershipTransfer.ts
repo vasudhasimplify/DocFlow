@@ -14,6 +14,7 @@ export interface OwnershipTransfer {
   transferred_at: string | null;
   created_at: string;
   updated_at: string;
+  document_file_name?: string;
   document?: {
     id: string;
     file_name: string;
@@ -37,23 +38,44 @@ export function useOwnershipTransfer() {
 
       console.log('📧 Fetching transfers for user:', user.user.id, user.user.email);
 
-      const { data, error } = await (supabase
+      const { data, error } = await supabase
         .from('document_ownership_transfers')
         .select(`
-          *,
-          document:documents(id, file_name)
+          id,
+          document_id,
+          from_user_id,
+          to_user_id,
+          to_user_email,
+          from_user_email,
+          status,
+          message,
+          transferred_at,
+          created_at,
+          updated_at,
+          document_file_name,
+          documents(id, file_name)
         `)
         .or(`from_user_id.eq.${user.user.id},to_user_id.eq.${user.user.id}`)
-        .order('created_at', { ascending: false }) as any);
+        .order('created_at', { ascending: false });
 
       if (error) {
         console.error('📧 Error fetching transfers:', error);
         throw error;
       }
 
-      console.log('📧 All transfers fetched:', data?.length || 0, data);
+      console.log('📧 All transfers fetched:', data?.length || 0);
+      console.log('📧 Raw transfer data:', JSON.stringify(data, null, 2));
 
-      const allTransfers = (data || []) as OwnershipTransfer[];
+      // Transform the data to match the expected structure
+      const allTransfers = (data || []).map(transfer => {
+        console.log('📧 Processing transfer:', transfer.id, 'documents field:', transfer.documents);
+        return {
+          ...transfer,
+          document: transfer.documents || null
+        };
+      }) as OwnershipTransfer[];
+      
+      console.log('📧 Transformed transfers:', JSON.stringify(allTransfers.map(t => ({ id: t.id, document: t.document })), null, 2));
       setTransfers(allTransfers);
       
       const incoming = allTransfers.filter(t => t.to_user_id === user.user!.id && t.status === 'pending');

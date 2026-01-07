@@ -26,6 +26,7 @@ interface WorkflowStage {
   name: string;
   description?: string;
   assignee: string;
+  notificationEmails?: string[]; // Additional email addresses for CC
   slaHours: number;
   autoApprove: boolean;
   conditions: Array<{
@@ -354,6 +355,27 @@ export const WorkflowBuilder = ({
                   onChange={(e) => updateStage(selectedStage!, { assignee: e.target.value })}
                   placeholder="e.g., reviewer, manager, system"
                 />
+              </div>
+
+              <div>
+                <Label>
+                  Additional Notification Emails (CC)
+                  <span className="text-xs text-gray-500 ml-2">Optional - comma separated</span>
+                </Label>
+                <Input
+                  value={selectedStageData.notificationEmails?.join(', ') || ''}
+                  onChange={(e) => {
+                    const emails = e.target.value
+                      .split(',')
+                      .map(email => email.trim())
+                      .filter(email => email.length > 0);
+                    updateStage(selectedStage!, { notificationEmails: emails });
+                  }}
+                  placeholder="user@example.com, manager@example.com"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  These emails will be notified when this step is assigned and completed
+                </p>
               </div>
 
               <div>

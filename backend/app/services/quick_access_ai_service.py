@@ -233,7 +233,7 @@ class QuickAccessAIService:
                 return f"Accessed {access_count} time{'s' if access_count > 1 else ''} - relevant to your work"
             return "Relevant based on document characteristics"
         
-        return ' ΓÇó '.join(reasons)
+        return ' - '.join(reasons)
     
     async def batch_calculate_scores(self, user_id: str, limit: Optional[int] = None) -> int:
         """

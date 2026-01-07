@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,9 +12,21 @@ import {
   Check,
   X,
   Inbox,
+  Eye,
 } from 'lucide-react';
 import { useOwnershipTransfer, OwnershipTransfer } from '@/hooks/useOwnershipTransfer';
 import { formatDistanceToNow } from 'date-fns';
+import { DocumentViewer } from '@/components/document-manager/DocumentViewer';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+
+interface Document {
+  id: string;
+  file_name: string;
+  file_type: string;
+  storage_url?: string;
+  storage_path?: string;
+}
 
 export function PendingTransfersPanel() {
   const {
@@ -26,6 +38,59 @@ export function PendingTransfersPanel() {
     rejectTransfer,
     cancelTransfer,
   } = useOwnershipTransfer();
+
+  const { toast } = useToast();
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
+  const [showDocumentViewer, setShowDocumentViewer] = useState(false);
+  const [loadingDocumentId, setLoadingDocumentId] = useState<string | null>(null);
+
+  const handleViewDocument = async (documentId: string) => {
+    try {
+      setLoadingDocumentId(documentId);
+      
+      // Try to fetch the document - use maybeSingle to avoid error when no rows
+      const { data: document, error } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('id', documentId)
+        .maybeSingle();
+
+      // Check if there was an actual error (not just no rows)
+      if (error) {
+        console.error('Error fetching document:', error);
+        toast({
+          title: "Error loading document",
+          description: error.message || "Unable to load the document.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // If no document found
+      if (!document) {
+        console.log('⚠️ Document not found or not accessible');
+        toast({
+          title: "Document unavailable",
+          description: "This document may have been deleted or you no longer have access to it.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log('📄 Document fetched for viewing:', document);
+      setSelectedDocument(document);
+      setShowDocumentViewer(true);
+    } catch (error) {
+      console.error('Error loading document:', error);
+      toast({
+        title: "Error loading document",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingDocumentId(null);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -86,7 +151,7 @@ export function PendingTransfersPanel() {
                           <FileText className="h-4 w-4 text-amber-600" />
                         </div>
                         <div className="min-w-0">
-                          <p className="font-medium truncate">{transfer.document?.file_name || 'Document Transfer'}</p>
+                          <p className="font-medium truncate">{transfer.document_file_name || transfer.document?.file_name || 'Document Transfer'}</p>
                           <div className="flex items-center gap-1 text-xs text-muted-foreground">
                             <Mail className="h-3 w-3" />
                             <span>To: {transfer.to_user_email}</span>
@@ -103,6 +168,15 @@ export function PendingTransfersPanel() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 mt-3">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleViewDocument(transfer.document_id)}
+                        disabled={loadingDocumentId === transfer.document_id}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        View
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -148,7 +222,7 @@ export function PendingTransfersPanel() {
                           <FileText className="h-4 w-4 text-primary" />
                         </div>
                         <div className="min-w-0">
-                          <p className="font-medium truncate">{transfer.document?.file_name || 'Document Transfer'}</p>
+                          <p className="font-medium truncate">{transfer.document_file_name || transfer.document?.file_name || 'Document Transfer'}</p>
                           <div className="flex items-center gap-1 text-xs text-muted-foreground">
                             <Mail className="h-3 w-3" />
                             <span>From: {transfer.from_user_email || 'Unknown User'}</span>
@@ -165,6 +239,15 @@ export function PendingTransfersPanel() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 mt-3">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleViewDocument(transfer.document_id)}
+                        disabled={loadingDocumentId === transfer.document_id}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        View
+                      </Button>
                       <Button
                         size="sm"
                         className="flex-1"
@@ -199,25 +282,25 @@ export function PendingTransfersPanel() {
             Transfer History
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {transfers.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="text-center py-8 text-muted-foreground px-6">
               <UserCheck className="h-10 w-10 mx-auto mb-3 opacity-50" />
               <p className="text-sm">No ownership transfers yet</p>
             </div>
           ) : (
-            <ScrollArea className="max-h-[400px]">
-              <div className="space-y-2">
-                {transfers.slice(0, 10).map((transfer) => (
+            <ScrollArea className="h-[400px] px-6 pb-4">
+              <div className="space-y-2 pt-2">
+                {transfers.map((transfer) => (
                   <div
                     key={transfer.id}
-                    className="flex items-start justify-between gap-3 p-3 rounded-lg border"
+                    className="flex items-start justify-between gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
                   >
                     <div className="flex items-start gap-3 min-w-0 flex-1">
                       <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium truncate">
-                          {transfer.document?.file_name || 'Document'}
+                          {transfer.document_file_name || transfer.document?.file_name || 'Unnamed Document'}
                         </p>
                         <p className="text-xs text-muted-foreground truncate">
                           To: {transfer.to_user_email}
@@ -227,7 +310,15 @@ export function PendingTransfersPanel() {
                         </p>
                       </div>
                     </div>
-                    <div className="shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleViewDocument(transfer.document_id)}
+                        disabled={loadingDocumentId === transfer.document_id}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
                       {getStatusBadge(transfer.status)}
                     </div>
                   </div>
@@ -237,6 +328,16 @@ export function PendingTransfersPanel() {
           )}
         </CardContent>
       </Card>
+
+      {/* Document Viewer Dialog */}
+      <DocumentViewer
+        document={selectedDocument}
+        isOpen={showDocumentViewer}
+        onClose={() => {
+          setShowDocumentViewer(false);
+          setSelectedDocument(null);
+        }}
+      />
     </div>
   );
 }

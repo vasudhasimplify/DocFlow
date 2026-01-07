@@ -33,12 +33,16 @@ interface RetentionPolicyListProps {
   policies: RetentionPolicy[];
   templates: RetentionPolicyTemplate[];
   onCreatePolicy: () => void;
+  onEditPolicy?: (policy: RetentionPolicy) => void;
+  onDuplicatePolicy?: (policy: RetentionPolicy) => void;
 }
 
 export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
   policies,
   templates,
   onCreatePolicy,
+  onEditPolicy,
+  onDuplicatePolicy,
 }) => {
   const { updatePolicy, deletePolicy } = useRetentionPolicies();
   const [searchQuery, setSearchQuery] = useState('');
@@ -74,9 +78,9 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="p-6">
       {/* Toolbar */}
-      <div className="flex items-center gap-4 mb-4 shrink-0">
+      <div className="flex items-center gap-4 mb-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -106,7 +110,7 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
 
       {/* Policy Templates */}
       {templates.length > 0 && (
-        <div className="mb-6 shrink-0">
+        <div className="mb-6">
           <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
             <Shield className="h-4 w-4" />
             Quick Start Templates
@@ -136,8 +140,7 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
       )}
 
       {/* Policies List */}
-      <ScrollArea className="flex-1">
-        <div className="space-y-3">
+      <div className="space-y-3">
           {filteredPolicies.map((policy) => {
             const DispositionIcon = getDispositionIcon(policy.disposition_action);
             const triggerType = TRIGGER_TYPES.find(t => t.value === policy.trigger_type);
@@ -196,7 +199,21 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
                       <Switch
                         checked={policy.is_active}
                         onCheckedChange={(checked) => updatePolicy(policy.id, { is_active: checked })}
+                        className={cn(
+                          // smaller switch sizing and use primary color when checked
+                          "h-5 w-9",
+                          policy.is_active ? "data-[state=checked]:bg-primary-600" : "data-[state=unchecked]:bg-gray-200"
+                        )}
                       />
+                      <Badge
+                        variant={policy.is_active ? "default" : "secondary"}
+                        className={cn(
+                          "text-xs font-medium min-w-[40px] text-center",
+                          policy.is_active ? "bg-primary-600 text-white" : "bg-gray-300 text-gray-800"
+                        )}
+                      >
+                        {policy.is_active ? 'ON' : 'OFF'}
+                      </Badge>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon">
@@ -204,11 +221,11 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onEditPolicy?.(policy)}>
                             <Edit className="h-4 w-4 mr-2" />
                             Edit Policy
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onDuplicatePolicy?.(policy)}>
                             <Copy className="h-4 w-4 mr-2" />
                             Duplicate
                           </DropdownMenuItem>
@@ -240,8 +257,7 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
               </Button>
             </div>
           )}
-        </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 };

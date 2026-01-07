@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -22,6 +22,19 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
   Zap,
   ChevronRight,
   ChevronLeft,
@@ -34,8 +47,11 @@ import {
   XCircle,
   PauseCircle,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  ChevronsUpDown
 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { cn } from '@/lib/utils';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import {
   Priority,
@@ -47,6 +63,8 @@ import {
 interface CreateEscalationRuleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  workflowId?: string;  // NEW: Pre-select workflow when opened from workflow context
+  workflowName?: string;  // NEW: For display purposes
 }
 
 const actionIcons: Record<EscalationAction, React.ReactNode> = {
@@ -60,19 +78,35 @@ const actionIcons: Record<EscalationAction, React.ReactNode> = {
 
 export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProps> = ({
   open,
-  onOpenChange
+  onOpenChange,
+  workflowId,
+  workflowName
 }) => {
-  const { createEscalationRule, isLoading } = useWorkflows();
+  const { workflows, createEscalationRule, isLoading } = useWorkflows();
   const [step, setStep] = useState(1);
+  const [users, setUsers] = useState<{ email: string; name?: string }[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [managerSearchOpen, setManagerSearchOpen] = useState<{ [key: number]: boolean }>({});
+  
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     is_active: true,
+    scope: workflowId ? 'workflow' as const : 'global' as const,
+    workflow_id: workflowId || undefined,
     priority: 'medium' as Priority,
     trigger_after_hours: 24,
+    trigger_after_minutes: undefined as number | undefined,
     repeat_every_hours: 12,
+    repeat_every_minutes: undefined as number | undefined,
     max_escalations: 3,
-    actions: [] as { action: EscalationAction; delay_hours: number }[],
+    actions: [] as { 
+      action: EscalationAction; 
+      delay_hours: number;
+      assignee?: { email: string; name?: string };  // For reassign
+      manager_email?: string;  // For escalate_manager
+      reason?: string;  // For auto_reject
+    }[],
     notify_assignee: true,
     notify_escalation_target: true,
     notify_workflow_owner: true
@@ -93,9 +127,13 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
       name: formData.name,
       description: formData.description,
       is_active: formData.is_active,
+      is_global: formData.scope === 'global',           // NEW: Set based on scope
+      workflow_id: formData.scope === 'workflow' ? formData.workflow_id : null,  // NEW
       priority: formData.priority,
       trigger_after_hours: formData.trigger_after_hours,
+      trigger_after_minutes: formData.trigger_after_minutes,
       repeat_every_hours: formData.repeat_every_hours,
+      repeat_every_minutes: formData.repeat_every_minutes,
       max_escalations: formData.max_escalations,
       actions: formData.actions
     });
@@ -109,9 +147,13 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
       name: '',
       description: '',
       is_active: true,
+      scope: workflowId ? 'workflow' : 'global',  // Reset to workflow scope if opened from workflow
+      workflow_id: workflowId || undefined,       // Keep the workflow pre-selected
       priority: 'medium',
       trigger_after_hours: 24,
+      trigger_after_minutes: undefined,
       repeat_every_hours: 12,
+      repeat_every_minutes: undefined,
       max_escalations: 3,
       actions: [],
       notify_assignee: true,
@@ -119,6 +161,35 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
       notify_workflow_owner: true
     });
   };
+
+  // Fetch users from auth.users (for manager selection)
+  useEffect(() => {
+    const fetchUsers = async () => {
+      if (!open) return;
+      
+      setLoadingUsers(true);
+      try {
+        // Get distinct emails from workflow_step_instances assigned_email
+        const { data, error } = await supabase
+          .from('workflow_step_instances')
+          .select('assigned_email')
+          .not('assigned_email', 'is', null);
+        
+        if (error) throw error;
+        
+        // Get unique emails
+        const uniqueEmails = Array.from(new Set(data?.map(d => d.assigned_email).filter(Boolean)));
+        setUsers(uniqueEmails.map(email => ({ email: email as string })));
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        setUsers([]);
+      } finally {
+        setLoadingUsers(false);
+      }
+    };
+    
+    fetchUsers();
+  }, [open]);
 
   const addAction = (action: EscalationAction) => {
     setFormData(prev => ({
@@ -189,6 +260,82 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
                 />
               </div>
 
+              {/* NEW: Scope Selection */}
+              <div>
+                <Label htmlFor="scope">Rule Scope</Label>
+                <Select
+                  value={formData.scope}
+                  onValueChange={(value: 'global' | 'workflow' | 'step') => 
+                    setFormData(prev => ({ ...prev, scope: value, workflow_id: undefined }))
+                  }
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="z-[100]">
+                    <SelectItem value="global">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-blue-500" />
+                        <div>
+                          <div className="font-medium">Global</div>
+                          <div className="text-xs text-muted-foreground">Applies to all workflows</div>
+                        </div>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="workflow">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-purple-500" />
+                        <div>
+                          <div className="font-medium">Specific Workflow</div>
+                          <div className="text-xs text-muted-foreground">Applies to one workflow only</div>
+                        </div>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="step" disabled>
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-orange-500" />
+                        <div>
+                          <div className="font-medium">Specific Step</div>
+                          <div className="text-xs text-muted-foreground">Configure in Workflow Builder</div>
+                        </div>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {formData.scope === 'global' && 'This rule will apply to all workflow steps across the system'}
+                  {formData.scope === 'workflow' && 'This rule will only apply to steps in the selected workflow'}
+                  {formData.scope === 'step' && 'Step-specific rules are configured in the Workflow Builder'}
+                </p>
+              </div>
+
+              {/* NEW: Workflow Selector (only if scope is 'workflow') */}
+              {formData.scope === 'workflow' && (
+                <div>
+                  <Label htmlFor="workflow">Select Workflow</Label>
+                  <Select
+                    value={formData.workflow_id || ''}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, workflow_id: value }))}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Choose a workflow..." />
+                    </SelectTrigger>
+                    <SelectContent className="z-[100]">
+                      {workflows && workflows.filter(w => !w.is_template).map(workflow => (
+                        <SelectItem key={workflow.id} value={workflow.id}>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={workflow.status === 'active' ? 'default' : 'secondary'} className="text-xs">
+                              {workflow.status}
+                            </Badge>
+                            <span>{workflow.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <div>
                 <Label>Priority Level</Label>
                 <div className="grid grid-cols-4 gap-2 mt-2">
@@ -236,24 +383,56 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="trigger">Trigger After (hours)</Label>
-                    <Input
-                      id="trigger"
-                      type="number"
-                      value={formData.trigger_after_hours}
-                      onChange={(e) => setFormData(prev => ({ ...prev, trigger_after_hours: parseInt(e.target.value) || 24 }))}
-                      className="mt-1"
-                    />
+                    <Label htmlFor="trigger">Trigger After</Label>
+                    <div className="flex gap-2 mt-1">
+                      <div className="flex-1">
+                        <Input
+                          id="trigger-hours"
+                          type="number"
+                          placeholder="Hours"
+                          value={formData.trigger_after_hours || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, trigger_after_hours: parseInt(e.target.value) || undefined }))}
+                        />
+                        <span className="text-xs text-muted-foreground mt-0.5 block">hours</span>
+                      </div>
+                      <div className="flex-1">
+                        <Input
+                          id="trigger-minutes"
+                          type="number"
+                          placeholder="Minutes"
+                          value={formData.trigger_after_minutes || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, trigger_after_minutes: parseInt(e.target.value) || undefined }))}
+                        />
+                        <span className="text-xs text-muted-foreground mt-0.5 block">minutes (testing)</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">Use minutes for fast testing</p>
                   </div>
                   <div>
-                    <Label htmlFor="repeat">Repeat Every (hours)</Label>
-                    <Input
-                      id="repeat"
-                      type="number"
-                      value={formData.repeat_every_hours}
-                      onChange={(e) => setFormData(prev => ({ ...prev, repeat_every_hours: parseInt(e.target.value) || 12 }))}
-                      className="mt-1"
-                    />
+                    <Label htmlFor="repeat">Repeat Every</Label>
+                    <div className="flex gap-2 mt-1">
+                      <div className="flex-1">
+                        <Input
+                          id="repeat-hours"
+                          type="number"
+                          placeholder="Hours"
+                          value={formData.repeat_every_hours || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, repeat_every_hours: parseInt(e.target.value) || undefined }))}
+                        />
+                        <span className="text-xs text-muted-foreground mt-0.5 block">hours</span>
+                      </div>
+                      <div className="flex-1">
+                        <Input
+                          id="repeat-minutes"
+                          type="number"
+                          placeholder="Minutes"
+                          value={formData.repeat_every_minutes || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, repeat_every_minutes: parseInt(e.target.value) || undefined }))}
+                        />
+                        <span className="text-xs text-muted-foreground mt-0.5 block">minutes (testing)</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">Optional - leave empty to trigger once</p>
                   </div>
                 </div>
 
@@ -307,25 +486,145 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
                       return (
                         <div
                           key={index}
-                          className="flex items-center justify-between p-3 rounded-lg border bg-card"
+                          className="p-3 rounded-lg border bg-card space-y-3"
                         >
-                          <div className="flex items-center gap-3">
-                            <Badge variant="outline" className="h-6 w-6 p-0 justify-center">
-                              {index + 1}
-                            </Badge>
-                            <div className="flex items-center gap-2">
-                              {actionIcons[action.action]}
-                              <span className="font-medium text-sm">{config.label}</span>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Badge variant="outline" className="h-6 w-6 p-0 justify-center">
+                                {index + 1}
+                              </Badge>
+                              <div className="flex items-center gap-2">
+                                {actionIcons[action.action]}
+                                <span className="font-medium text-sm">{config.label}</span>
+                              </div>
                             </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => removeAction(index)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => removeAction(index)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+
+                          {/* Configuration fields based on action type */}
+                          {action.action === 'reassign' && (
+                            <div className="space-y-2 pl-9">
+                              <Label htmlFor={`reassign-email-${index}`} className="text-xs">
+                                Reassign To (Email)
+                              </Label>
+                              <Input
+                                id={`reassign-email-${index}`}
+                                type="email"
+                                placeholder="user@company.com"
+                                value={action.assignee?.email || ''}
+                                onChange={(e) => {
+                                  const updated = [...formData.actions];
+                                  updated[index] = {
+                                    ...updated[index],
+                                    assignee: { email: e.target.value }
+                                  };
+                                  setFormData(prev => ({ ...prev, actions: updated }));
+                                }}
+                                className="h-8"
+                              />
+                            </div>
+                          )}
+
+                          {action.action === 'escalate_manager' && (
+                            <div className="space-y-2 pl-9">
+                              <Label htmlFor={`manager-email-${index}`} className="text-xs">
+                                Manager Email
+                              </Label>
+                              <Popover 
+                                open={managerSearchOpen[index]} 
+                                onOpenChange={(isOpen) => setManagerSearchOpen(prev => ({ ...prev, [index]: isOpen }))}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={managerSearchOpen[index]}
+                                    className="h-8 w-full justify-between text-sm"
+                                  >
+                                    {action.manager_email || "Select or enter manager email..."}
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[400px] p-0">
+                                  <Command>
+                                    <CommandInput 
+                                      placeholder="Search or type email..." 
+                                      value={action.manager_email || ''}
+                                      onValueChange={(value) => {
+                                        const updated = [...formData.actions];
+                                        updated[index] = {
+                                          ...updated[index],
+                                          manager_email: value
+                                        };
+                                        setFormData(prev => ({ ...prev, actions: updated }));
+                                      }}
+                                    />
+                                    <CommandList>
+                                      <CommandEmpty>
+                                        {loadingUsers ? "Loading users..." : "No users found. Type to enter manually."}
+                                      </CommandEmpty>
+                                      {users.length > 0 && (
+                                        <CommandGroup heading="Available Users">
+                                          {users.map((user) => (
+                                            <CommandItem
+                                              key={user.email}
+                                              value={user.email}
+                                              onSelect={() => {
+                                                const updated = [...formData.actions];
+                                                updated[index] = {
+                                                  ...updated[index],
+                                                  manager_email: user.email
+                                                };
+                                                setFormData(prev => ({ ...prev, actions: updated }));
+                                                setManagerSearchOpen(prev => ({ ...prev, [index]: false }));
+                                              }}
+                                            >
+                                              <Check
+                                                className={cn(
+                                                  "mr-2 h-4 w-4",
+                                                  action.manager_email === user.email ? "opacity-100" : "opacity-0"
+                                                )}
+                                              />
+                                              {user.email}
+                                            </CommandItem>
+                                          ))}
+                                        </CommandGroup>
+                                      )}
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          )}
+
+                          {action.action === 'auto_reject' && (
+                            <div className="space-y-2 pl-9">
+                              <Label htmlFor={`reject-reason-${index}`} className="text-xs">
+                                Rejection Reason (Optional)
+                              </Label>
+                              <Input
+                                id={`reject-reason-${index}`}
+                                placeholder="e.g., SLA exceeded"
+                                value={action.reason || ''}
+                                onChange={(e) => {
+                                  const updated = [...formData.actions];
+                                  updated[index] = {
+                                    ...updated[index],
+                                    reason: e.target.value
+                                  };
+                                  setFormData(prev => ({ ...prev, actions: updated }));
+                                }}
+                                className="h-8"
+                              />
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -387,13 +686,39 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
                 </p>
 
                 <div className="space-y-2 text-sm">
+                  {/* NEW: Show scope */}
+                  <div className="flex items-center gap-2">
+                    <div className={`h-2 w-2 rounded-full ${
+                      formData.scope === 'global' ? 'bg-blue-500' : 
+                      formData.scope === 'workflow' ? 'bg-purple-500' : 
+                      'bg-orange-500'
+                    }`} />
+                    <span className="font-medium">
+                      {formData.scope === 'global' && 'Global Rule - Applies to all workflows'}
+                      {formData.scope === 'workflow' && `Workflow Rule - ${workflows?.find(w => w.id === formData.workflow_id)?.name || 'Selected workflow'}`}
+                      {formData.scope === 'step' && 'Step-specific Rule'}
+                    </span>
+                  </div>
+                  
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-muted-foreground" />
-                    <span>Triggers after {formData.trigger_after_hours} hours</span>
+                    <span>
+                      Triggers after {formData.trigger_after_hours || 0} hours
+                      {formData.trigger_after_minutes ? ` ${formData.trigger_after_minutes} minutes` : ''}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-muted-foreground" />
-                    <span>Repeats every {formData.repeat_every_hours} hours</span>
+                    <span>
+                      {formData.repeat_every_hours || formData.repeat_every_minutes ? (
+                        <>
+                          Repeats every {formData.repeat_every_hours || 0} hours
+                          {formData.repeat_every_minutes ? ` ${formData.repeat_every_minutes} minutes` : ''}
+                        </>
+                      ) : (
+                        'Triggers once only'
+                      )}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-muted-foreground" />
@@ -433,7 +758,13 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
               Cancel
             </Button>
             {step < totalSteps ? (
-              <Button onClick={handleNext}>
+              <Button 
+                onClick={handleNext}
+                disabled={
+                  (step === 1 && !formData.name) ||
+                  (step === 1 && formData.scope === 'workflow' && !formData.workflow_id)
+                }
+              >
                 Next
                 <ChevronRight className="h-4 w-4 ml-2" />
               </Button>

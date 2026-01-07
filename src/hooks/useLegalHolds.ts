@@ -36,13 +36,38 @@ export function useLegalHolds() {
       setHolds(prev => [newHold, ...prev]);
       toast({
         title: 'Legal hold created',
-        description: `"${newHold.name}" has been created and is now active`
+        description: `"${newHold.name}" has been submitted for approval`
       });
       return newHold;
     } catch (err: any) {
       toast({
         title: 'Error',
         description: err.message || 'Failed to create legal hold',
+        variant: 'destructive'
+      });
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  const updateHold = useCallback(async (holdId: string, params: Partial<CreateLegalHoldParams>): Promise<EnhancedLegalHold | null> => {
+    setLoading(true);
+    try {
+      const updatedHold = await legalHoldApi.updateHold(holdId, params);
+      
+      // Update the hold in the list
+      setHolds(prev => prev.map(h => h.id === holdId ? updatedHold : h));
+      
+      toast({
+        title: 'Legal hold updated',
+        description: `"${updatedHold.name}" has been updated successfully`
+      });
+      return updatedHold;
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to update legal hold',
         variant: 'destructive'
       });
       return null;
@@ -71,6 +96,44 @@ export function useLegalHolds() {
       toast({
         title: 'Error',
         description: err.message || 'Failed to release legal hold',
+        variant: 'destructive'
+      });
+      return false;
+    }
+  }, [toast, fetchHolds]);
+
+  const approveHold = useCallback(async (holdId: string): Promise<boolean> => {
+    try {
+      await legalHoldApi.approveHold(holdId);
+      await fetchHolds();
+      toast({
+        title: 'Legal hold approved',
+        description: 'The hold is now active and custodians will be notified'
+      });
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to approve legal hold',
+        variant: 'destructive'
+      });
+      return false;
+    }
+  }, [toast, fetchHolds]);
+
+  const rejectHold = useCallback(async (holdId: string, reason: string): Promise<boolean> => {
+    try {
+      await legalHoldApi.rejectHold(holdId, reason);
+      await fetchHolds();
+      toast({
+        title: 'Legal hold rejected',
+        description: 'The hold has been returned to draft status'
+      });
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to reject legal hold',
         variant: 'destructive'
       });
       return false;
@@ -165,6 +228,48 @@ export function useLegalHolds() {
     }
   }, [toast, fetchHolds]);
 
+  const acknowledgeCustodian = useCallback(async (holdId: string, custodianId: string): Promise<boolean> => {
+    try {
+      await legalHoldApi.acknowledgeCustodian(holdId, custodianId);
+
+      await fetchHolds();
+
+      toast({
+        title: 'Hold acknowledged',
+        description: 'You have successfully acknowledged this legal hold'
+      });
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to acknowledge',
+        variant: 'destructive'
+      });
+      return false;
+    }
+  }, [toast, fetchHolds]);
+
+  const sendNotifications = useCallback(async (holdId: string, custodianIds: string[], message: string): Promise<boolean> => {
+    try {
+      await legalHoldApi.sendNotifications(holdId, custodianIds, message);
+
+      await fetchHolds();
+
+      toast({
+        title: 'Notifications sent',
+        description: `Successfully sent notifications to ${custodianIds.length} custodian${custodianIds.length !== 1 ? 's' : ''}`
+      });
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to send notifications',
+        variant: 'destructive'
+      });
+      return false;
+    }
+  }, [toast, fetchHolds]);
+
   const getAuditTrail = useCallback(async (holdId: string): Promise<LegalHoldAuditEntry[]> => {
     try {
       return await legalHoldApi.getAuditTrail(holdId);
@@ -187,11 +292,16 @@ export function useLegalHolds() {
     loading,
     fetchHolds,
     createHold,
+    updateHold,
     releaseHold,
+    approveHold,
+    rejectHold,
     addCustodian,
     removeCustodian,
     sendReminder,
     escalateCustodian,
+    acknowledgeCustodian,
+    sendNotifications,
     getAuditTrail
   };
 }

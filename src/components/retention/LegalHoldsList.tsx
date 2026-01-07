@@ -25,19 +25,25 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useRetentionPolicies } from '@/hooks/useRetentionPolicies';
+import { useLegalHoldDocCounts } from '@/hooks/useLegalHoldDocCounts';
 import type { LegalHold } from '@/types/retention';
 import { cn } from '@/lib/utils';
+import { useNavigate } from 'react-router-dom';
 
 interface LegalHoldsListProps {
   holds: LegalHold[];
   onCreateHold: () => void;
+  onEditHold?: (hold: LegalHold) => void;
 }
 
 export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
   holds,
   onCreateHold,
+  onEditHold,
 }) => {
   const { releaseLegalHold } = useRetentionPolicies();
+  const { docCounts } = useLegalHoldDocCounts(holds.map(h => h.id));
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
@@ -72,9 +78,9 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col p-6">
+    <div className="p-6">
       {/* Toolbar */}
-      <div className="flex items-center gap-4 mb-4 shrink-0">
+      <div className="flex items-center gap-4 mb-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -104,7 +110,7 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
       </div>
 
       {/* Warning Banner */}
-      <Card className="mb-4 bg-purple-500/10 border-purple-500/30 shrink-0">
+      <Card className="mb-4 bg-purple-500/10 border-purple-500/30">
         <CardContent className="p-4 flex items-center gap-3">
           <AlertTriangle className="h-5 w-5 text-purple-500" />
           <div>
@@ -117,8 +123,7 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
       </Card>
 
       {/* Holds List */}
-      <ScrollArea className="flex-1">
-        <div className="space-y-3">
+      <div className="space-y-3">
           {filteredHolds.map((hold) => (
             <Card key={hold.id} className={cn(hold.status !== 'active' && "opacity-60")}>
               <CardContent className="p-4">
@@ -163,7 +168,7 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
                         )}
                         <span className="flex items-center gap-1">
                           <FileText className="h-3 w-3" />
-                          {hold.document_ids?.length || 0} documents
+                          {docCounts.get(hold.id) || 0} documents
                         </span>
                       </div>
                       {hold.status === 'released' && hold.release_reason && (
@@ -180,11 +185,11 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onEditHold?.(hold)}>
                         <Edit className="h-4 w-4 mr-2" />
                         Edit Hold
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate('/documents', { state: { legalHoldId: hold.id, legalHoldName: hold.name } })}>
                         <FileText className="h-4 w-4 mr-2" />
                         View Documents
                       </DropdownMenuItem>
@@ -220,8 +225,7 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
               </Button>
             </div>
           )}
-        </div>
-      </ScrollArea>
+      </div>
 
       {/* Release Dialog */}
       <Dialog open={releaseDialogOpen} onOpenChange={setReleaseDialogOpen}>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -35,9 +35,13 @@ import {
   CheckCircle2,
   Eye,
   ClipboardList,
-  Bell
+  Bell,
+  Mail,
+  User
 } from 'lucide-react';
 import { useWorkflows } from '@/hooks/useWorkflows';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
 import {
   TriggerType,
   StepType,
@@ -75,11 +79,32 @@ const stepIcons: Record<StepType, React.ReactNode> = {
   integration: <Webhook className="h-4 w-4" />
 };
 
+// Helper function to generate schedule preview text
+const getSchedulePreview = (formData: any): string => {
+  const { schedule_type, schedule_time, schedule_day, schedule_date, schedule_cron } = formData;
+  
+  switch (schedule_type) {
+    case 'hourly':
+      return 'Runs every hour at minute 0';
+    case 'daily':
+      return `Runs daily at ${schedule_time}`;
+    case 'weekly':
+      return `Runs every ${schedule_day} at ${schedule_time}`;
+    case 'monthly':
+      return `Runs on day ${schedule_date} of every month at ${schedule_time}`;
+    case 'cron':
+      return schedule_cron || 'Enter cron expression';
+    default:
+      return '';
+  }
+};
+
 export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
   open,
   onOpenChange
 }) => {
   const { createWorkflow, isLoading } = useWorkflows();
+  const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [useTemplate, setUseTemplate] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
@@ -90,10 +115,80 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
     category: 'approval',
     color: WORKFLOW_COLORS[0],
     trigger_type: 'manual' as TriggerType,
-    steps: [] as { name: string; type: StepType; sla_hours: number }[]
+    trigger_document_types: [] as string[], // For document_upload trigger
+    schedule_type: 'daily' as 'hourly' | 'daily' | 'weekly' | 'monthly' | 'cron', // For schedule trigger
+    schedule_time: '09:00', // Time for daily/weekly/monthly
+    schedule_day: 'monday' as 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday', // For weekly
+    schedule_date: 1, // For monthly (1-31)
+    schedule_cron: '', // For custom cron expression
+    steps: [] as Array<{
+      name: string;
+      type: StepType;
+      sla_hours: number;
+      assigned_email: string;
+      // Condition-specific fields
+      condition_label?: string;
+      condition_field?: string;
+      condition_operator?: string;
+      condition_value?: string;
+    }>
   });
 
+  const [employees, setEmployees] = useState<Array<{
+    id: string;
+    email: string;
+    full_name: string;
+    role: string;
+    department: string;
+    designation: string;
+  }>>([]);
+
+  const [availableFields, setAvailableFields] = useState<Array<{
+    name: string;
+    label: string;
+    type: string;
+    description: string;
+    operators: string[];
+  }>>([]);
+
   const totalSteps = 4;
+
+  // Fetch employees for suggestions
+  useEffect(() => {
+    const fetchEmployees = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('employees')
+          .select('id, email, full_name, role, department, designation')
+          .eq('is_active', true)
+          .order('department')
+          .order('full_name');
+        
+        if (error) throw error;
+        if (data) setEmployees(data);
+      } catch (error) {
+        console.error('Error fetching employees:', error);
+      }
+    };
+
+    if (open) {
+      fetchEmployees();
+    }
+
+    // Fetch available fields for condition configuration
+    const fetchAvailableFields = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/document-fields');
+        const data = await response.json();
+        if (data.fields) {
+          setAvailableFields(data.fields);
+        }
+      } catch (error) {
+        console.error('Error fetching document fields:', error);
+      }
+    };
+    fetchAvailableFields();
+  }, [open]);
 
   const handleNext = () => {
     if (step < totalSteps) setStep(step + 1);
@@ -104,6 +199,11 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
   };
 
   const handleCreate = async () => {
+    if (!user) {
+      console.error('No user found');
+      return;
+    }
+    
     await createWorkflow({
       name: formData.name,
       description: formData.description,
@@ -112,18 +212,33 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
       version: 1,
       status: 'draft',
       trigger_type: formData.trigger_type,
-      trigger_config: {},
+      trigger_config: {
+        document_types: formData.trigger_document_types.length > 0 
+          ? formData.trigger_document_types 
+          : ['all'],
+        schedule_type: formData.schedule_type,
+        schedule_time: formData.schedule_time,
+        schedule_day: formData.schedule_day,
+        schedule_date: formData.schedule_date,
+        schedule_cron: formData.trigger_type === 'schedule' && formData.schedule_type === 'cron'
+          ? formData.schedule_cron
+          : undefined
+      },
       steps: formData.steps.map((s, i) => ({
         id: `step-${i + 1}`,
         name: s.name,
         type: s.type,
         order: i + 1,
-        config: {},
-        assignees: [],
+        config: {
+          assigned_email: s.assigned_email // Store email in config
+        },
+        assignees: s.assigned_email ? [{
+          type: 'user',
+          value: s.assigned_email
+        }] : [],
         sla_hours: s.sla_hours,
         escalation_rules: []
       })),
-      created_by: 'current-user',
       is_template: false,
       tags: [formData.category],
       sla_settings: {
@@ -160,22 +275,45 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
       category: 'approval',
       color: WORKFLOW_COLORS[0],
       trigger_type: 'manual',
+      trigger_document_types: [],
+      schedule_type: 'daily',
+      schedule_time: '09:00',
+      schedule_day: 'monday',
+      schedule_date: 1,
+      schedule_cron: '',
       steps: []
     });
   };
 
   const addStep = (type: StepType) => {
-    setFormData(prev => ({
-      ...prev,
-      steps: [
-        ...prev.steps,
-        {
-          name: `${STEP_TYPE_CONFIG[type].label} Step`,
-          type,
-          sla_hours: 48
-        }
-      ]
-    }));
+    const baseStep = {
+      name: `${STEP_TYPE_CONFIG[type].label} Step`,
+      type,
+      sla_hours: 48,
+      assigned_email: ''
+    };
+
+    // Add condition-specific fields
+    if (type === 'condition') {
+      setFormData(prev => ({
+        ...prev,
+        steps: [
+          ...prev.steps,
+          {
+            ...baseStep,
+            condition_label: '',
+            condition_field: '',
+            condition_operator: 'greater_than',
+            condition_value: ''
+          }
+        ]
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        steps: [...prev.steps, baseStep]
+      }));
+    }
   };
 
   const removeStep = (index: number) => {
@@ -185,7 +323,16 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
     }));
   };
 
-  const updateStep = (index: number, updates: Partial<{ name: string; type: StepType; sla_hours: number }>) => {
+  const updateStep = (index: number, updates: Partial<{
+    name: string;
+    type: StepType;
+    sla_hours: number;
+    assigned_email: string;
+    condition_label: string;
+    condition_field: string;
+    condition_operator: string;
+    condition_value: string;
+  }>) => {
     setFormData(prev => ({
       ...prev,
       steps: prev.steps.map((s, i) => i === index ? { ...s, ...updates } : s)
@@ -194,8 +341,8 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <GitBranch className="h-5 w-5" />
             Create Workflow
@@ -210,7 +357,7 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
         </DialogHeader>
 
         {/* Progress */}
-        <div className="flex gap-1 mb-4">
+        <div className="flex gap-1 mb-4 flex-shrink-0">
           {Array.from({ length: totalSteps }).map((_, i) => (
             <div
               key={i}
@@ -221,7 +368,7 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
           ))}
         </div>
 
-        <ScrollArea className="max-h-[60vh] pr-4">
+        <div className="flex-1 overflow-y-auto pr-2">
           {/* Step 1: Template or Blank */}
           {step === 1 && (
             <div className="space-y-6">
@@ -319,6 +466,30 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
               </div>
 
               <div>
+                <Label htmlFor="category">Workflow Category</Label>
+                <Select
+                  value={formData.category}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, category: value }))}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="approval">Approval</SelectItem>
+                    <SelectItem value="finance">Finance</SelectItem>
+                    <SelectItem value="legal">Legal</SelectItem>
+                    <SelectItem value="hr">HR</SelectItem>
+                    <SelectItem value="operations">Operations</SelectItem>
+                    <SelectItem value="compliance">Compliance</SelectItem>
+                    <SelectItem value="general">General</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Category helps AI suggest this workflow for matching documents
+                </p>
+              </div>
+
+              <div>
                 <Label>Workflow Color</Label>
                 <div className="flex gap-2 mt-2">
                   {WORKFLOW_COLORS.map((color) => (
@@ -337,7 +508,10 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
 
               <div>
                 <Label>Trigger Type</Label>
-                <div className="grid grid-cols-2 gap-2 mt-2">
+                <p className="text-xs text-muted-foreground mt-1 mb-3">
+                  Choose how this workflow should be initiated
+                </p>
+                <div className="grid grid-cols-2 gap-2">
                   {(Object.entries(TRIGGER_TYPE_CONFIG) as [TriggerType, typeof TRIGGER_TYPE_CONFIG[TriggerType]][])
                     .slice(0, 4)
                     .map(([key, config]) => (
@@ -351,17 +525,176 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
                             : 'border-border hover:border-primary/50'
                         }`}
                       >
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 mb-1">
                           {triggerIcons[key]}
                           <span className="font-medium text-sm">{config.label}</span>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {config.description}
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          {key === 'manual' && 'Start workflow manually'}
+                          {key === 'document_upload' && 'Trigger on document upload'}
+                          {key === 'form_submission' && 'Trigger on form submission'}
+                          {key === 'schedule' && 'Run on a schedule'}
                         </p>
                       </button>
                     ))}
                 </div>
               </div>
+
+              {/* Schedule Configuration for schedule trigger */}
+              {formData.trigger_type === 'schedule' && (
+                <div className="p-4 rounded-lg border bg-muted/30">
+                  <Label className="mb-3 block">Schedule Configuration</Label>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <Label className="text-xs mb-2 block">Schedule Type</Label>
+                      <Select 
+                        value={formData.schedule_type} 
+                        onValueChange={(value: any) => setFormData(prev => ({ ...prev, schedule_type: value }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hourly">⏰ Every Hour</SelectItem>
+                          <SelectItem value="daily">📅 Daily</SelectItem>
+                          <SelectItem value="weekly">📆 Weekly</SelectItem>
+                          <SelectItem value="monthly">🗓️ Monthly</SelectItem>
+                          <SelectItem value="cron">⚙️ Custom (Cron)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {formData.schedule_type !== 'hourly' && formData.schedule_type !== 'cron' && (
+                      <div>
+                        <Label className="text-xs mb-2 block">Time</Label>
+                        <Input
+                          type="time"
+                          value={formData.schedule_time}
+                          onChange={(e) => setFormData(prev => ({ ...prev, schedule_time: e.target.value }))}
+                        />
+                      </div>
+                    )}
+
+                    {formData.schedule_type === 'weekly' && (
+                      <div>
+                        <Label className="text-xs mb-2 block">Day of Week</Label>
+                        <Select 
+                          value={formData.schedule_day} 
+                          onValueChange={(value: any) => setFormData(prev => ({ ...prev, schedule_day: value }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="monday">Monday</SelectItem>
+                            <SelectItem value="tuesday">Tuesday</SelectItem>
+                            <SelectItem value="wednesday">Wednesday</SelectItem>
+                            <SelectItem value="thursday">Thursday</SelectItem>
+                            <SelectItem value="friday">Friday</SelectItem>
+                            <SelectItem value="saturday">Saturday</SelectItem>
+                            <SelectItem value="sunday">Sunday</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {formData.schedule_type === 'monthly' && (
+                      <div>
+                        <Label className="text-xs mb-2 block">Day of Month</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="31"
+                          value={formData.schedule_date}
+                          onChange={(e) => setFormData(prev => ({ ...prev, schedule_date: parseInt(e.target.value) || 1 }))}
+                        />
+                      </div>
+                    )}
+
+                    {formData.schedule_type === 'cron' && (
+                      <div>
+                        <Label className="text-xs mb-2 block">Cron Expression</Label>
+                        <Input
+                          placeholder="0 9 * * 1-5"
+                          value={formData.schedule_cron}
+                          onChange={(e) => setFormData(prev => ({ ...prev, schedule_cron: e.target.value }))}
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Example: "0 9 * * 1-5" = 9 AM on weekdays
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
+                      <p className="text-xs text-blue-700 dark:text-blue-300">
+                        ℹ️ <strong>Schedule Preview:</strong> {getSchedulePreview(formData)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Document Types Configuration for document_upload trigger */}
+              {formData.trigger_type === 'document_upload' && (
+                <div className="p-4 rounded-lg border bg-muted/30">
+                  <Label className="mb-2 block">Document Types to Trigger</Label>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Select which document types should auto-start this workflow
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 'all', label: 'All Documents', icon: '📄' },
+                      { value: 'invoice', label: 'Invoices', icon: '🧾' },
+                      { value: 'flight-invoice', label: 'Flight Invoices', icon: '✈️' },
+                      { value: 'hotel-invoice', label: 'Hotel Invoices', icon: '🏨' },
+                      { value: 'tax-invoice', label: 'Tax Invoices', icon: '💼' },
+                      { value: 'purchase-order', label: 'Purchase Orders', icon: '📝' },
+                      { value: 'contract', label: 'Contracts', icon: '📜' },
+                      { value: 'receipt', label: 'Receipts', icon: '🧾' },
+                      { value: 'bill', label: 'Bills', icon: '💵' },
+                      { value: 'bank-statement', label: 'Bank Statements', icon: '🏦' },
+                      { value: 'resume', label: 'Resumes', icon: '👤' },
+                      { value: 'id-document', label: 'ID Documents', icon: '🪪' }
+                    ].map((docType) => (
+                      <button
+                        key={docType.value}
+                        type="button"
+                        onClick={() => {
+                          if (docType.value === 'all') {
+                            setFormData(prev => ({ ...prev, trigger_document_types: ['all'] }));
+                          } else {
+                            setFormData(prev => {
+                              const types = prev.trigger_document_types.filter(t => t !== 'all');
+                              const isSelected = types.includes(docType.value);
+                              return {
+                                ...prev,
+                                trigger_document_types: isSelected
+                                  ? types.filter(t => t !== docType.value)
+                                  : [...types, docType.value]
+                              };
+                            });
+                          }
+                        }}
+                        className={`p-2 rounded-lg border text-left transition-all text-sm ${
+                          formData.trigger_document_types.includes(docType.value) || 
+                          (formData.trigger_document_types.includes('all') && docType.value === 'all')
+                            ? 'border-primary bg-primary/10 font-medium'
+                            : 'border-border hover:border-primary/50'
+                        }`}
+                      >
+                        <span className="mr-1">{docType.icon}</span>
+                        {docType.label}
+                      </button>
+                    ))}
+                  </div>
+                  {formData.trigger_document_types.length === 0 && (
+                    <p className="text-xs text-amber-600 mt-2">
+                      ⚠️ Select at least one document type or "All Documents"
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -423,15 +756,162 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
                                 <Trash2 className="h-4 w-4 text-destructive" />
                               </Button>
                             </div>
-                            <div className="flex items-center gap-4">
-                              <div className="flex items-center gap-2">
-                                <Label className="text-xs">SLA (hours):</Label>
-                                <Input
-                                  type="number"
-                                  value={s.sla_hours}
-                                  onChange={(e) => updateStep(index, { sla_hours: parseInt(e.target.value) || 48 })}
-                                  className="w-20 h-8"
-                                />
+                            
+                            {/* Consistent blue-themed UI for all steps */}
+                            <div className="space-y-3 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                              <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                                {stepIcons[s.type]}
+                                <Label className="text-sm font-semibold">Step Configuration</Label>
+                              </div>
+
+                              {/* Condition-specific fields */}
+                              {s.type === 'condition' && (
+                                <div className="space-y-3 pb-3 border-b border-blue-200 dark:border-blue-800">
+                                  <div className="space-y-2">
+                                    <Label className="text-xs font-semibold text-blue-700 dark:text-blue-300">Condition Label:</Label>
+                                    <Input
+                                      value={s.condition_label || ''}
+                                      onChange={(e) => updateStep(index, { condition_label: e.target.value })}
+                                      placeholder="e.g., Amount > 10000"
+                                      className="h-8"
+                                    />
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <Label className="text-xs font-semibold text-blue-700 dark:text-blue-300">Field to Check:</Label>
+                                    <Select
+                                      value={s.condition_field || ''}
+                                      onValueChange={(value) => updateStep(index, { condition_field: value })}
+                                    >
+                                      <SelectTrigger className="h-8">
+                                        <SelectValue placeholder="Select a field..." />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <ScrollArea className="h-72">
+                                          {availableFields.length === 0 ? (
+                                            <div className="p-4 text-center text-sm text-muted-foreground">
+                                              Loading fields...
+                                            </div>
+                                          ) : (
+                                            availableFields.map((field) => (
+                                              <SelectItem key={field.name} value={field.name}>
+                                                <div className="flex flex-col">
+                                                  <div className="flex items-center gap-2">
+                                                    <span className="font-medium">{field.label}</span>
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                      {field.type}
+                                                    </Badge>
+                                                  </div>
+                                                  <span className="text-xs text-muted-foreground">
+                                                    {field.name}
+                                                  </span>
+                                                </div>
+                                              </SelectItem>
+                                            ))
+                                          )}
+                                        </ScrollArea>
+                                      </SelectContent>
+                                    </Select>
+                                    <p className="text-[10px] text-muted-foreground">
+                                      Select from extracted document fields
+                                    </p>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-2">
+                                      <Label className="text-xs font-semibold text-blue-700 dark:text-blue-300">Operator:</Label>
+                                      <Select
+                                        value={s.condition_operator || 'greater_than'}
+                                        onValueChange={(value) => updateStep(index, { condition_operator: value })}
+                                      >
+                                        <SelectTrigger className="h-8">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="equals">Equals (=)</SelectItem>
+                                          <SelectItem value="not_equals">Not Equals (≠)</SelectItem>
+                                          <SelectItem value="greater_than">Greater Than (&gt;)</SelectItem>
+                                          <SelectItem value="less_than">Less Than (&lt;)</SelectItem>
+                                          <SelectItem value="greater_or_equal">Greater or Equal (≥)</SelectItem>
+                                          <SelectItem value="less_or_equal">Less or Equal (≤)</SelectItem>
+                                          <SelectItem value="contains">Contains</SelectItem>
+                                          <SelectItem value="not_contains">Not Contains</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      <Label className="text-xs font-semibold text-blue-700 dark:text-blue-300">Value:</Label>
+                                      <Input
+                                        value={s.condition_value || ''}
+                                        onChange={(e) => updateStep(index, { condition_value: e.target.value })}
+                                        placeholder="e.g., 10000"
+                                        className="h-8"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Common fields for ALL steps (including condition) */}
+                              <div className="space-y-3">
+                                <div className="space-y-2">
+                                  <Label className="text-xs font-semibold text-blue-700 dark:text-blue-300">SLA Time:</Label>
+                                  <div className="flex items-center gap-2">
+                                    <Input
+                                      type="number"
+                                      value={s.sla_hours}
+                                      onChange={(e) => updateStep(index, { sla_hours: parseFloat(e.target.value) || 48 })}
+                                      className="w-20 h-8"
+                                      step="0.01"
+                                      min="0.01"
+                                    />
+                                    <span className="text-xs text-muted-foreground">hours</span>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label className="text-xs font-semibold text-blue-700 dark:text-blue-300 flex items-center gap-1">
+                                    <Mail className="h-3 w-3" />
+                                    Assign to:
+                                  </Label>
+                                  <Select
+                                    value={s.assigned_email}
+                                    onValueChange={(value) => updateStep(index, { assigned_email: value })}
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue placeholder="Select employee or enter email" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <ScrollArea className="h-48">
+                                        {employees.length === 0 ? (
+                                          <div className="p-4 text-center text-sm text-muted-foreground">
+                                            <User className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                                            No employees found. Enter email manually below.
+                                          </div>
+                                        ) : (
+                                          employees.map((emp) => (
+                                            <SelectItem key={emp.id} value={emp.email}>
+                                              <div className="flex flex-col">
+                                                <span className="font-medium">{emp.full_name}</span>
+                                                <span className="text-xs text-muted-foreground">
+                                                  {emp.role} • {emp.department} • {emp.email}
+                                                </span>
+                                              </div>
+                                            </SelectItem>
+                                          ))
+                                        )}
+                                      </ScrollArea>
+                                    </SelectContent>
+                                  </Select>
+                                  <Input
+                                    type="email"
+                                    placeholder="Or enter email manually"
+                                    value={s.assigned_email}
+                                    onChange={(e) => updateStep(index, { assigned_email: e.target.value })}
+                                    className="h-8 text-xs"
+                                  />
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -492,9 +972,9 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
               </div>
             </div>
           )}
-        </ScrollArea>
+        </div>
 
-        <DialogFooter className="flex justify-between">
+        <DialogFooter className="flex justify-between flex-shrink-0 mt-4 pt-4 border-t">
           <div>
             {step > 1 && (
               <Button variant="ghost" onClick={handleBack}>

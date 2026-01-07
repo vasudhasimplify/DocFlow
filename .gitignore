@@ -108,10 +108,18 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 env.bak/
 venv.bak/
 .pytest_cache/
+
+# Python virtual environment folders (Windows)
+Lib/
+Scripts/
+Include/
+pyvenv.cfg
+pip-selfcheck.json
 
 # FastAPI backend
 backend/__pycache__/

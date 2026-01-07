@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useToast } from '@/hooks/use-toast';
 import { useOfflineMode } from '@/hooks/useOfflineMode';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 
 import { FeatureNavigation } from './components/FeatureNavigation';
@@ -19,6 +19,7 @@ import {
 import { SyncNotificationDialog } from '../offline/SyncNotificationDialog';
 import { useDocuments } from './hooks/useDocuments';
 import { useDocumentFiltering } from './hooks/useDocumentFiltering';
+import { useQuickAccess } from '@/hooks/useQuickAccess';
 import type { Document, ViewMode, SortOrder } from './types';
 
 export function SimplifyDrive() {
@@ -82,6 +83,63 @@ export function SimplifyDrive() {
     syncSelectedUploads,
     closeSyncDialog,
   } = useOfflineMode();
+  const { trackAccess } = useQuickAccess();
+
+  // Handle legal hold filter from navigation state
+  useEffect(() => {
+    const state = location.state as { legalHoldId?: string; legalHoldName?: string };
+    if (state?.legalHoldId) {
+      setActiveFeature('documents');
+      // Fetch documents under this legal hold
+      const fetchLegalHoldDocuments = async () => {
+        try {
+          const { data: retentionStatuses, error } = await supabase
+            .from('document_retention_status')
+            .select('document_id')
+            .contains('legal_hold_ids', [state.legalHoldId]);
+          
+          if (error) {
+            console.error('Error fetching legal hold documents:', error);
+            return;
+          }
+
+          const documentIds = retentionStatuses?.map(s => s.document_id) || [];
+          
+          if (documentIds.length > 0) {
+            setSearchQuery(`legal_hold:${state.legalHoldId}:${documentIds.join(',')}`);
+            toast({
+              title: "Filtered by Legal Hold",
+              description: `Showing ${documentIds.length} document(s) under: ${state.legalHoldName || 'Legal Hold'}`,
+            });
+          } else {
+            toast({
+              title: "No Documents Found",
+              description: `No documents are currently under: ${state.legalHoldName || 'Legal Hold'}`,
+            });
+          }
+        } catch (error) {
+          console.error('Error loading legal hold documents:', error);
+        }
+      };
+      
+      fetchLegalHoldDocuments();
+      // Clear the state after using it
+      window.history.replaceState({}, document.title);
+    }
+  }, [location, toast]);
+
+  // Handle document deep link from email notifications
+  useEffect(() => {
+    const documentId = searchParams.get('document');
+    if (documentId && documents.length > 0) {
+      const doc = documents.find(d => d.id === documentId);
+      if (doc) {
+        setActiveFeature('documents'); // Switch to documents tab
+        setSelectedDocument(doc);
+        setShowDocumentViewer(true);
+      }
+    }
+  }, [searchParams, documents]);
 
   // Pending uploads state
   const [pendingUploads, setPendingUploads] = useState<any[]>([]);
@@ -186,14 +244,20 @@ export function SimplifyDrive() {
     refetch();
     toast({
       title: "Document uploaded successfully",
-      description: "Your document has been processed and saved",
+      description: "Your document has been processed and organized automatically. Matching workflows will start automatically.",
     });
+    
+    // The backend WorkflowTriggerService automatically handles workflow matching and starting
+    // No need to show manual workflow suggestion dialog
+    
   }, [refetch, toast]);
 
   const handleViewDocument = useCallback((doc: Document) => {
     setSelectedDocument(doc);
     setShowDocumentViewer(true);
-  }, []);
+    // Track document access for quick access feature
+    trackAccess(doc.id);
+  }, [trackAccess]);
 
   const handleDownloadDocument = useCallback((doc: Document) => {
     const downloadUrl = doc.storage_url || doc.storage_path;

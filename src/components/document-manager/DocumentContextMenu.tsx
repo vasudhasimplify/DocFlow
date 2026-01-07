@@ -27,6 +27,7 @@ import {
   Pin,
   Link2,
   UserMinus,
+  GitBranch,
 } from 'lucide-react';
 
 interface Document {
@@ -53,6 +54,7 @@ interface DocumentContextMenuProps {
   onCompliance?: () => void;
   onCreateShortcut?: () => void;
   onPinToQuickAccess?: () => void;
+  onStartWorkflow?: () => void;
   isPinned?: boolean;
 }
 
@@ -74,6 +76,7 @@ export const DocumentContextMenu: React.FC<DocumentContextMenuProps> = ({
   onCompliance,
   onCreateShortcut,
   onPinToQuickAccess,
+  onStartWorkflow,
   isPinned,
 }) => {
   return (
@@ -122,7 +125,18 @@ export const DocumentContextMenu: React.FC<DocumentContextMenuProps> = ({
         )}
         
         {(onAISummary || onCompare || onVersionHistory) && <DropdownMenuSeparator />}
+        Workflow Actions */}
+        {onStartWorkflow && (
+          <>
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onStartWorkflow(); }}>
+              <GitBranch className="w-4 h-4 mr-3 text-primary" />
+              Start Workflow
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         
+        {/* 
         {/* Share & Collaborate */}
         <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onShare(); }}>
           <Share2 className="w-4 h-4 mr-3" />
