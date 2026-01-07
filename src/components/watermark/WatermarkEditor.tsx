@@ -69,6 +69,7 @@ const fontOptions = [
 interface DocumentItem {
   id: string;
   file_name: string;
+  similarity?: number; // For semantic search results
 }
 
 export function WatermarkEditor() {
@@ -152,16 +153,16 @@ export function WatermarkEditor() {
     setShowCreateDialog(true);
   };
 
-  // Fetch documents for picker
+  // Fetch documents for picker with semantic search
   useEffect(() => {
     if (showCreateDialog) {
       const fetchDocuments = async () => {
-        setLoadingDocs(true);
         try {
           const { data: user } = await supabase.auth.getUser();
           if (!user.user) return;
 
-          let query = supabase
+          // Always show recent documents first (immediately, no loading state needed)
+          const recentQuery = supabase
             .from('documents')
             .select('id, file_name')
             .eq('user_id', user.user.id)
@@ -169,18 +170,78 @@ export function WatermarkEditor() {
             .order('created_at', { ascending: false })
             .limit(20);
 
-          if (docSearchQuery) {
-            query = query.ilike('file_name', `%${docSearchQuery}%`);
+          const { data: recentDocs } = await recentQuery;
+          if (recentDocs) {
+            setDocuments(recentDocs);
           }
 
-          const { data, error } = await query;
-          if (error) throw error;
-          setDocuments(data || []);
+          // If there's a search query, search content
+          if (docSearchQuery.trim().length >= 3) {
+            setLoadingDocs(true);
+            try {
+              console.log('🔍 Searching content for query:', docSearchQuery);
+              const searchTerm = docSearchQuery.trim().toLowerCase();
+
+              // Search file_name, extracted_text, and analysis_result (as text)
+              // Using textSearch for better content matching
+              const { data, error } = await supabase
+                .from('documents')
+                .select('id, file_name, extracted_text, analysis_result')
+                .eq('user_id', user.user.id)
+                .eq('is_deleted', false)
+                .order('created_at', { ascending: false })
+                .limit(100); // Get more docs to filter client-side
+
+              if (error) throw error;
+
+              // Filter client-side for better content matching
+              const matchedDocs = (data || []).filter(doc => {
+                const fileName = (doc.file_name || '').toLowerCase();
+                const extractedText = (doc.extracted_text || '').toLowerCase();
+                const analysisResult = doc.analysis_result ? JSON.stringify(doc.analysis_result).toLowerCase() : '';
+
+                return fileName.includes(searchTerm) ||
+                  extractedText.includes(searchTerm) ||
+                  analysisResult.includes(searchTerm);
+              }).slice(0, 20).map(doc => ({ id: doc.id, file_name: doc.file_name }));
+
+              console.log('✅ Content search results:', matchedDocs.length, 'out of', data?.length || 0, 'documents');
+              setDocuments(matchedDocs);
+            } catch (searchError) {
+              console.error('Content search failed, falling back to name search:', searchError);
+              // Fall back to name-only search if content search fails
+              await performNameSearch(user.user.id);
+            } finally {
+              setLoadingDocs(false);
+            }
+          } else if (docSearchQuery.trim().length > 0) {
+            // Use simple name-based search for very short queries
+            setLoadingDocs(true);
+            await performNameSearch(user.user.id);
+            setLoadingDocs(false);
+          }
         } catch (err) {
           console.error('Error fetching documents:', err);
-        } finally {
           setLoadingDocs(false);
         }
+      };
+
+      const performNameSearch = async (userId: string) => {
+        let query = supabase
+          .from('documents')
+          .select('id, file_name')
+          .eq('user_id', userId)
+          .eq('is_deleted', false)
+          .order('created_at', { ascending: false })
+          .limit(20);
+
+        if (docSearchQuery) {
+          query = query.ilike('file_name', `%${docSearchQuery}%`);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+        setDocuments(data || []);
       };
 
       const timer = setTimeout(fetchDocuments, 300);
@@ -457,7 +518,7 @@ export function WatermarkEditor() {
                       <div className="relative">
                         <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                         <Input
-                          placeholder="Search documents..."
+                          placeholder="Search by content or name..."
                           className="pl-8"
                           value={docSearchQuery}
                           onChange={(e) => {
@@ -472,14 +533,14 @@ export function WatermarkEditor() {
                         <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-md border bg-popover text-popover-foreground shadow-md outline-none animate-in fade-in-0 zoom-in-95">
                           <ScrollArea className="h-[200px] overflow-y-auto">
                             <div className="p-1">
-                              {loadingDocs ? (
+                              {(loadingDocs) ? (
                                 <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
                                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                  Loading...
+                                  Searching content...
                                 </div>
                               ) : documents.length === 0 ? (
                                 <div className="py-2 px-4 text-sm text-muted-foreground text-center">
-                                  No documents found
+                                  {docSearchQuery ? 'No documents found' : 'No documents available'}
                                 </div>
                               ) : (
                                 documents.map(doc => (
@@ -496,8 +557,13 @@ export function WatermarkEditor() {
                                       setDocSearchQuery('');
                                     }}
                                   >
-                                    <FileText className="h-4 w-4 opacity-50" />
-                                    <span className="truncate">{doc.file_name}</span>
+                                    <FileText className="h-4 w-4 opacity-50 flex-shrink-0" />
+                                    <span className="truncate flex-1">{doc.file_name}</span>
+                                    {doc.similarity && doc.similarity > 0.5 && (
+                                      <Badge variant="outline" className="text-[10px] px-1 py-0 ml-auto flex-shrink-0">
+                                        {Math.round(doc.similarity * 100)}%
+                                      </Badge>
+                                    )}
                                   </div>
                                 ))
                               )}
@@ -516,7 +582,7 @@ export function WatermarkEditor() {
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Leave empty to create a general watermark template
+                    Search by document content or file name (type 3+ characters)
                   </p>
                 </div>
 

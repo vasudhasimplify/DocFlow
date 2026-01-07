@@ -1,19 +1,26 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
-  Activity, 
-  Zap, 
-  AlertTriangle, 
+import { Button } from '@/components/ui/button';
+import {
+  Activity,
+  Zap,
+  AlertTriangle,
   Clock,
   TrendingUp,
   FileText,
-  HardDrive
+  HardDrive,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { formatDistanceToNow } from 'date-fns';
 import type { MigrationJob, MigrationMetrics, MigrationAuditLog } from '@/types/migration';
+import { useToast } from '@/hooks/use-toast';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import ReactMarkdown from 'react-markdown';
+import { supabase } from '@/integrations/supabase/client';
 
 interface MigrationMetricsPanelProps {
   job?: MigrationJob;
@@ -23,6 +30,12 @@ interface MigrationMetricsPanelProps {
 
 export function MigrationMetricsPanel({ job, metrics, auditLogs }: MigrationMetricsPanelProps) {
   const latestMetric = metrics[0];
+  const { toast } = useToast();
+
+  // AI Summary state
+  const [showSummary, setShowSummary] = useState(false);
+  const [summary, setSummary] = useState<string>('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const formatBytes = (bytes?: number | bigint) => {
     if (!bytes) return '0 B/s';
@@ -30,6 +43,45 @@ export function MigrationMetricsPanel({ job, metrics, auditLogs }: MigrationMetr
     if (numBytes < 1024) return `${numBytes} B/s`;
     if (numBytes < 1024 * 1024) return `${(numBytes / 1024).toFixed(1)} KB/s`;
     return `${(numBytes / (1024 * 1024)).toFixed(1)} MB/s`;
+  };
+
+  const handleGenerateSummary = async () => {
+    if (!job) return;
+
+    setIsGenerating(true);
+    try {
+      // Get authenticated user ID
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch(`/api/migration/generate-summary?user_id=${userData.user.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: job.id })
+      });
+
+      if (!response.ok) throw new Error('Failed to generate summary');
+
+      const data = await response.json();
+      setSummary(data.summary);
+      setShowSummary(true);
+
+      toast({
+        title: "AI Summary Generated",
+        description: "Migration analysis complete"
+      });
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      toast({
+        title: "Generation Failed",
+        description: "Could not generate AI summary",
+        variant: "destructive"
+      });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const chartData = [...metrics].reverse().map((m, i) => ({
@@ -66,11 +118,33 @@ export function MigrationMetricsPanel({ job, metrics, auditLogs }: MigrationMetr
       {/* Real-time Stats */}
       <Card className="lg:col-span-2">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            Live Performance
-          </CardTitle>
-          <CardDescription>Real-time migration throughput</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5" />
+                Live Performance
+              </CardTitle>
+              <CardDescription>Real-time migration throughput</CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleGenerateSummary}
+              disabled={isGenerating}
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  AI Summary
+                </>
+              )}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Current Stats */}
@@ -109,17 +183,17 @@ export function MigrationMetricsPanel({ job, metrics, auditLogs }: MigrationMetr
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="time" tick={false} />
                   <YAxis />
-                  <Tooltip 
-                    contentStyle={{ 
+                  <Tooltip
+                    contentStyle={{
                       backgroundColor: 'hsl(var(--background))',
                       border: '1px solid hsl(var(--border))'
                     }}
                   />
-                  <Area 
-                    type="monotone" 
-                    dataKey="filesPerMin" 
-                    stroke="hsl(var(--primary))" 
-                    fill="hsl(var(--primary))" 
+                  <Area
+                    type="monotone"
+                    dataKey="filesPerMin"
+                    stroke="hsl(var(--primary))"
+                    fill="hsl(var(--primary))"
                     fillOpacity={0.3}
                     name="Files/min"
                   />
@@ -184,6 +258,21 @@ export function MigrationMetricsPanel({ job, metrics, auditLogs }: MigrationMetr
           </ScrollArea>
         </CardContent>
       </Card>
+
+      {/* AI Summary Dialog */}
+      <Dialog open={showSummary} onOpenChange={setShowSummary}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              AI Migration Summary
+            </DialogTitle>
+          </DialogHeader>
+          <div className="prose prose-sm max-w-none dark:prose-invert">
+            <ReactMarkdown>{summary}</ReactMarkdown>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

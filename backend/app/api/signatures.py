@@ -357,10 +357,14 @@ async def preview_document(request_id: str):
 
 
 @router.get("/download-signed/{request_id}")
-async def download_signed_pdf(request_id: str):
+async def download_signed_pdf(request_id: str, view: bool = False):
     """
     Generate and download a signed PDF with all signatures embedded on the document.
     If no PDF is attached, creates a signature certificate document.
+    
+    Args:
+        request_id: The signature request ID
+        view: If True, opens in browser; if False, downloads as file
     """
     try:
         print(f"Generating signed PDF for request: {request_id}")
@@ -632,11 +636,13 @@ async def download_signed_pdf(request_id: str):
         filename = f"{safe_title}_signed.pdf"
         
         # Return as streaming response
+        # Use 'inline' to view in browser, 'attachment' to download
+        disposition = "inline" if view else "attachment"
         return StreamingResponse(
             io.BytesIO(output_bytes),
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f'attachment; filename="{filename}"'
+                "Content-Disposition": f'{disposition}; filename="{filename}"'
             }
         )
         
@@ -757,3 +763,282 @@ def create_signature_certificate_pdf(request_data: dict, signers: list) -> fitz.
     
     return doc
 
+
+class SaveToDriveRequest(BaseModel):
+    user_id: str  # The user who wants to save (can be sender or receiver)
+    source_document_id: Optional[str] = None  # If provided, creates new version
+
+
+@router.post("/save-to-drive/{request_id}")
+async def save_signed_to_drive(request_id: str, body: SaveToDriveRequest):
+    """
+    Save the signed PDF to the user's SimplifyDrive.
+    - If source_document_id is provided, creates a new version of that document
+    - Otherwise, creates a new document
+    Works for both sender and receiver.
+    """
+    try:
+        print(f"💾 Saving signed PDF to drive for request: {request_id}, user: {body.user_id}")
+        
+        # First, generate the signed PDF bytes (reuse existing logic)
+        # Get the signature request details
+        response = get_supabase().table('signature_requests').select(
+            '*'
+        ).eq('id', request_id).single().execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Signature request not found")
+        
+        request_data = response.data
+        
+        # Generate signed PDF using existing download logic
+        # Call the download endpoint internally to get PDF bytes
+        import asyncio
+        
+        # Get all signers for this request
+        signers_response = get_supabase().table('signature_signers').select(
+            '*'
+        ).eq('request_id', request_id).order('signing_order').execute()
+        
+        signers = signers_response.data or []
+        
+        # Check if there's an original document URL
+        document_url = request_data.get('document_url')
+        
+        # Determine file type from URL
+        def get_file_extension(url: str) -> str:
+            if not url:
+                return ''
+            base_url = url.split('?')[0]
+            if base_url.startswith('storage://'):
+                base_url = base_url.replace('storage://', '')
+            if '.' in base_url:
+                return base_url.rsplit('.', 1)[-1].lower()
+            return ''
+        
+        # Handle storage:// format URLs
+        async def get_downloadable_url(url: str) -> str:
+            if not url:
+                return url
+            
+            bucket = None
+            file_path = None
+            
+            if url.startswith('storage://'):
+                path = url.replace('storage://', '')
+                parts = path.split('/', 1)
+                if len(parts) == 2:
+                    bucket, file_path = parts
+            elif '/storage/v1/object/public/' in url:
+                try:
+                    public_idx = url.index('/storage/v1/object/public/') + len('/storage/v1/object/public/')
+                    path_part = url[public_idx:]
+                    parts = path_part.split('/', 1)
+                    if len(parts) == 2:
+                        bucket, file_path = parts
+                except Exception:
+                    pass
+            
+            if bucket and file_path:
+                signed_response = get_supabase().storage.from_(bucket).create_signed_url(
+                    file_path, 
+                    3600
+                )
+                if signed_response.get('signedURL'):
+                    return signed_response['signedURL']
+            
+            return url
+        
+        file_ext = get_file_extension(document_url) if document_url else ''
+        is_pdf = file_ext == 'pdf'
+        is_image = file_ext in ['jpg', 'jpeg', 'png', 'gif', 'webp']
+        
+        if document_url and (is_pdf or is_image):
+            download_url = await get_downloadable_url(document_url)
+            
+            async with httpx.AsyncClient() as client:
+                doc_response = await client.get(download_url, timeout=30.0)
+                doc_response.raise_for_status()
+                doc_bytes = doc_response.content
+            
+            if is_pdf:
+                doc = fitz.open(stream=doc_bytes, filetype="pdf")
+            else:
+                doc = fitz.open()
+                img = fitz.Pixmap(doc_bytes)
+                page_width = min(img.width * 0.75, 612)
+                page_height = min(img.height * 0.75, 792)
+                page = doc.new_page(width=page_width, height=page_height)
+                rect = page.rect
+                page.insert_image(rect, stream=doc_bytes)
+        else:
+            doc = create_signature_certificate_pdf(request_data, signers)
+        
+        # Add signatures (same logic as download)
+        last_page = doc[-1]
+        page_width = last_page.rect.width
+        page_height = last_page.rect.height
+        
+        signature_y_start = page_height - 200
+        signature_width = 150
+        signature_height = 50
+        margin = 50
+        
+        last_page.insert_text(
+            (margin, signature_y_start - 30),
+            "ELECTRONIC SIGNATURES",
+            fontsize=12,
+            fontname="helv",
+            color=(0, 0, 0)
+        )
+        
+        last_page.draw_line(
+            (margin, signature_y_start - 20),
+            (page_width - margin, signature_y_start - 20),
+            color=(0.5, 0.5, 0.5),
+            width=1
+        )
+        
+        x_position = margin
+        y_position = signature_y_start
+        signatures_per_row = int((page_width - 2 * margin) / (signature_width + 20))
+        current_col = 0
+        
+        for signer in signers:
+            if signer.get('status') == 'signed' and signer.get('signature_data_url'):
+                try:
+                    data_url = signer['signature_data_url']
+                    if ',' in data_url:
+                        base64_data = data_url.split(',')[1]
+                    else:
+                        base64_data = data_url
+                    
+                    signature_bytes = base64.b64decode(base64_data)
+                    
+                    position = signer.get('signature_position')
+                    
+                    if position and isinstance(position, dict):
+                        target_page_num = position.get('page', len(doc))
+                        target_page = doc[min(target_page_num - 1, len(doc) - 1)]
+                        
+                        target_page_width = target_page.rect.width
+                        target_page_height = target_page.rect.height
+                        
+                        sig_width = position.get('width', signature_width)
+                        sig_height = position.get('height', signature_height)
+                        
+                        sig_x = (position.get('xPercent', 50) / 100) * target_page_width - sig_width / 2
+                        sig_y = (position.get('yPercent', 80) / 100) * target_page_height - sig_height / 2
+                        
+                        sig_x = max(0, min(sig_x, target_page_width - sig_width))
+                        sig_y = max(0, min(sig_y, target_page_height - sig_height))
+                        
+                        sig_rect = fitz.Rect(sig_x, sig_y, sig_x + sig_width, sig_y + sig_height)
+                        target_page.insert_image(sig_rect, stream=signature_bytes)
+                    else:
+                        sig_rect = fitz.Rect(x_position, y_position, x_position + signature_width, y_position + signature_height)
+                        last_page.insert_image(sig_rect, stream=signature_bytes)
+                    
+                    last_page.insert_text(
+                        (x_position, y_position + signature_height + 12),
+                        signer.get('name', 'Unknown'),
+                        fontsize=8,
+                        fontname="helv",
+                        color=(0, 0, 0)
+                    )
+                    
+                    signed_at = signer.get('signed_at')
+                    if signed_at:
+                        try:
+                            sign_date = datetime.fromisoformat(signed_at.replace('Z', '+00:00'))
+                            date_str = sign_date.strftime('%Y-%m-%d %H:%M')
+                        except:
+                            date_str = signed_at[:10] if len(signed_at) >= 10 else signed_at
+                        
+                        last_page.insert_text(
+                            (x_position, y_position + signature_height + 22),
+                            f"Signed: {date_str}",
+                            fontsize=6,
+                            fontname="helv",
+                            color=(0.5, 0.5, 0.5)
+                        )
+                    
+                    current_col += 1
+                    if current_col >= signatures_per_row:
+                        current_col = 0
+                        x_position = margin
+                        y_position += signature_height + 40
+                    else:
+                        x_position += signature_width + 20
+                        
+                except Exception as e:
+                    print(f"Failed to add signature for {signer.get('name')}: {e}")
+        
+        # Save to bytes
+        output_bytes = doc.write()
+        doc.close()
+        
+        # Create filename from document_name (the original uploaded file name)
+        # If document_name exists, use it; otherwise fall back to title
+        doc_name = request_data.get('document_name', '') or request_data.get('title', 'document')
+        # Remove extension if present
+        if doc_name.lower().endswith('.pdf'):
+            doc_name = doc_name[:-4]
+        safe_name = "".join(c for c in doc_name if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+        
+        # Add timestamp to make filename unique
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_filename = f"{safe_name}_signed_{timestamp}.pdf"
+        storage_path = f"{body.user_id}/{unique_filename}"
+        
+        print(f"📤 Uploading to storage: {storage_path}")
+        
+        upload_response = get_supabase().storage.from_('documents').upload(
+            storage_path,
+            output_bytes,
+            file_options={"content-type": "application/pdf"}
+        )
+        
+        if hasattr(upload_response, 'error') and upload_response.error:
+            raise HTTPException(status_code=500, detail=f"Failed to upload: {upload_response.error}")
+        
+        print(f"📄 Creating new document for user: {body.user_id}")
+        
+        # Create new document using actual database columns
+        doc_record = {
+            'user_id': body.user_id,
+            'uploaded_by': body.user_id,
+            'file_name': unique_filename,
+            'storage_path': storage_path,
+            'file_type': 'pdf',
+            'document_type': 'application/pdf',
+            'file_size': len(output_bytes),
+            'mime_type': 'application/pdf',
+            'processing_status': 'completed',
+            'is_deleted': False
+        }
+        
+        doc_result = get_supabase().table('documents').insert(doc_record).execute()
+        
+        if doc_result.data:
+            new_doc_id = doc_result.data[0].get('id')
+            print(f"✅ Created new document: {new_doc_id}")
+            
+            return {
+                "success": True,
+                "message": "Signed document saved to SimplifyDrive",
+                "document_id": new_doc_id,
+                "file_name": unique_filename,
+                "storage_path": storage_path
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create document record")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error saving signed PDF to drive: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

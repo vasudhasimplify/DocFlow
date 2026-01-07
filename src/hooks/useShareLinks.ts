@@ -128,7 +128,6 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
         track_views: true,
         watermark_enabled: params.watermark_enabled ?? false,
         watermark_text: params.watermark_text,
-        watermark_text: params.watermark_text,
         download_count: 0,
         unique_visitor_ids: [],
         name: params.name,
@@ -419,11 +418,25 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
 
   // Filter functions for different categories
   const getActiveLinks = useCallback(() => {
-    return links.filter(l => l.is_active && (!l.expires_at || new Date(l.expires_at) > new Date()));
+    return links.filter(l => {
+      // Must be active
+      if (!l.is_active) return false;
+      // Must not be expired by date
+      if (l.expires_at && new Date(l.expires_at) <= new Date()) return false;
+      // Must not have reached max uses limit
+      if (l.max_uses && l.use_count >= l.max_uses) return false;
+      return true;
+    });
   }, [links]);
 
   const getExpiredLinks = useCallback(() => {
-    return links.filter(l => l.is_active && l.expires_at && new Date(l.expires_at) <= new Date());
+    // Show links that have passed their expiration date (regardless of is_active status)
+    // Also include links that reached their max_uses limit
+    return links.filter(l => {
+      const isExpiredByDate = l.expires_at && new Date(l.expires_at) <= new Date();
+      const isExpiredByUsage = l.max_uses && l.use_count >= l.max_uses;
+      return isExpiredByDate || isExpiredByUsage;
+    });
   }, [links]);
 
   const getRevokedLinks = useCallback(() => {

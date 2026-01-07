@@ -500,7 +500,14 @@ export const SignatureDashboard: React.FC = () => {
                               </Button>
                             )}
                             {request.status === 'completed' && (
-                              <Button variant="outline" size="sm">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const apiUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/signatures/download-signed/${request.id}`;
+                                  window.open(apiUrl, '_blank');
+                                }}
+                              >
                                 <Download className="h-3.5 w-3.5 mr-1.5" />
                                 Download
                               </Button>

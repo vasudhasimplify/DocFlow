@@ -43,6 +43,7 @@ class MigrationEngine:
         self.last_metrics_time: float = 0
         self.metrics_interval: float = 5.0  # Record metrics every 5 seconds
         self.throttle_count: int = 0
+        self.is_cancelled: bool = False
         
     async def start_migration(self):
         """Start ultra-fast migration with timing."""
@@ -75,6 +76,25 @@ class MigrationEngine:
             transfer_start = time.time()
             await self._transfer_files_ultra_fast()
             transfer_time = time.time() - transfer_start
+            
+            # Check if we actually finished everything despite cancellation flag
+            job = self._get_job()
+            total_items = job.get('total_items', 0)
+            items_processed_total = self.processed_count + self.failed_count
+            
+            # Only mark as cancelled if we stopped EARLY
+            if self.is_cancelled and items_processed_total < total_items:
+                logger.info(f"🛑 Migration cancelled after processing {items_processed_total}/{total_items} files")
+                # IMPORTANT: Record final metrics so counts match
+                self._record_metrics()
+                # Ensure DB status is definitely cancelled with correct counts
+                self._update_job_status(
+                    'cancelled',
+                    processed_items=self.processed_count,
+                    failed_items=self.failed_count,
+                    transferred_bytes=self.total_bytes
+                )
+                return
             
             # Calculate final stats
             total_time = time.time() - self.start_time
@@ -240,28 +260,58 @@ class MigrationEngine:
         
         job = self._get_job()
         user_id = job['user_id']
+        delete_after = job.get('config', {}).get('delete_after_migration', False)
         
-        logger.info(f"📦 Transferring {len(items)} files with {self.concurrency} async workers")
+        # Pre-fetch identity mappings once for efficiency
+        identity_mappings = self._get_identity_mappings(user_id)
+        logger.info(f"🔗 Loaded {len(identity_mappings)} identity mappings for user")
         
-        # Use aiohttp for async downloads
-        connector = aiohttp.TCPConnector(limit=self.concurrency, ssl=False)
-        timeout = aiohttp.ClientTimeout(total=120)
+        logger.info(f"📦 Transferring {len(items)} files with {self.concurrency} async workers (Delete source: {delete_after})")
         
-        async with aiohttp.ClientSession(connector=connector, timeout=timeout, trust_env=False) as session:
-            semaphore = asyncio.Semaphore(self.concurrency)
+        # Start cancellation monitor
+        monitor_task = asyncio.create_task(self._monitor_cancellation())
+        
+        try:
+            # Use aiohttp for async downloads with proper SSL context
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(limit=self.concurrency, ssl=ssl_context)
+            timeout = aiohttp.ClientTimeout(total=120)
             
-            async def transfer_one(item):
-                async with semaphore:
-                    await self._transfer_single_async(session, item, user_id)
-            
-            tasks = [transfer_one(item) for item in items]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout, trust_env=False) as session:
+                semaphore = asyncio.Semaphore(self.concurrency)
+                
+                async def transfer_one(item):
+                    # Check cancellation before starting
+                    if self.is_cancelled:
+                        return
+                    
+                    async with semaphore:
+                        # Double check inside semaphore
+                        if self.is_cancelled:
+                            return
+                        await self._transfer_single_async(session, item, user_id, delete_after, identity_mappings)
+                
+                tasks = [transfer_one(item) for item in items]
+                await asyncio.gather(*tasks, return_exceptions=True)
+                
+        finally:
+            # key: stop monitor when done
+            self.is_cancelled = True # This stops the loop in monitor
+            monitor_task.cancel()
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
     
-    async def _transfer_single_async(self, session: aiohttp.ClientSession, item: Dict[str, Any], user_id: str):
-        """Transfer a single file using async HTTP."""
+    async def _transfer_single_async(self, session: aiohttp.ClientSession, item: Dict[str, Any], user_id: str, delete_after: bool = False, identity_mappings: List[Dict] = None):
+        """Transfer a single file using async HTTP with optional permission migration."""
         file_id = item['source_item_id']
         file_name = item['source_name']
         file_start = time.time()
+        identity_mappings = identity_mappings or []
         
         try:
             # Async download
@@ -270,13 +320,48 @@ class MigrationEngine:
                 headers = {"Authorization": f"Bearer {self.access_token}"}
             else:
                 # Google Drive
-                url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+                mime_type = item.get('source_mime_type', '')
+                
+                # Handle Google Apps files (Docs, Sheets, Slides) -> Export to PDF/Office
+                if mime_type.startswith('application/vnd.google-apps.'):
+                    export_mime = 'application/pdf' # Default safe export
+                    if 'spreadsheet' in mime_type:
+                        export_mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' # xlsx
+                    elif 'document' in mime_type:
+                        export_mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' # docx
+                    elif 'presentation' in mime_type:
+                        export_mime = 'application/vnd.openxmlformats-officedocument.presentationml.presentation' # pptx
+                    
+                    url = f"https://www.googleapis.com/drive/v3/files/{file_id}/export?mimeType={export_mime}&supportsAllDrives=true"
+                    # Update item mime type for storage to match export
+                    item['source_mime_type'] = export_mime
+                else:
+                    # Regular binary files (with acknowledgeAbuse for shared files)
+                    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&acknowledgeAbuse=true&supportsAllDrives=true"
+                
                 headers = {"Authorization": f"Bearer {self.access_token}"}
             
-            async with session.get(url, headers=headers) as response:
-                if response.status != 200:
-                    raise Exception(f"Download failed: HTTP {response.status}")
-                file_content = await response.read()
+            try:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 403 or response.status == 400:
+                        # Shared file permission issue or bad request -> Fallback to robust sync
+                        raise Exception(f"HTTP {response.status}")
+                    if response.status != 200:
+                        raise Exception(f"Download failed: HTTP {response.status}")
+                    file_content = await response.read()
+                    
+            except Exception as async_err:
+                # 🔄 FALLBACK: Use robust synchronous connector (handles retries, different auth flows)
+                logger.warning(f"⚠️ Async download failed ({str(async_err)}), trying robust sync fallback for {file_name}")
+                try:
+                    if self.connector and hasattr(self.connector, 'download_file'):
+                        file_content = await asyncio.to_thread(self.connector.download_file, file_id)
+                    else:
+                        raise async_err
+                except Exception as sync_err:
+                    # Both async and sync failed - re-raise to be caught by outer exception handler
+                    logger.error(f"❌ Both async and sync download failed for {file_name}: {sync_err}")
+                    raise Exception(f"Download failed: async={async_err}, sync={sync_err}")
             
             download_time = time.time() - file_start
             
@@ -315,6 +400,32 @@ class MigrationEngine:
             total_time = time.time() - file_start
             self.processed_count += 1
             self.total_bytes += len(file_content)
+            
+            # Best Effort: Apply permissions from source (non-blocking)
+            try:
+                document_id = doc_response.data[0]['id']
+                if self.connector and hasattr(self.connector, 'get_permissions'):
+                    # Fetch source permissions (run sync connector method in thread pool)
+                    source_permissions = await asyncio.to_thread(self.connector.get_permissions, file_id)
+                    if source_permissions:
+                        await self._apply_permissions(
+                            document_id=document_id,
+                            target_user_id=user_id,
+                            source_permissions=source_permissions,
+                            identity_mappings=identity_mappings,
+                            owner_id=user_id,
+                            file_name=file_name
+                        )
+            except Exception as perm_err:
+                logger.warning(f"⚠️ Could not apply permissions for {file_name}: {perm_err}")
+
+            # Move Logic: Delete from source if configured (Move vs Copy)
+            if delete_after and self.connector and hasattr(self.connector, 'trash_file'):
+                try:
+                    # Run in thread pool to avoid blocking async loop since connector is sync
+                    await asyncio.to_thread(self.connector.trash_file, file_id)
+                except Exception as trash_err:
+                    logger.warning(f"⚠️ Failed to trash source file {file_name}: {trash_err}")
             
             # Record live metrics periodically
             self._maybe_record_metrics()
@@ -416,10 +527,222 @@ class MigrationEngine:
                 'created_at': datetime.utcnow().isoformat()
             }
             
-            self.supabase.table('migration_audit_log').insert(log_data).execute()
+            result = self.supabase.table('migration_audit_log').insert(log_data).execute()
+            logger.info(f"📝 Audit log recorded: {event_type} - {error_message[:50] if error_message else 'no message'}...")
             
         except Exception as e:
             logger.warning(f"⚠️ Failed to record audit log: {e}")
+
+    def _get_identity_mappings(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Fetch all identity mappings for a user.
+        
+        Args:
+            user_id: SimplifyDrive user ID
+            
+        Returns:
+            List of identity mapping records
+        """
+        try:
+            response = self.supabase.table('identity_mappings').select('*').eq('user_id', user_id).execute()
+            return response.data or []
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch identity mappings: {e}")
+            return []
+
+    def _resolve_target_user(self, source_email: str, source_system: str, identity_mappings: List[Dict]) -> Optional[str]:
+        """
+        Resolve a source email to a SimplifyDrive user ID.
+        
+        Strategy (Best Effort):
+        1. Check identity_mappings for explicit override
+        2. Auto-match by email in auth.users (profiles table)
+        3. Return None if no match (fallback to owner_only)
+        
+        Args:
+            source_email: Email from source system permission
+            source_system: 'google_drive' or 'onedrive'
+            identity_mappings: Pre-fetched list of mappings
+            
+        Returns:
+            SimplifyDrive user UUID or None
+        """
+        if not source_email:
+            return None
+        
+        # Step 1: Check explicit identity mapping
+        for mapping in identity_mappings:
+            if (mapping.get('source_system') == source_system and 
+                mapping.get('source_email', '').lower() == source_email.lower()):
+                target_id = mapping.get('target_user_id')
+                if target_id:
+                    logger.info(f"🔗 Identity mapping found: {source_email} → {target_id}")
+                    return target_id
+        
+        # Step 2: Auto-match by email in profiles table (or users table)
+        try:
+            # Try profiles table first
+            response = self.supabase.table('profiles').select('id').eq('email', source_email.lower()).maybeSingle().execute()
+            if response.data:
+                target_id = response.data.get('id')
+                logger.info(f"🔗 Auto-matched by email (profiles): {source_email} → {target_id}")
+                return target_id
+            
+            # Fallback: Try users table (some schemas use this instead)
+            response = self.supabase.table('users').select('id').eq('email', source_email.lower()).maybeSingle().execute()
+            if response.data:
+                target_id = response.data.get('id')
+                logger.info(f"🔗 Auto-matched by email (users): {source_email} → {target_id}")
+                return target_id
+                
+        except Exception as e:
+            logger.debug(f"Could not auto-match email in public tables: {e}")
+        
+        # Step 3: Fallback to auth.users via Admin API (works when no public profiles table exists)
+        try:
+            # Use Supabase Admin API to search auth.users
+            auth_response = self.supabase.auth.admin.list_users()
+            if auth_response and hasattr(auth_response, 'users'):
+                available_emails = [u.email for u in auth_response.users if u.email]
+                logger.debug(f"🔍 Auth users available: {available_emails}")
+                
+                for user in auth_response.users:
+                    if user.email and user.email.lower() == source_email.lower():
+                        logger.info(f"🔗 Auto-matched by email (auth.users): {source_email} → {user.id}")
+                        return user.id
+                        
+                # Log near-matches for debugging
+                source_lower = source_email.lower()
+                for user in auth_response.users:
+                    if user.email and (source_lower.split('@')[0] in user.email.lower() or user.email.lower().split('@')[0] in source_lower):
+                        logger.info(f"⚠️ Potential match: {source_email} ≈ {user.email} (different domain?)")
+        except Exception as e:
+            logger.warning(f"Could not search auth.users: {e}")
+        
+        # Step 4: No match found
+        logger.info(f"❓ No target user found for {source_email} (will use owner_only)")
+        return None
+    
+    async def _apply_permissions(self, document_id: str, target_user_id: str, source_permissions: List[Dict], 
+                                  identity_mappings: List[Dict], owner_id: str, file_name: str = "Unknown"):
+        """
+        Apply source permissions to migrated document (Best Effort).
+        
+        This creates share records for users we can identify, and skips any we cannot.
+        NEVER fails the migration if permissions cannot be applied.
+        
+        Args:
+            document_id: The new SimplifyDrive document ID
+            target_user_id: The migration job owner (document owner)
+            source_permissions: Permissions from source system
+            identity_mappings: Pre-fetched identity mappings
+            owner_id: Owner of the migration job
+            file_name: Name of the file being processed (for logging)
+        """
+        try:
+            if not source_permissions:
+                return
+            
+            shares_created = 0
+            
+            for perm in source_permissions:
+                source_email = perm.get('email')
+                source_role = perm.get('role', 'reader')
+                perm_type = perm.get('type', 'user')
+                
+                # Skip owner permissions and non-user types (domain, anyone, link)
+                if source_role == 'owner' or perm_type not in ['user', 'group']:
+                    continue
+                
+                # Resolve to SimplifyDrive user
+                resolved_user_id = self._resolve_target_user(source_email, self.source_system, identity_mappings)
+                
+                if not resolved_user_id:
+                    # Log: User not found
+                    self._record_audit_log(
+                        'permission_skipped',
+                        error_message=f'[{file_name}] No SimplifyDrive user found for {source_email} ({source_role}). User does not exist in system.'
+                    )
+                    continue
+                
+                # Don't share with ourselves
+                if resolved_user_id == owner_id:
+                    self._record_audit_log(
+                        'permission_skipped',
+                        error_message=f'[{file_name}] Skipped {source_email} ({source_role}) - same as migration owner (cannot share with self)'
+                    )
+                    continue
+                
+                # Map source role to SimplifyDrive permission
+                permission_level = 'view'  # default
+                if source_role in ['writer', 'write', 'editor']:
+                    permission_level = 'edit'
+                elif source_role == 'commenter':
+                    permission_level = 'comment'
+                
+                # Create share record in external_shares table
+                try:
+                    from datetime import timedelta
+                    import uuid
+                    
+                    share_data = {
+                        'owner_id': owner_id,
+                        'resource_type': 'document',
+                        'resource_id': document_id,
+                        'resource_name': None,  # Will be filled by trigger or left blank
+                        'guest_email': source_email,
+                        'permission': permission_level,
+                        'allow_download': True,
+                        'allow_print': True,
+                        'allow_reshare': False,
+                        'status': 'accepted',  # Auto-accepted for internal users
+                        'invitation_token': str(uuid.uuid4()).replace('-', '')[:32],
+                        'message': f'Migrated from {self.source_system.replace("_", " ").title()}'
+                    }
+                    
+                    self.supabase.table('external_shares').insert(share_data).execute()
+                    shares_created += 1
+                    logger.info(f"📤 Shared document with {source_email} ({permission_level})")
+                    
+                    # Log: Success
+                    self._record_audit_log(
+                        'permission_applied',
+                        error_message=f'[{file_name}] Shared with {source_email} as {permission_level} (source role: {source_role})'
+                    )
+                    
+                except Exception as share_err:
+                    logger.warning(f"⚠️ Could not create share for {source_email}: {share_err}")
+                    # Log: Failed
+                    self._record_audit_log(
+                        'permission_failed',
+                        error_message=f'[{file_name}] Failed to share with {source_email}: {str(share_err)[:200]}'
+                    )
+            
+            if shares_created > 0:
+                logger.info(f"✅ Applied {shares_created} permission(s) to document {document_id}")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Non-blocking: Could not apply permissions to {document_id}: {e}")
+
+
+
+    async def _monitor_cancellation(self):
+        """Periodically check if job is cancelled."""
+        while not self.is_cancelled:
+            try:
+                # Check DB status
+                result = self.supabase.table('migration_jobs').select('status').eq('id', self.job_id).single().execute()
+                status = result.data.get('status')
+                
+                if status in ['cancelled', 'failed']:
+                     self.is_cancelled = True
+                     logger.warning(f"🛑 Job {status.upper()} detected! Stopping migration...")
+                     return
+                
+                await asyncio.sleep(2)  # Check every 2 seconds
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to check cancellation status: {e}")
+                await asyncio.sleep(5)
 
 
 async def start_migration_job(job_id: str):

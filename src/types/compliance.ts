@@ -1,37 +1,37 @@
 // Compliance Labels Types - Best in Class Implementation
 
-export type ComplianceFramework = 
-  | 'GDPR' 
-  | 'HIPAA' 
-  | 'SOX' 
-  | 'PCI_DSS' 
-  | 'CCPA' 
-  | 'FERPA' 
-  | 'ISO_27001' 
-  | 'NIST' 
-  | 'SOC2' 
+export type ComplianceFramework =
+  | 'GDPR'
+  | 'HIPAA'
+  | 'SOX'
+  | 'PCI_DSS'
+  | 'CCPA'
+  | 'FERPA'
+  | 'ISO_27001'
+  | 'NIST'
+  | 'SOC2'
   | 'CUSTOM';
 
-export type DataClassification = 
-  | 'public' 
-  | 'internal' 
-  | 'confidential' 
-  | 'highly_confidential' 
+export type DataClassification =
+  | 'public'
+  | 'internal'
+  | 'confidential'
+  | 'highly_confidential'
   | 'restricted';
 
 export type ComplianceLabelStatus = 'active' | 'pending_review' | 'expired' | 'revoked';
 
 export type SensitivityLevel = 'low' | 'medium' | 'high' | 'critical';
 
-export type DataCategory = 
-  | 'pii' 
-  | 'phi' 
-  | 'pci' 
-  | 'financial' 
-  | 'legal' 
-  | 'hr' 
-  | 'intellectual_property' 
-  | 'customer_data' 
+export type DataCategory =
+  | 'pii'
+  | 'phi'
+  | 'pci'
+  | 'financial'
+  | 'legal'
+  | 'hr'
+  | 'intellectual_property'
+  | 'customer_data'
   | 'employee_data'
   | 'other';
 
@@ -50,7 +50,6 @@ export interface ComplianceLabel {
   retention_period_days?: number;
   encryption_required: boolean;
   access_logging_required: boolean;
-  watermark_required: boolean;
   download_restricted: boolean;
   sharing_restricted: boolean;
   export_restricted: boolean;
@@ -414,13 +413,13 @@ export const DATA_CATEGORY_CONFIG: Record<DataCategory, {
 };
 
 // Helper functions
-export const getFrameworkConfig = (framework: ComplianceFramework) => 
+export const getFrameworkConfig = (framework: ComplianceFramework) =>
   COMPLIANCE_FRAMEWORKS[framework];
 
-export const getClassificationConfig = (classification: DataClassification) => 
+export const getClassificationConfig = (classification: DataClassification) =>
   DATA_CLASSIFICATION_CONFIG[classification];
 
-export const getSensitivityConfig = (level: SensitivityLevel) => 
+export const getSensitivityConfig = (level: SensitivityLevel) =>
   SENSITIVITY_LEVEL_CONFIG[level];
 
 export const getRecommendedLabels = (framework: ComplianceFramework): Partial<ComplianceLabel>[] => {

@@ -7,6 +7,16 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +31,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
-import { Cloud, HardDrive, Database, Loader2, FolderOpen, Shield, Zap, CheckCircle2 } from 'lucide-react';
+import { Cloud, HardDrive, Database, Loader2, FolderOpen, Shield, Zap, CheckCircle2, AlertTriangle, FileUp } from 'lucide-react';
 import { CloudFolderBrowser } from '@/components/bulk-processing/CloudFolderBrowser';
 import { oauthService } from '@/services/oauthService';
 import { useToast } from '@/hooks/use-toast';
@@ -65,6 +75,8 @@ export function CreateMigrationDialog({
         delta_mode: false,
         dry_run: false
     });
+    const [nameError, setNameError] = useState('');
+    const [showMoveCopyDialog, setShowMoveCopyDialog] = useState(false);
 
     const sourceCredentials = credentials.filter(c => c.source_system === sourceSystem);
 
@@ -118,6 +130,28 @@ export function CreateMigrationDialog({
     const handleFolderSelect = (folderId: string, folderName: string) => {
         setConfig({ ...config, source_folder_id: folderId || undefined });
         setSelectedFolderName(folderName);
+    };
+
+    const handleNext = () => {
+        // Validate migration name on step 2
+        if (step === 2) {
+            if (!name.trim()) {
+                setNameError('Migration name is required');
+                return;
+            }
+            // Show Move vs Copy popup before proceeding
+            setShowMoveCopyDialog(true);
+            return;
+        }
+
+        setNameError('');
+        setStep(step + 1);
+    };
+
+    const handleMoveCopyChoice = (deleteAfter: boolean) => {
+        setConfig({ ...config, delete_after_migration: deleteAfter });
+        setShowMoveCopyDialog(false);
+        setStep(3);
     };
 
     const sources = [
@@ -191,13 +225,23 @@ export function CreateMigrationDialog({
                         <div className="space-y-4">
                             {/* Migration Name */}
                             <div className="space-y-2">
-                                <Label htmlFor="name">Migration Name</Label>
+                                <Label htmlFor="name">
+                                    Migration Name <span className="text-red-500">*</span>
+                                </Label>
                                 <Input
                                     id="name"
                                     placeholder="e.g., Q4 2024 Google Drive Migration"
                                     value={name}
-                                    onChange={(e) => setName(e.target.value)}
+                                    onChange={(e) => {
+                                        setName(e.target.value);
+                                        setNameError(''); // Clear error when user types
+                                    }}
+                                    required
+                                    className={nameError ? 'border-red-500' : ''}
                                 />
+                                {nameError && (
+                                    <p className="text-sm text-red-500">{nameError}</p>
+                                )}
                             </div>
 
                             {/* Connect or Select Account */}
@@ -436,10 +480,7 @@ export function CreateMigrationDialog({
                         Cancel
                     </Button>
                     {step < 3 ? (
-                        <Button
-                            onClick={() => setStep(step + 1)}
-                            disabled={step === 2 && !name}
-                        >
+                        <Button onClick={handleNext}>
                             Next
                         </Button>
                     ) : (
@@ -456,6 +497,49 @@ export function CreateMigrationDialog({
                     )}
                 </DialogFooter>
             </DialogContent>
+
+            <AlertDialog open={showMoveCopyDialog} onOpenChange={setShowMoveCopyDialog}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Choose Migration Mode</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            How should we handle the files in the source system (Google Drive) after they are migrated?
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+
+                    <div className="grid grid-cols-2 gap-4 py-4">
+                        <div
+                            className="border rounded-lg p-4 cursor-pointer hover:bg-accent border-primary bg-accent/50 transition-colors"
+                            onClick={() => handleMoveCopyChoice(false)}
+                        >
+                            <div className="flex flex-col items-center text-center gap-2">
+                                <FileUp className="h-8 w-8 text-blue-500" />
+                                <h3 className="font-semibold">Copy Files (Default)</h3>
+                                <p className="text-xs text-muted-foreground">
+                                    Keep files in source. Nothing will be deleted.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div
+                            className="border rounded-lg p-4 cursor-pointer hover:bg-red-50 hover:border-red-200 transition-colors"
+                            onClick={() => handleMoveCopyChoice(true)}
+                        >
+                            <div className="flex flex-col items-center text-center gap-2">
+                                <AlertTriangle className="h-8 w-8 text-red-500" />
+                                <h3 className="font-semibold text-red-600">Move Files</h3>
+                                <p className="text-xs text-muted-foreground">
+                                    Delete from source after successful migration.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setShowMoveCopyDialog(false)}>Cancel</AlertDialogCancel>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </Dialog>
     );
 }

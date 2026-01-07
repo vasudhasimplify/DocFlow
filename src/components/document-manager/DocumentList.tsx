@@ -20,14 +20,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { supabase } from '@/integrations/supabase/client';
-import { 
-  FileText, 
-  Eye, 
-  Download, 
-  Share, 
-  MoreHorizontal, 
-  Star, 
-  Clock, 
+import {
+  FileText,
+  Eye,
+  Download,
+  Share,
+  MoreHorizontal,
+  Star,
+  Clock,
   Brain,
   Tag,
   Folder,
@@ -58,6 +58,7 @@ import { CheckOutDialog } from '@/components/checkinout/CheckOutDialog';
 import { TransferOwnershipDialog } from '@/components/ownership/TransferOwnershipDialog';
 import { DocumentEditorModal } from './DocumentEditorModal';
 import { ApplyComplianceLabelDialog } from '@/components/compliance/ApplyComplianceLabelDialog';
+import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
 
 interface Document {
   id: string;
@@ -74,6 +75,7 @@ interface Document {
   insights?: DocumentInsight;
   tags?: DocumentTag[];
   folders?: SmartFolder[];
+  has_restrictions?: boolean;
 }
 
 interface DocumentInsight {
@@ -113,14 +115,14 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 }) => {
   const { toast } = useToast();
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();
-  
+
   // Check Out and Transfer Dialog states
   const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
   const [showTransferDialog, setShowTransferDialog] = useState(false);
   const [showComplianceDialog, setShowComplianceDialog] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
   const [showEditorModal, setShowEditorModal] = useState(false);
-  
+
   // Delete confirmation dialog states
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showPermanentDeleteDialog, setShowPermanentDeleteDialog] = useState(false);
@@ -138,7 +140,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       documentName: document.file_name
     }));
     e.dataTransfer.effectAllowed = 'move';
-    
+
     // Create custom drag image
     const dragPreview = globalThis.document.createElement('div');
     dragPreview.className = 'bg-primary text-primary-foreground px-4 py-2 rounded-lg shadow-xl flex items-center gap-2 text-sm font-medium';
@@ -151,13 +153,13 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     dragPreview.style.left = '-1000px';
     dragPreview.style.zIndex = '9999';
     globalThis.document.body.appendChild(dragPreview);
-    
+
     e.dataTransfer.setDragImage(dragPreview, 20, 20);
-    
+
     setTimeout(() => {
       globalThis.document.body.removeChild(dragPreview);
     }, 0);
-    
+
     if (e.currentTarget) {
       e.currentTarget.style.opacity = '0.5';
     }
@@ -197,26 +199,26 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
   const handleDelete = async () => {
     if (!documentToDelete) return;
-    
+
     try {
       const response = await fetch(`http://localhost:8000/api/v1/documents/${documentToDelete.id}`, {
         method: 'DELETE',
       });
-      
+
       if (!response.ok) throw new Error('Delete failed');
-      
+
       toast({
         title: "Moved to recycle bin",
         description: `${documentToDelete.file_name} has been moved to recycle bin`,
       });
-      
+
       setShowDeleteDialog(false);
       setDocumentToDelete(null);
       setSelectedDocuments(new Set());
-      
+
       // Emit event to refresh folder counts
       window.dispatchEvent(new CustomEvent('document-deleted'));
-      
+
       if (onRefresh) {
         await onRefresh();
       }
@@ -235,14 +237,14 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       const response = await fetch(`http://localhost:8000/api/v1/documents/${document.id}/restore`, {
         method: 'POST',
       });
-      
+
       if (!response.ok) throw new Error('Restore failed');
-      
+
       toast({
         title: "Document restored",
         description: `${document.file_name} has been restored`,
       });
-      
+
       if (onRefresh) {
         await onRefresh();
       }
@@ -258,26 +260,26 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
   const handlePermanentDelete = async () => {
     if (!documentToDelete) return;
-    
+
     try {
       const response = await fetch(`http://localhost:8000/api/v1/documents/${documentToDelete.id}/permanent`, {
         method: 'DELETE',
       });
-      
+
       if (!response.ok) throw new Error('Permanent delete failed');
-      
+
       toast({
         title: "Document permanently deleted",
         description: `${documentToDelete.file_name} has been permanently deleted`,
       });
-      
+
       setShowPermanentDeleteDialog(false);
       setDocumentToDelete(null);
       setSelectedDocuments(new Set());
-      
+
       // Emit event to refresh folder counts
       window.dispatchEvent(new CustomEvent('document-deleted'));
-      
+
       if (onRefresh) {
         await onRefresh();
       }
@@ -302,13 +304,26 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     onDocumentClick(document);
   };
 
+  const { getDocumentRestrictions } = useDocumentRestrictions();
+
   const handleDownload = async (document: Document) => {
     try {
+      // Check for download restrictions
+      const restrictions = await getDocumentRestrictions(document.id);
+      if (restrictions.restrictDownload) {
+        toast({
+          title: "🚫 Download Restricted",
+          description: `This document is restricted from downloading by access rule(s): ${restrictions.matchedRules.join(', ')}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       if (document.storage_url) {
         // Create download link directly from storage URL
         const response = await fetch(document.storage_url);
         if (!response.ok) throw new Error('Download failed');
-        
+
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const a = globalThis.document.createElement('a');
@@ -318,7 +333,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         a.click();
         globalThis.document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
+
         toast({
           title: "Download started",
           description: `Downloading ${document.file_name}`,
@@ -338,6 +353,17 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
   const handleShare = async (document: Document) => {
     try {
+      // Check for share restrictions
+      const restrictions = await getDocumentRestrictions(document.id);
+      if (restrictions.restrictShare) {
+        toast({
+          title: "🚫 Sharing Restricted",
+          description: `This document is restricted from sharing by access rule(s): ${restrictions.matchedRules.join(', ')}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       if (document.storage_url) {
         await navigator.clipboard.writeText(document.storage_url);
         toast({
@@ -451,34 +477,15 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
       {/* Documents List */}
       <div className="space-y-2">
-      {documents.map(document => (
-        <ContextMenu key={document.id}>
-          <ContextMenuTrigger asChild>
-            <Card 
-              className={`group hover:shadow-md transition-all duration-200 cursor-grab active:cursor-grabbing border hover:border-primary/50 relative ${
-                selectedDocuments.has(document.id) ? 'border-primary border-2 bg-primary/5' : 'bg-white'
-              } ${draggingDocument?.id === document.id ? 'opacity-50 scale-[0.98]' : ''}`}
-              draggable
-              onDragStart={(e) => handleDragStart(e, document)}
-              onDragEnd={handleDragEnd}
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelectedDocuments(prev => {
-                  const newSet = new Set(prev);
-                  if (newSet.has(document.id)) {
-                    newSet.delete(document.id);
-                  } else {
-                    newSet.add(document.id);
-                  }
-                  return newSet;
-                });
-              }}
-              tabIndex={0}
-            >
-          <CardContent className="p-4">
-            <div className="flex items-center gap-4">
-              {/* Checkbox */}
-              <button
+        {documents.map(document => (
+          <ContextMenu key={document.id}>
+            <ContextMenuTrigger asChild>
+              <Card
+                className={`group hover:shadow-md transition-all duration-200 cursor-grab active:cursor-grabbing border hover:border-primary/50 relative ${selectedDocuments.has(document.id) ? 'border-primary border-2 bg-primary/5' : 'bg-white'
+                  } ${draggingDocument?.id === document.id ? 'opacity-50 scale-[0.98]' : ''}`}
+                draggable
+                onDragStart={(e) => handleDragStart(e, document)}
+                onDragEnd={handleDragEnd}
                 onClick={(e) => {
                   e.stopPropagation();
                   setSelectedDocuments(prev => {
@@ -491,410 +498,442 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     return newSet;
                   });
                 }}
-                className="text-primary hover:text-primary/80 transition-colors flex-shrink-0"
+                tabIndex={0}
               >
-                {selectedDocuments.has(document.id) ? (
-                  <CheckCircle2 className="w-5 h-5" />
-                ) : (
-                  <Circle className="w-5 h-5 text-muted-foreground hover:text-primary" />
-                )}
-              </button>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-4">
+                    {/* Checkbox */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedDocuments(prev => {
+                          const newSet = new Set(prev);
+                          if (newSet.has(document.id)) {
+                            newSet.delete(document.id);
+                          } else {
+                            newSet.add(document.id);
+                          }
+                          return newSet;
+                        });
+                      }}
+                      className="text-primary hover:text-primary/80 transition-colors flex-shrink-0"
+                    >
+                      {selectedDocuments.has(document.id) ? (
+                        <CheckCircle2 className="w-5 h-5" />
+                      ) : (
+                        <Circle className="w-5 h-5 text-muted-foreground hover:text-primary" />
+                      )}
+                    </button>
 
-              {/* Icon & AI Indicators */}
-              <div className="flex items-center gap-2">
-                {getFileIcon(document.file_type)}
-                {document.insights && (
-                  <div className="flex items-center gap-1">
-                    <Brain className="w-4 h-4 text-blue-500" />
-                    <Star 
-                      className={`w-4 h-4 ${getImportanceColor(document.insights.importance_score)}`}
-                      fill="currentColor"
-                    />
-                  </div>
-                )}
-              </div>
+                    {/* Icon & AI Indicators */}
+                    <div className="flex items-center gap-2">
+                      {getFileIcon(document.file_type)}
+                      {document.insights && (
+                        <div className="flex items-center gap-1">
+                          <Brain className="w-4 h-4 text-blue-500" />
+                          <Star
+                            className={`w-4 h-4 ${getImportanceColor(document.insights.importance_score)}`}
+                            fill="currentColor"
+                          />
+                        </div>
+                      )}
+                    </div>
 
-              {/* Document Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium truncate mb-1">
-                      {document.insights?.ai_generated_title || document.file_name}
-                    </h3>
-                    
-                    {document.file_name !== document.insights?.ai_generated_title && (
-                      <p className="text-sm text-muted-foreground truncate mb-1">
-                        {document.file_name}
-                      </p>
-                    )}
+                    {/* Document Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-medium truncate mb-1 flex items-center gap-2">
+                            {document.insights?.ai_generated_title || document.file_name}
+                            {document.has_restrictions && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge variant="outline" className="text-[10px] py-0 h-4 bg-amber-50 text-amber-700 border-amber-200 gap-1 px-1.5 font-bold">
+                                      <Shield className="w-2.5 h-2.5" />
+                                      RESTRICTED
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Access restrictions applied by rules</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                          </h3>
 
-                    {/* AI Summary */}
-                    {document.insights?.summary && (
-                      <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
-                        {document.insights.summary}
-                      </p>
-                    )}
+                          {document.file_name !== document.insights?.ai_generated_title && (
+                            <p className="text-sm text-muted-foreground truncate mb-1">
+                              {document.file_name}
+                            </p>
+                          )}
 
-                    {/* Tags & Topics */}
-                    <div className="flex items-center gap-4 text-sm">
-                      {/* Tags */}
-                      {document.tags && document.tags.length > 0 && (
-                        <div className="flex items-center gap-2">
-                          <Tag className="w-3 h-3 text-muted-foreground" />
-                          <div className="flex gap-1">
-                            {document.tags.slice(0, 3).map(tag => (
-                              <Badge 
-                                key={tag.id} 
-                                variant="secondary" 
-                                className="text-xs flex items-center gap-1"
-                              >
-                                {tag.is_ai_suggested && <Sparkles className="w-2 h-2" />}
-                                {tag.name}
-                              </Badge>
-                            ))}
-                            {document.tags.length > 3 && (
-                              <Badge variant="outline" className="text-xs">
-                                +{document.tags.length - 3}
-                              </Badge>
+                          {/* AI Summary */}
+                          {document.insights?.summary && (
+                            <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
+                              {document.insights.summary}
+                            </p>
+                          )}
+
+                          {/* Tags & Topics */}
+                          <div className="flex items-center gap-4 text-sm">
+                            {/* Tags */}
+                            {document.tags && document.tags.length > 0 && (
+                              <div className="flex items-center gap-2">
+                                <Tag className="w-3 h-3 text-muted-foreground" />
+                                <div className="flex gap-1">
+                                  {document.tags.slice(0, 3).map(tag => (
+                                    <Badge
+                                      key={tag.id}
+                                      variant="secondary"
+                                      className="text-xs flex items-center gap-1"
+                                    >
+                                      {tag.is_ai_suggested && <Sparkles className="w-2 h-2" />}
+                                      {tag.name}
+                                    </Badge>
+                                  ))}
+                                  {document.tags.length > 3 && (
+                                    <Badge variant="outline" className="text-xs">
+                                      +{document.tags.length - 3}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Folders */}
+                            {document.folders && document.folders.length > 0 && (
+                              <div className="flex items-center gap-1">
+                                <Folder className="w-3 h-3 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">
+                                  {document.folders[0].name}
+                                  {document.folders.length > 1 && ` +${document.folders.length - 1}`}
+                                </span>
+                              </div>
                             )}
                           </div>
                         </div>
-                      )}
 
-                      {/* Folders */}
-                      {document.folders && document.folders.length > 0 && (
-                        <div className="flex items-center gap-1">
-                          <Folder className="w-3 h-3 text-muted-foreground" />
-                          <span className="text-xs text-muted-foreground">
-                            {document.folders[0].name}
-                            {document.folders.length > 1 && ` +${document.folders.length - 1}`}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                        {/* Right Side Info */}
+                        <div className="flex items-center gap-4 ml-4">
+                          {/* Key Topics */}
+                          {document.insights?.key_topics && document.insights.key_topics.length > 0 && (
+                            <div className="hidden md:flex flex-col items-end">
+                              <span className="text-xs text-muted-foreground mb-1">Topics:</span>
+                              <div className="flex gap-1">
+                                {document.insights.key_topics.slice(0, 2).map((topic, index) => (
+                                  <Badge key={index} variant="outline" className="text-xs">
+                                    {topic}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
 
-                  {/* Right Side Info */}
-                  <div className="flex items-center gap-4 ml-4">
-                    {/* Key Topics */}
-                    {document.insights?.key_topics && document.insights.key_topics.length > 0 && (
-                      <div className="hidden md:flex flex-col items-end">
-                        <span className="text-xs text-muted-foreground mb-1">Topics:</span>
-                        <div className="flex gap-1">
-                          {document.insights.key_topics.slice(0, 2).map((topic, index) => (
-                            <Badge key={index} variant="outline" className="text-xs">
-                              {topic}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                          {/* Document Stats */}
+                          <div className="flex flex-col items-end text-sm text-muted-foreground">
+                            <div className="flex items-center gap-1 mb-1">
+                              <Clock className="w-3 h-3" />
+                              {formatDistanceToNow(new Date(document.created_at), { addSuffix: true })}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span>{formatFileSize(document.file_size)}</span>
+                              {document.insights?.estimated_reading_time && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {document.insights.estimated_reading_time}m read
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
 
-                    {/* Document Stats */}
-                    <div className="flex flex-col items-end text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1 mb-1">
-                        <Clock className="w-3 h-3" />
-                        {formatDistanceToNow(new Date(document.created_at), { addSuffix: true })}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span>{formatFileSize(document.file_size)}</span>
-                        {document.insights?.estimated_reading_time && (
-                          <Badge variant="secondary" className="text-xs">
-                            {document.insights.estimated_reading_time}m read
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-1">
-                      {/* Always visible Star and Pin buttons */}
-                      <StarButton 
-                        documentId={document.id} 
-                        size="sm"
-                      />
-                      
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button 
-                              variant="ghost" 
+                          {/* Actions */}
+                          <div className="flex items-center gap-1">
+                            {/* Always visible Star and Pin buttons */}
+                            <StarButton
+                              documentId={document.id}
                               size="sm"
-                              className="h-8 w-8 p-0 hover:bg-primary/10"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (isPinned(document.id)) {
-                                  unpinDocument(document.id);
-                                } else {
-                                  pinDocument(document.id);
-                                }
-                              }}
-                            >
-                              <Pin 
-                                className={`w-4 h-4 transition-all ${
-                                  isPinned(document.id) 
-                                    ? 'text-primary fill-primary rotate-45' 
-                                    : 'text-muted-foreground hover:text-primary'
-                                }`}
-                              />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{isPinned(document.id) ? 'Unpin from Quick Access' : 'Pin to Quick Access'}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      
-                      {/* Action Buttons - Always visible */}
-                      <div className="flex items-center gap-1">
-                        {/* Primary Actions */}
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                className="h-8 w-8 p-0 hover:bg-gray-100"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleView(document);
-                                }}
-                              >
-                                <Eye className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>View</p></TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                className="h-8 w-8 p-0 hover:bg-green-100"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleEdit(document);
-                                }}
-                              >
-                                <Edit className="w-4 h-4 text-green-600" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Edit</p></TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                className="h-8 w-8 p-0 hover:bg-gray-100"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDownload(document);
-                                }}
-                              >
-                                <Download className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Download</p></TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                className="h-8 w-8 p-0 hover:bg-gray-100"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleShare(document);
-                                }}
-                              >
-                                <Share className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Share</p></TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        
-                        <div className="w-px h-6 bg-gray-200 mx-1"></div>
-                        
-                        {/* Document Management */}
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedDocument(document);
-                                  setShowCheckOutDialog(true);
-                                }}
-                              >
-                                <Lock className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Check Out</p></TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                className="h-8 w-8 p-0 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedDocument(document);
-                                  setShowTransferDialog(true);
-                                }}
-                              >
-                                <UserMinus className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Transfer</p></TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                className="h-8 w-8 p-0 text-green-600 hover:bg-green-50 hover:text-green-700"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedDocument(document);
-                                  setShowComplianceDialog(true);
-                                }}
-                              >
-                                <Shield className="w-4 h-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Compliance Labels</p></TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
+                            />
+
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0 hover:bg-primary/10"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (isPinned(document.id)) {
+                                        unpinDocument(document.id);
+                                      } else {
+                                        pinDocument(document.id);
+                                      }
+                                    }}
+                                  >
+                                    <Pin
+                                      className={`w-4 h-4 transition-all ${isPinned(document.id)
+                                        ? 'text-primary fill-primary rotate-45'
+                                        : 'text-muted-foreground hover:text-primary'
+                                        }`}
+                                    />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>{isPinned(document.id) ? 'Unpin from Quick Access' : 'Pin to Quick Access'}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+
+                            {/* Action Buttons - Always visible */}
+                            <div className="flex items-center gap-1">
+                              {/* Primary Actions */}
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 hover:bg-gray-100"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleView(document);
+                                      }}
+                                    >
+                                      <Eye className="w-4 h-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent><p>View</p></TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 hover:bg-green-100"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEdit(document);
+                                      }}
+                                    >
+                                      <Edit className="w-4 h-4 text-green-600" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent><p>Edit</p></TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 hover:bg-gray-100"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDownload(document);
+                                      }}
+                                    >
+                                      <Download className="w-4 h-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent><p>Download</p></TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 hover:bg-gray-100"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleShare(document);
+                                      }}
+                                    >
+                                      <Share className="w-4 h-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent><p>Share</p></TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+
+                              <div className="w-px h-6 bg-gray-200 mx-1"></div>
+
+                              {/* Document Management */}
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedDocument(document);
+                                        setShowCheckOutDialog(true);
+                                      }}
+                                    >
+                                      <Lock className="w-4 h-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent><p>Check Out</p></TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedDocument(document);
+                                        setShowTransferDialog(true);
+                                      }}
+                                    >
+                                      <UserMinus className="w-4 h-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent><p>Transfer</p></TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0 text-green-600 hover:bg-green-50 hover:text-green-700"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedDocument(document);
+                                        setShowComplianceDialog(true);
+                                      }}
+                                    >
+                                      <Shield className="w-4 h-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent><p>Compliance Labels</p></TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
+                          </div>
+                        </div>
                       </div>
+
+                      {/* Processing Status */}
+                      {(document.metadata as any)?.is_pending_upload ? (
+                        <div className="mt-2">
+                          <Badge
+                            variant="outline"
+                            className="text-xs text-orange-600 border-orange-400 bg-orange-50"
+                          >
+                            <CloudUpload className="w-3 h-3 mr-1" />
+                            Queued for Upload
+                          </Badge>
+                        </div>
+                      ) : document.processing_status && document.processing_status !== 'completed' && (
+                        <div className="mt-2">
+                          <Badge
+                            variant={
+                              document.processing_status === 'processing' ? 'secondary' :
+                                document.processing_status === 'pending' ? 'outline' :
+                                  'destructive'
+                            }
+                            className="text-xs"
+                          >
+                            {document.processing_status === 'processing' ? 'AI Processing...' :
+                              document.processing_status === 'pending' ? 'Pending Analysis' :
+                                'Processing Failed'}
+                          </Badge>
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
+                </CardContent>
+              </Card>
+            </ContextMenuTrigger>
 
-                {/* Processing Status */}
-                {(document.metadata as any)?.is_pending_upload ? (
-                  <div className="mt-2">
-                    <Badge 
-                      variant="outline"
-                      className="text-xs text-orange-600 border-orange-400 bg-orange-50"
-                    >
-                      <CloudUpload className="w-3 h-3 mr-1" />
-                      Queued for Upload
-                    </Badge>
-                  </div>
-                ) : document.processing_status && document.processing_status !== 'completed' && (
-                  <div className="mt-2">
-                    <Badge 
-                      variant={
-                        document.processing_status === 'processing' ? 'secondary' : 
-                        document.processing_status === 'pending' ? 'outline' :
-                        'destructive'
-                      }
-                      className="text-xs"
-                    >
-                      {document.processing_status === 'processing' ? 'AI Processing...' : 
-                       document.processing_status === 'pending' ? 'Pending Analysis' :
-                       'Processing Failed'}
-                    </Badge>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-          </ContextMenuTrigger>
-          
-          {/* Right-click context menu - Full menu matching dropdown */}
-          <ContextMenuContent className="w-56">
-            <ContextMenuItem onClick={() => onDocumentClick(document)}>
-              <Eye className="w-4 h-4 mr-2" />
-              View
-            </ContextMenuItem>
-            {(document.metadata as any)?.is_deleted ? (
-              <>
-                <ContextMenuItem onClick={() => handleRestore(document)}>
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Restore
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem 
-                  onClick={() => initiateDelete(document)}
-                  className="text-red-600"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete Permanently
-                </ContextMenuItem>
-              </>
-            ) : (
-              <>
-                <ContextMenuItem onClick={() => handleEdit(document)}>
-                  <Edit className="w-4 h-4 mr-2" />
-                  Edit
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => handleDownload(document)}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Download
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => handleShare(document)}>
-                  <Share className="w-4 h-4 mr-2" />
-                  Share
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={() => {
-                  setSelectedDocument(document);
-                  setShowCheckOutDialog(true);
-                }}>
-                  <Lock className="w-4 h-4 mr-2" />
-                  Check Out
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => {
-                  setSelectedDocument(document);
-                  setShowTransferDialog(true);
-                }}>
-                  <UserMinus className="w-4 h-4 mr-2" />
-                  Transfer Ownership
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => {
-                  setSelectedDocument(document);
-                  setShowComplianceDialog(true);
-                }}>
-                  <Shield className="w-4 h-4 mr-2" />
-                  Compliance Labels
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem 
-                  onClick={() => initiateDelete(document)}
-                  className="text-red-600"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete
-                </ContextMenuItem>
-              </>
-            )}
-          </ContextMenuContent>
-        </ContextMenu>
-      ))}
-      
+            {/* Right-click context menu - Full menu matching dropdown */}
+            <ContextMenuContent className="w-56">
+              <ContextMenuItem onClick={() => onDocumentClick(document)}>
+                <Eye className="w-4 h-4 mr-2" />
+                View
+              </ContextMenuItem>
+              {(document.metadata as any)?.is_deleted ? (
+                <>
+                  <ContextMenuItem onClick={() => handleRestore(document)}>
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Restore
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    onClick={() => initiateDelete(document)}
+                    className="text-red-600"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete Permanently
+                  </ContextMenuItem>
+                </>
+              ) : (
+                <>
+                  <ContextMenuItem onClick={() => handleEdit(document)}>
+                    <Edit className="w-4 h-4 mr-2" />
+                    Edit
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => handleDownload(document)}>
+                    <Download className="w-4 h-4 mr-2" />
+                    Download
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => handleShare(document)}>
+                    <Share className="w-4 h-4 mr-2" />
+                    Share
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onClick={() => {
+                    setSelectedDocument(document);
+                    setShowCheckOutDialog(true);
+                  }}>
+                    <Lock className="w-4 h-4 mr-2" />
+                    Check Out
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => {
+                    setSelectedDocument(document);
+                    setShowTransferDialog(true);
+                  }}>
+                    <UserMinus className="w-4 h-4 mr-2" />
+                    Transfer Ownership
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => {
+                    setSelectedDocument(document);
+                    setShowComplianceDialog(true);
+                  }}>
+                    <Shield className="w-4 h-4 mr-2" />
+                    Compliance Labels
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    onClick={() => initiateDelete(document)}
+                    className="text-red-600"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete
+                  </ContextMenuItem>
+                </>
+              )}
+            </ContextMenuContent>
+          </ContextMenu>
+        ))}
+
       </div>
       {/* End Documents List */}
 
@@ -930,7 +969,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      
+
       {/* Other Dialogs */}
       {selectedDocument && (
         <>
@@ -946,7 +985,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               });
             }}
           />
-          
+
           <TransferOwnershipDialog
             open={showTransferDialog}
             onOpenChange={setShowTransferDialog}
@@ -968,7 +1007,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
             }}
             document={selectedDocument}
           />
-          
+
           <ApplyComplianceLabelDialog
             open={showComplianceDialog}
             onOpenChange={setShowComplianceDialog}

@@ -54,8 +54,8 @@ export const ApplyComplianceLabelDialog: React.FC<ApplyComplianceLabelDialogProp
   const filteredLabels = labels.filter(label =>
     label.is_active &&
     (label.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-     label.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-     COMPLIANCE_FRAMEWORKS[label.framework].name.toLowerCase().includes(searchQuery.toLowerCase()))
+      label.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      COMPLIANCE_FRAMEWORKS[label.framework].name.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const handleSelectLabel = (label: ComplianceLabel) => {
@@ -208,7 +208,6 @@ export const ApplyComplianceLabelDialog: React.FC<ApplyComplianceLabelDialogProp
                       {selectedLabel.access_logging_required && <li>• All access will be logged</li>}
                       {selectedLabel.download_restricted && <li>• Downloads are restricted</li>}
                       {selectedLabel.sharing_restricted && <li>• Sharing is restricted</li>}
-                      {selectedLabel.watermark_required && <li>• Watermarks will be applied</li>}
                       {selectedLabel.deletion_requires_approval && <li>• Deletion requires approval</li>}
                       {selectedLabel.retention_required && (
                         <li>• Retention period: {Math.round(selectedLabel.retention_period_days! / 365)} years</li>
@@ -241,8 +240,8 @@ export const ApplyComplianceLabelDialog: React.FC<ApplyComplianceLabelDialogProp
                     onCheckedChange={(checked) => setAcknowledged(checked as boolean)}
                   />
                   <label htmlFor="acknowledge" className="text-sm leading-relaxed cursor-pointer">
-                    {selectedLabel.acknowledgment_text || 
-                     'I acknowledge that I understand the compliance requirements associated with this label.'}
+                    {selectedLabel.acknowledgment_text ||
+                      'I acknowledge that I understand the compliance requirements associated with this label.'}
                   </label>
                 </div>
               </div>

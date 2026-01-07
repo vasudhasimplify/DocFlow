@@ -80,7 +80,6 @@ export const ComplianceLabelCard: React.FC<ComplianceLabelCardProps> = ({
   const requirements = [
     { enabled: label.encryption_required, label: 'Encryption', icon: Key },
     { enabled: label.access_logging_required, label: 'Audit Log', icon: Activity },
-    { enabled: label.watermark_required, label: 'Watermark', icon: FileText },
     { enabled: label.download_restricted, label: 'Download Restricted', icon: Download },
     { enabled: label.sharing_restricted, label: 'Sharing Restricted', icon: Globe },
     { enabled: label.deletion_requires_approval, label: 'Deletion Approval', icon: AlertTriangle },

@@ -14,6 +14,8 @@ export interface OfflineDocument {
   processing_status: string;
   metadata: any;
   storage_url?: string | null;
+  has_restrictions?: boolean;
+  restriction_count?: number;
   blob_data?: Blob;
   cached_at: string;
   is_favorite: boolean;
@@ -122,7 +124,7 @@ export const saveDocumentOffline = async (
   blob?: Blob
 ): Promise<void> => {
   const database = await initOfflineDB();
-  
+
   console.log('💾 Saving document offline:', {
     id: document.id,
     file_name: document.file_name,
@@ -131,7 +133,7 @@ export const saveDocumentOffline = async (
     blob_size: blob?.size || 0,
     blob_type: blob?.type || 'none'
   });
-  
+
   const offlineDoc: OfflineDocument = {
     ...document,
     blob_data: blob,
@@ -206,7 +208,7 @@ export const addToSyncQueue = async (
   data: any
 ): Promise<void> => {
   const database = await initOfflineDB();
-  
+
   const item: SyncQueueItem = {
     id: crypto.randomUUID(),
     operation,
@@ -259,7 +261,7 @@ export const cacheData = async (
   expiresInMinutes?: number
 ): Promise<void> => {
   const database = await initOfflineDB();
-  
+
   const cacheItem = {
     key,
     data,
@@ -275,14 +277,14 @@ export const cacheData = async (
 export const getCachedData = async <T>(key: string): Promise<T | null> => {
   const database = await initOfflineDB();
   const item = await database.get('app_cache', key);
-  
+
   if (!item) return null;
-  
+
   if (item.expires_at && new Date(item.expires_at) < new Date()) {
     await database.delete('app_cache', key);
     return null;
   }
-  
+
   return item.data as T;
 };
 
@@ -301,7 +303,7 @@ export const getOfflineStorageStats = async (): Promise<{
   const database = await initOfflineDB();
   const documents = await database.getAll('documents');
   const pendingSyncs = await getSyncQueueCount();
-  
+
   const totalSize = documents.reduce((sum, doc) => {
     const blobSize = doc.blob_data?.size || 0;
     return sum + doc.file_size + blobSize;
@@ -454,7 +456,7 @@ export const queueFileUpload = async (
 ): Promise<string> => {
   const database = await initOfflineDB();
   const id = `pending-upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  
+
   const queueItem: SyncQueueItem = {
     id,
     operation: 'upload',
@@ -474,7 +476,7 @@ export const queueFileUpload = async (
   };
 
   await database.add('sync_queue', queueItem);
-  
+
   // Also save as a temporary document so it appears in the list
   const tempDocument: OfflineDocument = {
     id,
@@ -499,9 +501,9 @@ export const queueFileUpload = async (
     sync_status: 'pending',
     last_synced_at: null,
   };
-  
+
   await database.put('documents', tempDocument);
-  
+
   return id;
 };
 

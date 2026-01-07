@@ -81,9 +81,8 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
     data_categories: [] as DataCategory[],
     retention_required: false,
     retention_period_days: 365,
-    encryption_required: true,
-    access_logging_required: true,
-    watermark_required: false,
+    encryption_required: false,
+    access_logging_required: false,
     download_restricted: false,
     sharing_restricted: false,
     export_restricted: false,
@@ -128,9 +127,8 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
       data_categories: [],
       retention_required: false,
       retention_period_days: 365,
-      encryption_required: true,
-      access_logging_required: true,
-      watermark_required: false,
+      encryption_required: false,
+      access_logging_required: false,
       download_restricted: false,
       sharing_restricted: false,
       export_restricted: false,
@@ -169,7 +167,7 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
         <DialogHeader>
           <DialogTitle>Create Compliance Label</DialogTitle>
           <DialogDescription>
-            Step {step} of {totalSteps} — 
+            Step {step} of {totalSteps} —
             {step === 1 && ' Basic Information'}
             {step === 2 && ' Classification & Categories'}
             {step === 3 && ' Security Requirements'}
@@ -182,9 +180,8 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
           {Array.from({ length: totalSteps }).map((_, i) => (
             <div
               key={i}
-              className={`h-1 flex-1 rounded-full transition-colors ${
-                i < step ? 'bg-primary' : 'bg-muted'
-              }`}
+              className={`h-1 flex-1 rounded-full transition-colors ${i < step ? 'bg-primary' : 'bg-muted'
+                }`}
             />
           ))}
         </div>
@@ -203,11 +200,10 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
                           key={key}
                           type="button"
                           onClick={() => setFormData(prev => ({ ...prev, framework: key }))}
-                          className={`p-3 rounded-lg border text-left transition-all ${
-                            formData.framework === key
+                          className={`p-3 rounded-lg border text-left transition-all ${formData.framework === key
                               ? 'border-primary bg-primary/5'
                               : 'border-border hover:border-primary/50'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center gap-2">
                             <div className={`h-6 w-6 rounded ${config.color} flex items-center justify-center text-white text-xs`}>
@@ -289,9 +285,8 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
                         key={color}
                         type="button"
                         onClick={() => setFormData(prev => ({ ...prev, color }))}
-                        className={`h-8 w-8 rounded-full transition-transform ${
-                          formData.color === color ? 'ring-2 ring-primary ring-offset-2 scale-110' : ''
-                        }`}
+                        className={`h-8 w-8 rounded-full transition-transform ${formData.color === color ? 'ring-2 ring-primary ring-offset-2 scale-110' : ''
+                          }`}
                         style={{ backgroundColor: color }}
                       />
                     ))}
@@ -313,11 +308,10 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
                         key={key}
                         type="button"
                         onClick={() => setFormData(prev => ({ ...prev, data_classification: key }))}
-                        className={`p-3 rounded-lg border text-left transition-all ${
-                          formData.data_classification === key
+                        className={`p-3 rounded-lg border text-left transition-all ${formData.data_classification === key
                             ? `${config.borderColor} ${config.bgColor}`
                             : 'border-border hover:border-primary/50'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -344,11 +338,10 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
                         key={key}
                         type="button"
                         onClick={() => setFormData(prev => ({ ...prev, sensitivity_level: key }))}
-                        className={`p-3 rounded-lg border text-center transition-all ${
-                          formData.sensitivity_level === key
+                        className={`p-3 rounded-lg border text-center transition-all ${formData.sensitivity_level === key
                             ? `border-primary ${config.bgColor}`
                             : 'border-border hover:border-primary/50'
-                        }`}
+                          }`}
                       >
                         <span className={`font-medium text-sm ${config.color}`}>
                           {config.label}
@@ -370,18 +363,16 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
                         key={key}
                         type="button"
                         onClick={() => toggleDataCategory(key)}
-                        className={`p-2 rounded-lg border text-left transition-all ${
-                          formData.data_categories.includes(key)
+                        className={`p-2 rounded-lg border text-left transition-all ${formData.data_categories.includes(key)
                             ? 'border-primary bg-primary/5'
                             : 'border-border hover:border-primary/50'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2">
-                          <div className={`h-4 w-4 rounded border flex items-center justify-center ${
-                            formData.data_categories.includes(key)
+                          <div className={`h-4 w-4 rounded border flex items-center justify-center ${formData.data_categories.includes(key)
                               ? 'bg-primary border-primary'
                               : 'border-muted-foreground'
-                          }`}>
+                            }`}>
                             {formData.data_categories.includes(key) && (
                               <Check className="h-3 w-3 text-primary-foreground" />
                             )}
@@ -427,20 +418,6 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
                   <Switch
                     checked={formData.access_logging_required}
                     onCheckedChange={(checked) => setFormData(prev => ({ ...prev, access_logging_required: checked }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg border">
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-5 w-5 text-muted-foreground" />
-                    <div>
-                      <p className="font-medium text-sm">Watermark Required</p>
-                      <p className="text-xs text-muted-foreground">Apply watermarks when viewing/downloading</p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={formData.watermark_required}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, watermark_required: checked }))}
                   />
                 </div>
 
@@ -607,11 +584,6 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
                       {formData.access_logging_required && (
                         <li className="flex items-center gap-2 text-sm">
                           <Check className="h-3 w-3 text-green-500" /> Access Logging
-                        </li>
-                      )}
-                      {formData.watermark_required && (
-                        <li className="flex items-center gap-2 text-sm">
-                          <Check className="h-3 w-3 text-green-500" /> Watermark
                         </li>
                       )}
                       {formData.download_restricted && (

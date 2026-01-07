@@ -137,6 +137,80 @@ class LLMClient:
         result = await self._call_api_with_retry(request_body)
         return result
 
+    async def generate_completion_with_image(self, prompt: str, image_url: str, 
+                                            temperature: float = 0.3, max_tokens: int = 150) -> str:
+        """
+        Generate a text completion for a prompt with an image (vision task).
+        For signature verification and other image analysis tasks.
+        """
+        try:
+            logger.info(f"Generating completion with image, max_tokens={max_tokens}, temp={temperature}")
+            
+            # Extract base64 from data URL if needed
+            image_data = image_url.split(",")[1] if "," in image_url else image_url
+            
+            request_body = {
+                "model": self._normalize_model_name(self.extraction_model),
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{image_data}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature
+            }
+            
+            result = await self._call_api_with_retry(request_body)
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            logger.info(f"Vision completion response: {content[:200]}")
+            return content
+            
+        except Exception as e:
+            logger.error(f"Error generating completion with image: {e}")
+            raise
+
+    async def generate_text_completion(self, prompt: str, max_tokens: int = 500) -> str:
+        """
+        Generate text completion without image (for migration summaries, etc).
+        """
+        try:
+            logger.info(f"Generating text completion, max_tokens={max_tokens}")
+            
+            request_body = {
+                "model": self._normalize_model_name(self.extraction_model),
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "max_tokens": max_tokens,
+                "temperature": 0.3
+            }
+            
+            result = await self._call_api_with_retry(request_body)
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            logger.info(f"Text completion response: {content[:200]}")
+            return content
+            
+        except Exception as e:
+            logger.error(f"Error generating text completion: {e}")
+            raise
+
     def process_api_result(self, result: Dict[str, Any], task: str) -> Dict[str, Any]:
         """Process API result and handle JSON parsing"""
         try:

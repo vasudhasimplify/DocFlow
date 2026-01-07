@@ -93,7 +93,6 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
         retention_period_days: label.retention_period_days,
         encryption_required: label.encryption_required,
         access_logging_required: label.access_logging_required,
-        watermark_required: label.watermark_required,
         download_restricted: label.download_restricted,
         sharing_restricted: label.sharing_restricted,
         export_restricted: label.export_restricted,
@@ -134,7 +133,7 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <div 
+              <div
                 className="h-8 w-8 rounded-lg flex items-center justify-center text-white"
                 style={{ backgroundColor: formData.color || label.color }}
               >
@@ -158,7 +157,7 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                   <FileText className="h-4 w-4" />
                   Basic Information
                 </h3>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Label Name</Label>
@@ -168,7 +167,7 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                       placeholder="e.g., GDPR Personal Data"
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label>Code</Label>
                     <Input
@@ -197,9 +196,8 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                       <button
                         key={color}
                         type="button"
-                        className={`h-8 w-8 rounded-full border-2 transition-transform ${
-                          formData.color === color ? 'border-primary scale-110' : 'border-transparent'
-                        }`}
+                        className={`h-8 w-8 rounded-full border-2 transition-transform ${formData.color === color ? 'border-primary scale-110' : 'border-transparent'
+                          }`}
                         style={{ backgroundColor: color }}
                         onClick={() => setFormData(prev => ({ ...prev, color }))}
                       />
@@ -220,9 +218,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                     <Label>Data Classification</Label>
                     <Select
                       value={formData.data_classification}
-                      onValueChange={(v) => setFormData(prev => ({ 
-                        ...prev, 
-                        data_classification: v as DataClassification 
+                      onValueChange={(v) => setFormData(prev => ({
+                        ...prev,
+                        data_classification: v as DataClassification
                       }))}
                     >
                       <SelectTrigger>
@@ -242,9 +240,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                     <Label>Sensitivity Level</Label>
                     <Select
                       value={formData.sensitivity_level}
-                      onValueChange={(v) => setFormData(prev => ({ 
-                        ...prev, 
-                        sensitivity_level: v as SensitivityLevel 
+                      onValueChange={(v) => setFormData(prev => ({
+                        ...prev,
+                        sensitivity_level: v as SensitivityLevel
                       }))}
                     >
                       <SelectTrigger>
@@ -293,9 +291,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                     </div>
                     <Switch
                       checked={formData.encryption_required}
-                      onCheckedChange={(checked) => setFormData(prev => ({ 
-                        ...prev, 
-                        encryption_required: checked 
+                      onCheckedChange={(checked) => setFormData(prev => ({
+                        ...prev,
+                        encryption_required: checked
                       }))}
                     />
                   </div>
@@ -307,23 +305,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                     </div>
                     <Switch
                       checked={formData.access_logging_required}
-                      onCheckedChange={(checked) => setFormData(prev => ({ 
-                        ...prev, 
-                        access_logging_required: checked 
-                      }))}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between p-3 rounded-lg border">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">Watermark Required</span>
-                    </div>
-                    <Switch
-                      checked={formData.watermark_required}
-                      onCheckedChange={(checked) => setFormData(prev => ({ 
-                        ...prev, 
-                        watermark_required: checked 
+                      onCheckedChange={(checked) => setFormData(prev => ({
+                        ...prev,
+                        access_logging_required: checked
                       }))}
                     />
                   </div>
@@ -335,9 +319,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                     </div>
                     <Switch
                       checked={formData.download_restricted}
-                      onCheckedChange={(checked) => setFormData(prev => ({ 
-                        ...prev, 
-                        download_restricted: checked 
+                      onCheckedChange={(checked) => setFormData(prev => ({
+                        ...prev,
+                        download_restricted: checked
                       }))}
                     />
                   </div>
@@ -349,9 +333,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                     </div>
                     <Switch
                       checked={formData.sharing_restricted}
-                      onCheckedChange={(checked) => setFormData(prev => ({ 
-                        ...prev, 
-                        sharing_restricted: checked 
+                      onCheckedChange={(checked) => setFormData(prev => ({
+                        ...prev,
+                        sharing_restricted: checked
                       }))}
                     />
                   </div>
@@ -363,9 +347,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                     </div>
                     <Switch
                       checked={formData.deletion_requires_approval}
-                      onCheckedChange={(checked) => setFormData(prev => ({ 
-                        ...prev, 
-                        deletion_requires_approval: checked 
+                      onCheckedChange={(checked) => setFormData(prev => ({
+                        ...prev,
+                        deletion_requires_approval: checked
                       }))}
                     />
                   </div>
@@ -386,9 +370,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                   </div>
                   <Switch
                     checked={formData.retention_required}
-                    onCheckedChange={(checked) => setFormData(prev => ({ 
-                      ...prev, 
-                      retention_required: checked 
+                    onCheckedChange={(checked) => setFormData(prev => ({
+                      ...prev,
+                      retention_required: checked
                     }))}
                   />
                 </div>
@@ -399,9 +383,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                     <Input
                       type="number"
                       value={formData.retention_period_days || ''}
-                      onChange={(e) => setFormData(prev => ({ 
-                        ...prev, 
-                        retention_period_days: parseInt(e.target.value) || undefined 
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        retention_period_days: parseInt(e.target.value) || undefined
                       }))}
                       min={1}
                     />
@@ -413,9 +397,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                   <Input
                     type="number"
                     value={formData.audit_frequency_days || ''}
-                    onChange={(e) => setFormData(prev => ({ 
-                      ...prev, 
-                      audit_frequency_days: parseInt(e.target.value) || 90 
+                    onChange={(e) => setFormData(prev => ({
+                      ...prev,
+                      audit_frequency_days: parseInt(e.target.value) || 90
                     }))}
                     min={1}
                   />
@@ -436,9 +420,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                   </div>
                   <Switch
                     checked={formData.requires_acknowledgment}
-                    onCheckedChange={(checked) => setFormData(prev => ({ 
-                      ...prev, 
-                      requires_acknowledgment: checked 
+                    onCheckedChange={(checked) => setFormData(prev => ({
+                      ...prev,
+                      requires_acknowledgment: checked
                     }))}
                   />
                 </div>
@@ -448,9 +432,9 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
                     <Label>Acknowledgment Text</Label>
                     <Textarea
                       value={formData.acknowledgment_text || ''}
-                      onChange={(e) => setFormData(prev => ({ 
-                        ...prev, 
-                        acknowledgment_text: e.target.value 
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        acknowledgment_text: e.target.value
                       }))}
                       placeholder="I acknowledge that I understand the compliance requirements..."
                       rows={3}
@@ -492,7 +476,7 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Compliance Label?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the "{label.name}" label. 
+              This will permanently delete the "{label.name}" label.
               Documents with this label will lose their compliance classification.
               This action cannot be undone.
             </AlertDialogDescription>

@@ -322,6 +322,25 @@ export function useMigration() {
     }
   });
 
+  // Delete identity mapping
+  const deleteIdentityMappingMutation = useMutation({
+    mutationFn: async (mappingId: string) => {
+      const { error } = await supabase
+        .from('identity_mappings')
+        .delete()
+        .eq('id', mappingId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['identity-mappings'] });
+      toast({ title: 'Identity mapping deleted' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to delete mapping', description: error.message, variant: 'destructive' });
+    }
+  });
+
   // Get job statistics
   const getJobStats = useCallback((job: MigrationJob) => {
     const progress = job.total_items > 0
@@ -368,6 +387,7 @@ export function useMigration() {
     retryFailed: retryFailedMutation.mutate,
     saveCredentials: saveCredentialsMutation.mutate,
     saveIdentityMapping: saveIdentityMappingMutation.mutate,
+    deleteIdentityMapping: deleteIdentityMappingMutation.mutate,
     refetchJobs,
     refetchItems,
     

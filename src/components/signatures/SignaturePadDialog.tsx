@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { PenTool, Type, Upload, Trash2, Check, RotateCcw } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,
   DialogContent,
@@ -33,13 +34,17 @@ export const SignaturePadDialog: React.FC<SignaturePadDialogProps> = ({
   type = 'signature',
 }) => {
   const { userSignatures, saveUserSignature, deleteUserSignature } = useElectronicSignatures();
+  const { toast } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<'draw' | 'type' | 'upload' | 'saved'>('draw');
   const [isDrawing, setIsDrawing] = useState(false);
   const [typedName, setTypedName] = useState('');
   const [selectedFont, setSelectedFont] = useState(SIGNATURE_FONTS[0].value);
   const [signatureName, setSignatureName] = useState('');
   const [hasDrawing, setHasDrawing] = useState(false);
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const filteredSignatures = userSignatures.filter(s => s.signature_type === type);
 
@@ -134,11 +139,13 @@ export const SignaturePadDialog: React.FC<SignaturePadDialogProps> = ({
 
   const handleSave = async () => {
     let dataUrl = '';
-    
+
     if (activeTab === 'draw') {
       dataUrl = getCanvasDataUrl();
     } else if (activeTab === 'type') {
       dataUrl = getTypedSignatureDataUrl();
+    } else if (activeTab === 'upload' && uploadedImage) {
+      dataUrl = uploadedImage;
     }
 
     if (!dataUrl) return;
@@ -164,18 +171,92 @@ export const SignaturePadDialog: React.FC<SignaturePadDialogProps> = ({
     }
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      toast({
+        title: "File too large",
+        description: "Maximum file size is 2MB",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check file type
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload an image file (PNG, JPG, or SVG)",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Read file as data URL
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const dataUrl = event.target?.result as string;
+
+      // AI Verification
+      setIsVerifying(true);
+      try {
+        const response = await fetch('/api/v1/verify-signature-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_data_url: dataUrl })
+        });
+
+        if (!response.ok) {
+          throw new Error('Verification failed');
+        }
+
+        const result = await response.json();
+
+        if (!result.is_valid_signature) {
+          toast({
+            title: "Not a signature",
+            description: "Please upload a signature on white paper with blue or black pen. Colorful or complex images are not allowed.",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        // Success - set uploaded image
+        setUploadedImage(dataUrl);
+        toast({
+          title: "Verified by AI",
+          description: "Signature looks good!"
+        });
+      } catch (error) {
+        console.error('Verification failed:', error);
+        toast({
+          title: "Verification failed",
+          description: "Could not verify image. Please try again.",
+          variant: "destructive"
+        });
+      } finally {
+        setIsVerifying(false);
+      }
+    };
+
+    reader.readAsDataURL(file);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <PenTool className="h-5 w-5" />
-            {onSignatureSelect 
+            {onSignatureSelect
               ? `Select ${type === 'signature' ? 'Signature' : 'Initials'}`
               : 'Manage My Signatures'}
           </DialogTitle>
           <DialogDescription>
-            {onSignatureSelect 
+            {onSignatureSelect
               ? 'Draw, type, or choose a saved signature'
               : 'Create and manage your saved signatures'}
           </DialogDescription>
@@ -254,8 +335,8 @@ export const SignaturePadDialog: React.FC<SignaturePadDialogProps> = ({
                     onClick={() => setSelectedFont(font.value)}
                   >
                     <CardContent className="p-4 text-center">
-                      <span 
-                        style={{ fontFamily: font.value }} 
+                      <span
+                        style={{ fontFamily: font.value }}
                         className="text-2xl"
                       >
                         {typedName || 'Your Name'}
@@ -269,18 +350,56 @@ export const SignaturePadDialog: React.FC<SignaturePadDialogProps> = ({
           </TabsContent>
 
           <TabsContent value="upload" className="space-y-4">
-            <div className="border-2 border-dashed rounded-lg p-8 text-center">
-              <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground mb-2">
-                Drag and drop an image, or click to browse
-              </p>
-              <Button variant="outline" size="sm">
-                Choose File
-              </Button>
-              <p className="text-xs text-muted-foreground mt-2">
-                PNG, JPG, or SVG up to 2MB
-              </p>
-            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/svg+xml"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+
+            {uploadedImage ? (
+              <div className="space-y-4">
+                <div className="border rounded-lg p-4 bg-white">
+                  <img
+                    src={uploadedImage}
+                    alt="Uploaded signature"
+                    className="max-h-32 mx-auto object-contain"
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setUploadedImage(null)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Remove
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Verified by AI
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="border-2 border-dashed rounded-lg p-8 text-center">
+                <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground mb-2">
+                  {isVerifying ? "Verifying signature with AI..." : "Upload an image of your signature"}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isVerifying}
+                >
+                  {isVerifying ? "Verifying..." : "Choose File"}
+                </Button>
+                <p className="text-xs text-muted-foreground mt-2">
+                  PNG, JPG, or SVG up to 2MB. AI will verify it's a real signature.
+                </p>
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="saved">
@@ -294,7 +413,7 @@ export const SignaturePadDialog: React.FC<SignaturePadDialogProps> = ({
               ) : (
                 <div className="space-y-2">
                   {filteredSignatures.map((sig) => (
-                    <Card 
+                    <Card
                       key={sig.id}
                       className={cn(
                         "cursor-pointer hover:border-primary transition-colors",
@@ -304,8 +423,8 @@ export const SignaturePadDialog: React.FC<SignaturePadDialogProps> = ({
                     >
                       <CardContent className="p-3 flex items-center gap-3">
                         <div className="flex-1 bg-white rounded p-2 border">
-                          <img 
-                            src={sig.data_url} 
+                          <img
+                            src={sig.data_url}
                             alt={sig.name}
                             className="h-10 object-contain mx-auto"
                           />
@@ -339,7 +458,7 @@ export const SignaturePadDialog: React.FC<SignaturePadDialogProps> = ({
           </TabsContent>
         </Tabs>
 
-        {(activeTab === 'draw' || activeTab === 'type') && (
+        {(activeTab === 'draw' || activeTab === 'type' || activeTab === 'upload') && (
           <div>
             <Label>Save as (optional)</Label>
             <Input
@@ -354,10 +473,15 @@ export const SignaturePadDialog: React.FC<SignaturePadDialogProps> = ({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          {(activeTab === 'draw' || activeTab === 'type') && (
-            <Button 
+          {(activeTab === 'draw' || activeTab === 'type' || (activeTab === 'upload' && uploadedImage)) && (
+            <Button
               onClick={handleSave}
-              disabled={activeTab === 'draw' ? !hasDrawing : !typedName.trim()}
+              disabled={
+                activeTab === 'draw' ? !hasDrawing :
+                  activeTab === 'type' ? !typedName.trim() :
+                    activeTab === 'upload' ? !uploadedImage :
+                      false
+              }
             >
               <Check className="h-4 w-4 mr-2" />
               {onSignatureSelect ? 'Use This Signature' : 'Save Signature'}

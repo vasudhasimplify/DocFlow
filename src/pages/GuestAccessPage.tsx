@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Loader2, FileText, Download, AlertCircle, Clock, Eye, ExternalLink, X, Lock, ArrowRight, Mail } from 'lucide-react';
+import { Loader2, FileText, Download, AlertCircle, Clock, Eye, ExternalLink, X, Lock, ArrowRight, Mail, Printer, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,8 @@ import {
 } from '@/utils/shareLinkStorage';
 import { EnhancedShareLink } from '@/types/shareLink';
 import { useToast } from '@/hooks/use-toast';
+import { useDocumentComments } from '@/hooks/useDocumentComments';
+import CommentsSidebar from '@/components/collaboration/CommentsSidebar';
 
 interface ShareData {
   id: string;
@@ -58,12 +60,32 @@ export default function GuestAccessPage() {
   const [isLocked, setIsLocked] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
+  const [isCommentsOpen, setIsCommentsOpen] = useState(false);
   const { toast } = useToast();
 
   // Email verification state (for allowed_emails / allowed_domains)
+  // NOTE: visitorEmail must be declared before useDocumentComments hook that uses it
   const [requiresEmailVerification, setRequiresEmailVerification] = useState(false);
   const [visitorEmail, setVisitorEmail] = useState('');
   const [emailVerificationError, setEmailVerificationError] = useState('');
+
+  // Generate a stable anonymous guest ID for this session (used if no email verification)
+  const [anonymousGuestId] = useState(() => `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}@anonymous.local`);
+
+  const {
+    comments,
+    addComment,
+    resolveComment,
+    reopenComment,
+    deleteComment,
+    updateComment,
+    toggleReaction
+  } = useDocumentComments({
+    documentId: share?.resource_id || '',
+    // Use visitor email if provided, otherwise use the stable anonymous guest ID
+    guestEmail: visitorEmail || anonymousGuestId,
+    guestName: visitorEmail ? visitorEmail.split('@')[0] : 'Anonymous Guest'
+  });
 
   // Block Ctrl+S save for view-only links
   useEffect(() => {
@@ -95,36 +117,54 @@ export default function GuestAccessPage() {
     return () => window.document.removeEventListener('keydown', handleKeyDown);
   }, [share, toast]);
 
-  // Block right-click context menu globally for view-only documents
+  // Block right-click context menu globally when download or print is disabled
   useEffect(() => {
-    // Only block when viewing the document
-    if (!showViewer || !share) return;
+    // Block as soon as share data is loaded (not just when viewer is open)
+    if (!share) return;
 
     const permission = 'permission' in share ? share.permission : 'view';
+    const allowDownload = 'allow_download' in share ? share.allow_download : false;
+    const allowPrint = 'allow_print' in share ? share.allow_print : false;
 
-    // For view-only documents, ALWAYS block saving - no exceptions
-    const isViewOnly = permission === 'view';
+    // Determine what's actually allowed
+    const canEdit = permission === 'edit';
+    const canDownload = canEdit || permission === 'download' || allowDownload;
+    const canPrint = canEdit || allowPrint;
 
-    console.log('🔒 Right-click blocker:', { permission, isViewOnly, showViewer });
-
-    // Only block for view-only permission
-    if (!isViewOnly) {
-      console.log('⚠️ Not blocking - permission is:', permission);
+    // If both download and print are allowed, don't block right-click
+    if (canDownload && canPrint) {
+      console.log('⚠️ Not blocking right-click - both download and print allowed');
       return;
     }
 
-    console.log('✅ BLOCKING all right-clicks for view-only document');
+    console.log('✅ BLOCKING right-clicks:', { canDownload, canPrint, showViewer });
 
     const handleContextMenu = (e: MouseEvent) => {
       console.log('🛑 RIGHT-CLICK BLOCKED');
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      toast({
-        title: '🚫 Saving Disabled',
-        description: 'This is a view-only document. Saving is not permitted.',
-        variant: 'destructive'
-      });
+
+      // Show appropriate message based on what's blocked
+      if (!canDownload && !canPrint) {
+        toast({
+          title: '🚫 Actions Disabled',
+          description: 'Saving and printing are disabled for this document.',
+          variant: 'destructive'
+        });
+      } else if (!canDownload) {
+        toast({
+          title: '🚫 Download Disabled',
+          description: 'Saving is disabled for this document.',
+          variant: 'destructive'
+        });
+      } else {
+        toast({
+          title: '🚫 Printing Disabled',
+          description: 'Printing is disabled for this document.',
+          variant: 'destructive'
+        });
+      }
       return false;
     };
 
@@ -355,6 +395,63 @@ export default function GuestAccessPage() {
     };
   }, [share, toast]);
 
+  // Block browser print via CSS @media print when printing is disabled
+  // This handles cases where user tries File > Print menu or right-click > Print
+  useEffect(() => {
+    if (!share) return;
+
+    const permission = 'permission' in share ? share.permission : 'view';
+    const allowPrint = 'allow_print' in share ? share.allow_print : false;
+    const canEdit = permission === 'edit';
+    const canPrint = canEdit || allowPrint;
+
+    // If printing is allowed, don't inject blocking styles
+    if (canPrint) return;
+
+    console.log('🖨️ Injecting print-blocking CSS');
+
+    // Create a style element to block printing
+    const styleId = 'guest-access-print-blocker';
+    let styleElement = window.document.getElementById(styleId) as HTMLStyleElement;
+
+    if (!styleElement) {
+      styleElement = window.document.createElement('style');
+      styleElement.id = styleId;
+      window.document.head.appendChild(styleElement);
+    }
+
+    // CSS that hides everything when trying to print and shows a message
+    styleElement.textContent = `
+      @media print {
+        body * {
+          visibility: hidden !important;
+        }
+        body::before {
+          visibility: visible !important;
+          display: block !important;
+          position: fixed !important;
+          top: 50% !important;
+          left: 50% !important;
+          transform: translate(-50%, -50%) !important;
+          font-size: 24px !important;
+          font-weight: bold !important;
+          color: #666 !important;
+          content: "Printing is disabled for this document" !important;
+          text-align: center !important;
+          z-index: 999999 !important;
+        }
+      }
+    `;
+
+    return () => {
+      // Clean up the style element when component unmounts or permissions change
+      const element = window.document.getElementById(styleId);
+      if (element) {
+        element.remove();
+      }
+    };
+  }, [share]);
+
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -554,6 +651,7 @@ export default function GuestAccessPage() {
       // Also try to send via backend API (for email notifications and bell icon)
       const notifyPayload = {
         share_id: shareData.id,
+        resource_id: 'resource_id' in shareData ? shareData.resource_id : undefined,
         resource_name: shareData.resource_name,
         accessor_email: accessorEmail || 'Anonymous',
         accessed_at: new Date().toISOString(),
@@ -870,6 +968,7 @@ export default function GuestAccessPage() {
   const getPermissionLabel = (permission: string) => {
     switch (permission) {
       case 'view': return 'View Only';
+      case 'comment': return 'Can Comment';
       case 'download': return 'Can Download';
       case 'edit': return 'Can Edit';
       default: return permission;
@@ -1072,6 +1171,33 @@ export default function GuestAccessPage() {
                 Download
               </Button>
             )}
+            {(permission === 'comment' || permission === 'edit') && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsCommentsOpen(!isCommentsOpen)}
+                className={`border-gray-600 ${isCommentsOpen ? 'bg-blue-600 text-white border-blue-500' : 'text-gray-300'}`}
+              >
+                <MessageSquare className="h-4 w-4 mr-2" />
+                Comments
+                {comments.filter(c => c.status === 'open').length > 0 && (
+                  <Badge variant="secondary" className="ml-2 bg-blue-500 text-white h-5 min-w-5 flex items-center justify-center p-0">
+                    {comments.filter(c => c.status === 'open').length}
+                  </Badge>
+                )}
+              </Button>
+            )}
+            {canPrint && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => window.print()}
+                className="border-gray-600 text-gray-300"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                Print
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -1083,104 +1209,124 @@ export default function GuestAccessPage() {
           </div>
         </div>
 
-        {/* Document Viewer with Watermark */}
-        <div
-          className={`flex-1 p-4 relative ${!canCopy ? 'select-none' : ''}`}
-          onContextMenu={!canDownload ? (e) => {
-            e.preventDefault();
-            toast({
-              title: "Right-click Disabled",
-              description: "This is a view-only document. Saving is not permitted.",
-              variant: "destructive"
-            });
-          } : undefined}
-        >
-          {/* Watermark Overlay */}
-          {watermarkEnabled && (
-            <div
-              className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center overflow-hidden"
-              style={{
-                background: 'repeating-linear-gradient(45deg, transparent, transparent 200px, rgba(128,128,128,0.03) 200px, rgba(128,128,128,0.03) 400px)'
-              }}
-            >
+        {/* Document Viewer and Sidebar Container */}
+        <div className="flex-1 flex overflow-hidden">
+          <div
+            className={`flex-1 p-4 relative overflow-auto ${!canCopy ? 'select-none' : ''}`}
+            onContextMenu={!canDownload ? (e) => {
+              e.preventDefault();
+              toast({
+                title: "Right-click Disabled",
+                description: "This is a view-only document. Saving is not permitted.",
+                variant: "destructive"
+              });
+            } : undefined}
+          >
+            {/* Watermark Overlay */}
+            {watermarkEnabled && (
               <div
-                className="text-gray-500/20 text-4xl font-bold whitespace-nowrap transform -rotate-45"
+                className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center overflow-hidden"
                 style={{
-                  fontSize: '4rem',
-                  userSelect: 'none'
+                  background: 'repeating-linear-gradient(45deg, transparent, transparent 200px, rgba(128,128,128,0.03) 200px, rgba(128,128,128,0.03) 400px)'
                 }}
               >
-                {watermarkText || 'CONFIDENTIAL'}
+                <div
+                  className="text-gray-500/20 text-4xl font-bold whitespace-nowrap transform -rotate-45"
+                  style={{
+                    fontSize: '4rem',
+                    userSelect: 'none'
+                  }}
+                >
+                  {watermarkText || 'CONFIDENTIAL'}
+                </div>
               </div>
+            )}
+
+            {(() => {
+              const previewType = getPreviewType(document?.file_type, document?.file_name);
+
+              if (previewType === 'pdf') {
+                // PDF viewer - scrolling works natively, right-click is blocked by global contextmenu handler
+                return (
+                  <div className="relative w-full h-full min-h-[calc(100vh-80px)]">
+                    <iframe
+                      id="pdf-viewer-iframe"
+                      src={getPdfViewerUrl(documentUrl)}
+                      className="w-full h-full min-h-[calc(100vh-80px)] rounded-lg border border-gray-700"
+                      title={resourceName}
+                    />
+                  </div>
+                );
+              } else if (previewType === 'image') {
+                // Block right-click if download is not allowed
+                return (
+                  <div
+                    className="flex items-center justify-center h-full"
+                    onContextMenu={!canDownload ? (e) => {
+                      e.preventDefault();
+                      toast({
+                        title: "Right-click Disabled",
+                        description: "Saving is disabled for this document.",
+                        variant: "destructive"
+                      });
+                    } : undefined}
+                  >
+                    <img
+                      src={documentUrl || ''}
+                      alt={resourceName}
+                      className={`max-w-full max-h-[calc(100vh-100px)] rounded-lg shadow-xl ${!canDownload ? 'pointer-events-none' : ''}`}
+                      draggable={canDownload}
+                      style={!canDownload ? { WebkitUserDrag: 'none' } as React.CSSProperties : undefined}
+                    />
+                  </div>
+                );
+              } else if (previewType === 'text' && document?.extracted_text) {
+                return (
+                  <div
+                    className={`max-w-4xl mx-auto bg-white rounded-lg shadow-xl p-8 min-h-[calc(100vh-100px)] ${!canCopy ? 'select-none' : ''}`}
+                    onContextMenu={canCopy ? undefined : (e) => e.preventDefault()}
+                  >
+                    <pre className="whitespace-pre-wrap font-mono text-sm text-gray-800">
+                      {document.extracted_text}
+                    </pre>
+                  </div>
+                );
+              } else {
+                return (
+                  <div className="flex flex-col items-center justify-center h-full text-center">
+                    <FileText className="h-20 w-20 text-gray-600 mb-4" />
+                    <p className="text-gray-400 mb-2">Preview not available for this file type</p>
+                    <p className="text-gray-500 text-sm mb-4">
+                      File: {document?.file_name || 'Unknown'}
+                      {document?.file_type && <span> ({document.file_type})</span>}
+                    </p>
+                    {canDownload && (
+                      <Button onClick={handleDownload} disabled={downloading}>
+                        <Download className="h-4 w-4 mr-2" />
+                        Download to View
+                      </Button>
+                    )}
+                  </div>
+                );
+              }
+            })()}
+          </div>
+
+          {/* Comments Sidebar */}
+          {isCommentsOpen && (
+            <div className="w-[350px] shrink-0 border-l border-gray-700 bg-gray-800 overflow-hidden flex flex-col">
+              <CommentsSidebar
+                comments={comments}
+                onAddComment={addComment}
+                onReply={(content, parentId) => addComment(content, { parentCommentId: parentId })}
+                onEdit={updateComment}
+                onDelete={deleteComment}
+                onResolve={resolveComment}
+                onReopen={reopenComment}
+                onReact={toggleReaction}
+              />
             </div>
           )}
-
-          {(() => {
-            const previewType = getPreviewType(document?.file_type, document?.file_name);
-
-            if (previewType === 'pdf') {
-              return (
-                <iframe
-                  src={getPdfViewerUrl(documentUrl)}
-                  className="w-full h-full min-h-[calc(100vh-80px)] rounded-lg border border-gray-700"
-                  title={resourceName}
-                  // Disable right-click for non-edit permissions
-                  onContextMenu={canEdit ? undefined : (e) => e.preventDefault()}
-                />
-              );
-            } else if (previewType === 'image') {
-              // Block right-click if download is not allowed
-              return (
-                <div
-                  className="flex items-center justify-center h-full"
-                  onContextMenu={!canDownload ? (e) => {
-                    e.preventDefault();
-                    toast({
-                      title: "Right-click Disabled",
-                      description: "Saving is disabled for this document.",
-                      variant: "destructive"
-                    });
-                  } : undefined}
-                >
-                  <img
-                    src={documentUrl || ''}
-                    alt={resourceName}
-                    className={`max-w-full max-h-[calc(100vh-100px)] rounded-lg shadow-xl ${!canDownload ? 'pointer-events-none' : ''}`}
-                    draggable={canDownload}
-                    style={!canDownload ? { WebkitUserDrag: 'none' } as React.CSSProperties : undefined}
-                  />
-                </div>
-              );
-            } else if (previewType === 'text' && document?.extracted_text) {
-              return (
-                <div
-                  className={`max-w-4xl mx-auto bg-white rounded-lg shadow-xl p-8 min-h-[calc(100vh-100px)] ${!canCopy ? 'select-none' : ''}`}
-                  onContextMenu={canCopy ? undefined : (e) => e.preventDefault()}
-                >
-                  <pre className="whitespace-pre-wrap font-mono text-sm text-gray-800">
-                    {document.extracted_text}
-                  </pre>
-                </div>
-              );
-            } else {
-              return (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                  <FileText className="h-20 w-20 text-gray-600 mb-4" />
-                  <p className="text-gray-400 mb-2">Preview not available for this file type</p>
-                  <p className="text-gray-500 text-sm mb-4">
-                    File: {document?.file_name || 'Unknown'}
-                    {document?.file_type && <span> ({document.file_type})</span>}
-                  </p>
-                  {canDownload && (
-                    <Button onClick={handleDownload} disabled={downloading}>
-                      <Download className="h-4 w-4 mr-2" />
-                      Download to View
-                    </Button>
-                  )}
-                </div>
-              );
-            }
-          })()}
         </div>
       </div>
     );

@@ -22,13 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { 
-  Link, 
-  Send, 
-  Settings, 
-  Users, 
-  Pencil, 
-  Eye, 
+import {
+  Link,
+  Send,
+  Settings,
+  Users,
+  Pencil,
+  Eye,
   X,
   Check,
   Copy,
@@ -42,7 +42,8 @@ import {
   Ban,
   Infinity,
   Timer,
-  Zap
+  Zap,
+  MessageSquare
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, addHours, addDays, addMonths, differenceInDays, differenceInHours, isPast } from 'date-fns';
@@ -59,7 +60,7 @@ interface EnhancedShareDialogProps {
 
 interface ShareConfig {
   emails: string[];
-  permission: 'view' | 'edit' | 'download';
+  permission: 'view' | 'comment' | 'edit' | 'download';
   message: string;
   expiresAt: Date | null;
   maxUses: number | null;
@@ -76,7 +77,7 @@ interface SharedUser {
   email: string;
   name: string;
   avatar?: string;
-  permission: 'view' | 'edit';
+  permission: 'view' | 'comment' | 'edit';
 }
 
 const QUICK_EXPIRATION_OPTIONS = [
@@ -100,15 +101,15 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
   const [activeTab, setActiveTab] = useState<'invite' | 'link'>('invite');
   const [emailInput, setEmailInput] = useState('');
   const [message, setMessage] = useState('');
-  const [permission, setPermission] = useState<'view' | 'edit' | 'download'>('view');
+  const [permission, setPermission] = useState<'view' | 'comment' | 'edit' | 'download'>('view');
   const [addedEmails, setAddedEmails] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  
+
   // Expiration settings
   const [expirationMode, setExpirationMode] = useState<string>('week');
   const [customExpirationDate, setCustomExpirationDate] = useState<Date | undefined>();
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
-  
+
   // Security settings
   const [maxUses, setMaxUses] = useState<string>('');
   const [requirePassword, setRequirePassword] = useState(false);
@@ -117,7 +118,7 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
   const [allowDownload, setAllowDownload] = useState(true);
   const [watermarkEnabled, setWatermarkEnabled] = useState(false);
   const [notifyOnAccess, setNotifyOnAccess] = useState(false);
-  
+
   // Mock shared users
   const [sharedUsers] = useState<SharedUser[]>([
     { id: '1', email: 'deep@simplifyai.id', name: 'Deep Bhau', permission: 'edit' },
@@ -134,11 +135,11 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
   const getExpirationLabel = (): string => {
     const expDate = getExpirationDate();
     if (!expDate) return 'Never expires';
-    
+
     const now = new Date();
     const diffHours = differenceInHours(expDate, now);
     const diffDays = differenceInDays(expDate, now);
-    
+
     if (diffHours < 24) {
       return `Expires in ${diffHours} hour${diffHours !== 1 ? 's' : ''}`;
     } else if (diffDays < 30) {
@@ -152,7 +153,7 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
     if (e.key === 'Enter' && emailInput.trim()) {
       e.preventDefault();
       const email = emailInput.trim().toLowerCase();
-      
+
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         toast({
           title: "Invalid email",
@@ -161,7 +162,7 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
         });
         return;
       }
-      
+
       if (!addedEmails.includes(email)) {
         setAddedEmails([...addedEmails, email]);
       }
@@ -219,18 +220,18 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
         requirePassword,
         password: requirePassword ? password : undefined,
         requireEmail,
-        allowDownload,
+        allowDownload: allowDownload || permission === 'download' || permission === 'comment',
         watermarkEnabled,
         notifyOnAccess,
       });
-      
+
       toast({
         title: "Shared successfully",
-        description: activeTab === 'invite' 
+        description: activeTab === 'invite'
           ? `Document shared with ${addedEmails.length} people`
           : "Share link created successfully",
       });
-      
+
       setAddedEmails([]);
       setMessage('');
       onOpenChange(false);
@@ -245,7 +246,7 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
     }
   };
 
-  const truncatedName = documentName.length > 30 
+  const truncatedName = documentName.length > 30
     ? `${documentName.substring(0, 15)}...${documentName.substring(documentName.length - 12)}`
     : documentName;
 
@@ -286,7 +287,7 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
                   className="pl-10"
                 />
               </div>
-              <Select value={permission} onValueChange={(v: 'view' | 'edit' | 'download') => setPermission(v)}>
+              <Select value={permission} onValueChange={(v: 'view' | 'comment' | 'edit' | 'download') => setPermission(v)}>
                 <SelectTrigger className="w-32">
                   <SelectValue />
                 </SelectTrigger>
@@ -295,6 +296,12 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
                     <div className="flex items-center gap-2">
                       <Eye className="w-4 h-4" />
                       Can view
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="comment">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4" />
+                      Can comment
                     </div>
                   </SelectItem>
                   <SelectItem value="edit">
@@ -317,8 +324,8 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
             {addedEmails.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {addedEmails.map(email => (
-                  <Badge 
-                    key={email} 
+                  <Badge
+                    key={email}
                     variant="secondary"
                     className="flex items-center gap-1 pl-2 pr-1 py-1"
                   >
@@ -353,7 +360,7 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
                   <Clock className="w-4 h-4" />
                   Link Expiration
                 </Label>
-                <Badge 
+                <Badge
                   variant={expirationDate ? (isExpiringSoon ? "destructive" : "secondary") : "outline"}
                   className="gap-1"
                 >
@@ -361,7 +368,7 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
                   {getExpirationLabel()}
                 </Badge>
               </div>
-              
+
               {/* Quick Expiration Options */}
               <div className="grid grid-cols-3 gap-2">
                 {QUICK_EXPIRATION_OPTIONS.map(option => (
@@ -395,12 +402,12 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
                   <CalendarIcon className="w-3 h-3" />
                   Custom Date
                 </Button>
-                
+
                 {expirationMode === 'custom' && (
                   <Popover open={showCustomDatePicker} onOpenChange={setShowCustomDatePicker}>
                     <PopoverTrigger asChild>
                       <Button variant="outline" size="sm" className="gap-2">
-                        {customExpirationDate 
+                        {customExpirationDate
                           ? format(customExpirationDate, 'MMM d, yyyy')
                           : 'Select date'
                         }
@@ -457,7 +464,7 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
                     onCheckedChange={setRequirePassword}
                   />
                 </div>
-                
+
                 {requirePassword && (
                   <Input
                     type="password"
@@ -558,14 +565,14 @@ export const EnhancedShareDialog: React.FC<EnhancedShareDialogProps> = ({
               ))}
             </div>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={handleCopyLink} className="gap-2">
               <Copy className="w-4 h-4" />
               Copy link
             </Button>
-            
-            <Button 
+
+            <Button
               onClick={handleSend}
               disabled={loading || (activeTab === 'invite' && addedEmails.length === 0)}
               className="gap-2"

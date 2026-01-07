@@ -261,6 +261,7 @@ async def get_share_stats(current_user = Depends(get_current_user)):
 class AccessNotificationRequest(BaseModel):
     share_id: str
     resource_name: str
+    resource_id: Optional[str] = None  # Add resource_id param
     accessor_email: Optional[str] = "Anonymous"
     accessed_at: Optional[str] = None
     owner_id: Optional[str] = None  # For local share links, pass the owner's user ID
@@ -279,6 +280,7 @@ async def notify_access(request: AccessNotificationRequest):
         print(f"📧 ACCESS NOTIFICATION")
         print(f"{'='*60}")
         print(f"   Document: {request.resource_name}")
+        print(f"   ID: {request.resource_id}")
         print(f"   Accessed by: {request.accessor_email}")
         print(f"   Time: {request.accessed_at or datetime.utcnow().isoformat()}")
         print(f"   Share ID: {request.share_id}")
@@ -286,6 +288,7 @@ async def notify_access(request: AccessNotificationRequest):
         
         supabase = get_supabase_client()
         owner_id = None
+        resource_id = request.resource_id
         
         # Check if this is a local share link (starts with 'link-')
         if request.share_id.startswith('link-'):
@@ -307,6 +310,8 @@ async def notify_access(request: AccessNotificationRequest):
                 if share_response.data:
                     share = share_response.data
                     owner_id = share.get('owner_id')
+                    if not resource_id:
+                        resource_id = share.get('resource_id')
                     
                     # Check if notification is enabled in DB
                     if not share.get('notify_on_access') and not share.get('notify_on_view'):
@@ -319,14 +324,18 @@ async def notify_access(request: AccessNotificationRequest):
             try:
                 notification_message = f"{request.accessor_email} accessed your shared link for \"{request.resource_name}\""
                 
-                # Generate a proper UUID for document_id and lock_id (they are required UUID fields)
+                # Generate a proper UUID for lock_id only
                 notification_uuid = str(uuid.uuid4())
                 
+                # IMPORTANT: Use the actual document ID for document_id foreign key
+                # Fallback to notification_uuid ONLY if resource_id is missing (which might still error but explains why)
+                actual_doc_id = resource_id if resource_id else notification_uuid
+                
                 notification_data = {
-                    "document_id": notification_uuid,  # Use generated UUID
+                    "document_id": actual_doc_id,  
                     "lock_id": notification_uuid,  # Use generated UUID
                     "notified_user_id": owner_id,
-                    "notification_type": "access_requested",  # Using existing type
+                    "notification_type": "lock_acquired",  # Fallback to known valid type
                     "message": notification_message,
                     "is_read": False
                 }

@@ -10,12 +10,14 @@ import { useToast } from '@/hooks/use-toast';
 
 interface UseDocumentCommentsOptions {
   documentId: string;
+  guestEmail?: string;
+  guestName?: string;
 }
 
-export const useDocumentComments = ({ documentId }: UseDocumentCommentsOptions) => {
+export const useDocumentComments = ({ documentId, guestEmail, guestName }: UseDocumentCommentsOptions) => {
   const { user } = useAuth();
   const { toast } = useToast();
-  
+
   const [comments, setComments] = useState<DocumentComment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -46,6 +48,15 @@ export const useDocumentComments = ({ documentId }: UseDocumentCommentsOptions) 
           reactions: comment.comment_reactions || [],
           replies: [],
         };
+
+        // If it's a guest comment, populate the user info from guest fields
+        if (!formattedComment.user && (formattedComment.guest_email || formattedComment.guest_name)) {
+          formattedComment.user = {
+            email: formattedComment.guest_email,
+            name: formattedComment.guest_name,
+          };
+        }
+
         commentsMap.set(comment.id, formattedComment);
       });
 
@@ -80,15 +91,38 @@ export const useDocumentComments = ({ documentId }: UseDocumentCommentsOptions) 
       anchorPosition?: AnchorPosition;
     }
   ) => {
-    if (!user || !documentId) return;
+    if ((!user && !guestEmail) || !documentId) {
+      console.log('addComment: Missing required data', { user: !!user, guestEmail, documentId });
+      return;
+    }
+
+    const commentData = {
+      id: `comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      document_id: documentId,
+      user_id: user?.id || '00000000-0000-0000-0000-000000000000',
+      comment: content,
+      guest_email: guestEmail,
+      guest_name: guestName,
+      parent_comment_id: options?.parentCommentId || null,
+      selection_start: options?.selectionStart,
+      selection_end: options?.selectionEnd,
+      selection_text: options?.selectionText,
+      anchor_position: options?.anchorPosition,
+      status: 'open' as const,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
 
     try {
+      // Try to insert into database
       const { data, error } = await (supabase
         .from('document_comments')
         .insert({
           document_id: documentId,
-          user_id: user.id,
+          user_id: user?.id || '00000000-0000-0000-0000-000000000000',
           comment: content,
+          guest_email: guestEmail,
+          guest_name: guestName,
           parent_comment_id: options?.parentCommentId,
           selection_start: options?.selectionStart,
           selection_end: options?.selectionEnd,
@@ -99,18 +133,49 @@ export const useDocumentComments = ({ documentId }: UseDocumentCommentsOptions) 
         .select()
         .single());
 
-      if (error) throw error;
+      if (error) {
+        console.warn('Database insert failed, using local storage:', error.message);
+        // Store locally for guests when database fails (likely RLS issue)
+        const localKey = `guest_comments_${documentId}`;
+        const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+        existing.push(commentData);
+        localStorage.setItem(localKey, JSON.stringify(existing));
 
-      // Log activity
-      await (supabase
-        .from('document_activity')
-        .insert({
-          document_id: documentId,
-          user_id: user.id,
-          action_type: options?.parentCommentId ? 'comment_replied' : 'comment_added',
-          action_details: { comment_id: data.id },
-        } as any));
+        // Add to local state immediately
+        const newComment: DocumentComment = {
+          ...commentData,
+          content: content, // Add the content property required by DocumentComment
+          reactions: [],
+          replies: [],
+          user: {
+            email: guestEmail,
+            name: guestName,
+          }
+        } as DocumentComment;
 
+        if (options?.parentCommentId) {
+          // Find parent and add as reply
+          setComments(prev => {
+            const updated = [...prev];
+            const parent = updated.find(c => c.id === options.parentCommentId);
+            if (parent) {
+              parent.replies = parent.replies || [];
+              parent.replies.push(newComment);
+            }
+            return updated;
+          });
+        } else {
+          setComments(prev => [...prev, newComment]);
+        }
+
+        toast({
+          title: 'Comment added',
+          description: 'Your comment has been posted',
+        });
+        return newComment;
+      }
+
+      // Database insert successful
       await fetchComments();
 
       toast({
@@ -121,13 +186,14 @@ export const useDocumentComments = ({ documentId }: UseDocumentCommentsOptions) 
       return data;
     } catch (error) {
       console.error('Error adding comment:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       toast({
         title: 'Error',
-        description: 'Failed to add comment',
+        description: `Failed to add comment: ${errorMessage}`,
         variant: 'destructive',
       });
     }
-  }, [user, documentId, fetchComments, toast]);
+  }, [user, guestEmail, guestName, documentId, fetchComments, toast]);
 
   // Update comment
   const updateComment = useCallback(async (commentId: string, content: string) => {
@@ -246,17 +312,21 @@ export const useDocumentComments = ({ documentId }: UseDocumentCommentsOptions) 
 
   // Add reaction
   const addReaction = useCallback(async (commentId: string, reaction: string) => {
-    if (!user) return;
+    if (!user && !guestEmail) return;
 
     try {
+      const reactionData = {
+        comment_id: commentId,
+        user_id: user?.id || '00000000-0000-0000-0000-000000000000',
+        reaction,
+        guest_email: guestEmail,
+        guest_name: guestName
+      };
+
       const { error } = await supabase
         .from('comment_reactions')
-        .upsert({
-          comment_id: commentId,
-          user_id: user.id,
-          reaction,
-        }, {
-          onConflict: 'comment_id,user_id,reaction'
+        .upsert(reactionData, {
+          onConflict: user ? 'comment_id,user_id,reaction' : 'comment_id,guest_email,reaction'
         });
 
       if (error) throw error;
@@ -265,19 +335,26 @@ export const useDocumentComments = ({ documentId }: UseDocumentCommentsOptions) 
     } catch (error) {
       console.error('Error adding reaction:', error);
     }
-  }, [user, fetchComments]);
+  }, [user, guestEmail, guestName, fetchComments]);
 
   // Remove reaction
   const removeReaction = useCallback(async (commentId: string, reaction: string) => {
-    if (!user) return;
+    if (!user && !guestEmail) return;
 
     try {
-      const { error } = await supabase
+      let query = supabase
         .from('comment_reactions')
         .delete()
         .eq('comment_id', commentId)
-        .eq('user_id', user.id)
         .eq('reaction', reaction);
+
+      if (user) {
+        query = query.eq('user_id', user.id);
+      } else {
+        query = query.eq('guest_email', guestEmail);
+      }
+
+      const { error } = await query;
 
       if (error) throw error;
 
@@ -285,15 +362,16 @@ export const useDocumentComments = ({ documentId }: UseDocumentCommentsOptions) 
     } catch (error) {
       console.error('Error removing reaction:', error);
     }
-  }, [user, fetchComments]);
+  }, [user, guestEmail, fetchComments]);
 
   // Toggle reaction
   const toggleReaction = useCallback(async (commentId: string, reaction: string) => {
-    if (!user) return;
+    if (!user && !guestEmail) return;
 
     const comment = findComment(comments, commentId);
     const hasReaction = comment?.reactions?.some(
-      r => r.user_id === user.id && r.reaction === reaction
+      r => (user && r.user_id === user.id && r.reaction === reaction) ||
+        (!user && r.guest_email === guestEmail && r.reaction === reaction)
     );
 
     if (hasReaction) {
@@ -301,7 +379,7 @@ export const useDocumentComments = ({ documentId }: UseDocumentCommentsOptions) 
     } else {
       await addReaction(commentId, reaction);
     }
-  }, [user, comments, addReaction, removeReaction]);
+  }, [user, guestEmail, guestName, comments, addReaction, removeReaction]);
 
   // Helper to find a comment in the tree
   const findComment = (

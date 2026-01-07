@@ -172,3 +172,66 @@ class OneDriveConnector:
         except Exception as e:
             logger.error(f"❌ Error downloading file: {e}")
             raise
+    
+    def get_permissions(self, file_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all permissions (sharing settings) for a file.
+        
+        Args:
+            file_id: OneDrive file ID
+        
+        Returns:
+            List of permission dicts: [{email, role, type, displayName}, ...]
+        """
+        try:
+            url = f"{self.BASE_URL}/me/drive/items/{file_id}/permissions"
+            response = requests.get(url, headers=self.headers, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            
+            result = []
+            for perm in data.get('value', []):
+                # OneDrive permissions structure differs from Google Drive
+                granted_to = perm.get('grantedTo', {}).get('user', {}) or perm.get('grantedToIdentities', [{}])[0].get('user', {})
+                
+                # Map OneDrive roles to simplified roles
+                roles = perm.get('roles', [])
+                role = 'reader'  # default
+                if 'write' in roles or 'owner' in roles:
+                    role = 'writer'
+                if 'owner' in roles:
+                    role = 'owner'
+                
+                result.append({
+                    'email': granted_to.get('email'),
+                    'role': role,
+                    'type': 'user' if granted_to.get('email') else 'link',
+                    'displayName': granted_to.get('displayName')
+                })
+            
+            logger.info(f"📋 Got {len(result)} permissions for file {file_id}")
+            return result
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not get permissions for {file_id}: {e}")
+            return []  # Return empty list on failure (best effort)
+    
+    def trash_file(self, file_id: str) -> bool:
+        """
+        Move file to trash (OneDrive recycle bin).
+        
+        Args:
+            file_id: OneDrive file ID
+            
+        Returns:
+            True if successful
+        """
+        try:
+            url = f"{self.BASE_URL}/me/drive/items/{file_id}"
+            response = requests.delete(url, headers=self.headers, timeout=30)
+            response.raise_for_status()
+            logger.info(f"🗑️ Trashed source file: {file_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to trash file {file_id}: {e}")
+            return False

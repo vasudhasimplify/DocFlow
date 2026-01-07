@@ -66,6 +66,7 @@ export interface MigrationConfig {
   concurrency: number;
   retry_attempts: number;
   delta_mode: boolean;
+  delete_after_migration?: boolean;
 }
 
 export interface MigrationCheckpoint {
