@@ -4230,6 +4230,132 @@ export type Database = {
           },
         ]
       }
+      document_retention_status: {
+        Row: {
+          id: string
+          document_id: string
+          user_id: string
+          policy_id: string | null
+          retention_start_date: string
+          retention_end_date: string
+          current_status: string
+          legal_hold_ids: string[] | null
+          disposition_action: string | null
+          disposition_date: string | null
+          disposition_approved_by: string | null
+          disposition_notes: string | null
+          exception_reason: string | null
+          exception_approved_by: string | null
+          exception_end_date: string | null
+          notification_sent: boolean | null
+          last_review_date: string | null
+          next_review_date: string | null
+          metadata: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          document_id: string
+          user_id: string
+          policy_id?: string | null
+          retention_start_date: string
+          retention_end_date: string
+          current_status?: string
+          legal_hold_ids?: string[] | null
+          disposition_action?: string | null
+          disposition_date?: string | null
+          disposition_approved_by?: string | null
+          disposition_notes?: string | null
+          exception_reason?: string | null
+          exception_approved_by?: string | null
+          exception_end_date?: string | null
+          notification_sent?: boolean | null
+          last_review_date?: string | null
+          next_review_date?: string | null
+          metadata?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          document_id?: string
+          user_id?: string
+          policy_id?: string | null
+          retention_start_date?: string
+          retention_end_date?: string
+          current_status?: string
+          legal_hold_ids?: string[] | null
+          disposition_action?: string | null
+          disposition_date?: string | null
+          disposition_approved_by?: string | null
+          disposition_notes?: string | null
+          exception_reason?: string | null
+          exception_approved_by?: string | null
+          exception_end_date?: string | null
+          notification_sent?: boolean | null
+          last_review_date?: string | null
+          next_review_date?: string | null
+          metadata?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      disposition_audit_log: {
+        Row: {
+          id: string
+          document_id: string
+          user_id: string
+          action: string
+          action_by: string
+          policy_id: string | null
+          legal_hold_id: string | null
+          previous_status: string | null
+          new_status: string | null
+          reason: string | null
+          document_metadata: Json | null
+          certificate_number: string | null
+          ip_address: string | null
+          user_agent: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          document_id: string
+          user_id: string
+          action: string
+          action_by: string
+          policy_id?: string | null
+          legal_hold_id?: string | null
+          previous_status?: string | null
+          new_status?: string | null
+          reason?: string | null
+          document_metadata?: Json | null
+          certificate_number?: string | null
+          ip_address?: string | null
+          user_agent?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          document_id?: string
+          user_id?: string
+          action?: string
+          action_by?: string
+          policy_id?: string | null
+          legal_hold_id?: string | null
+          previous_status?: string | null
+          new_status?: string | null
+          reason?: string | null
+          document_metadata?: Json | null
+          certificate_number?: string | null
+          ip_address?: string | null
+          user_agent?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       enhanced_search_settings: {
         Row: {
           auto_refresh_enabled: boolean | null
@@ -5901,6 +6027,81 @@ export type Database = {
           poor_min?: number
           sector?: string | null
           unit?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      legal_holds: {
+        Row: {
+          id: string
+          user_id: string
+          name: string
+          description: string | null
+          hold_reason: string
+          matter_id: string | null
+          custodian_name: string | null
+          custodian_email: string | null
+          start_date: string
+          end_date: string | null
+          status: string
+          document_ids: string[] | null
+          folder_ids: string[] | null
+          search_criteria: Json | null
+          notes: string | null
+          created_by: string | null
+          released_by: string | null
+          released_at: string | null
+          release_reason: string | null
+          metadata: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          name: string
+          description?: string | null
+          hold_reason: string
+          matter_id?: string | null
+          custodian_name?: string | null
+          custodian_email?: string | null
+          start_date?: string
+          end_date?: string | null
+          status?: string
+          document_ids?: string[] | null
+          folder_ids?: string[] | null
+          search_criteria?: Json | null
+          notes?: string | null
+          created_by?: string | null
+          released_by?: string | null
+          released_at?: string | null
+          release_reason?: string | null
+          metadata?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          name?: string
+          description?: string | null
+          hold_reason?: string
+          matter_id?: string | null
+          custodian_name?: string | null
+          custodian_email?: string | null
+          start_date?: string
+          end_date?: string | null
+          status?: string
+          document_ids?: string[] | null
+          folder_ids?: string[] | null
+          search_criteria?: Json | null
+          notes?: string | null
+          created_by?: string | null
+          released_by?: string | null
+          released_at?: string | null
+          release_reason?: string | null
+          metadata?: Json | null
+          created_at?: string
           updated_at?: string
         }
         Relationships: []
@@ -8837,6 +9038,114 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      retention_policies: {
+        Row: {
+          id: string
+          user_id: string
+          name: string
+          description: string | null
+          retention_period_days: number
+          disposition_action: string
+          trigger_type: string
+          trigger_event: string | null
+          is_active: boolean | null
+          priority: number | null
+          applies_to_categories: string[] | null
+          applies_to_folders: string[] | null
+          compliance_framework: string | null
+          notification_days_before: number | null
+          requires_approval: boolean | null
+          approval_roles: string[] | null
+          metadata: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          name: string
+          description?: string | null
+          retention_period_days: number
+          disposition_action: string
+          trigger_type: string
+          trigger_event?: string | null
+          is_active?: boolean | null
+          priority?: number | null
+          applies_to_categories?: string[] | null
+          applies_to_folders?: string[] | null
+          compliance_framework?: string | null
+          notification_days_before?: number | null
+          requires_approval?: boolean | null
+          approval_roles?: string[] | null
+          metadata?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          name?: string
+          description?: string | null
+          retention_period_days?: number
+          disposition_action?: string
+          trigger_type?: string
+          trigger_event?: string | null
+          is_active?: boolean | null
+          priority?: number | null
+          applies_to_categories?: string[] | null
+          applies_to_folders?: string[] | null
+          compliance_framework?: string | null
+          notification_days_before?: number | null
+          requires_approval?: boolean | null
+          approval_roles?: string[] | null
+          metadata?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      retention_policy_templates: {
+        Row: {
+          id: string
+          name: string
+          description: string | null
+          compliance_framework: string
+          retention_period_days: number
+          disposition_action: string
+          trigger_type: string
+          requires_approval: boolean | null
+          category_suggestions: string[] | null
+          is_system_template: boolean | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          description?: string | null
+          compliance_framework: string
+          retention_period_days: number
+          disposition_action: string
+          trigger_type: string
+          requires_approval?: boolean | null
+          category_suggestions?: string[] | null
+          is_system_template?: boolean | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          description?: string | null
+          compliance_framework?: string
+          retention_period_days?: number
+          disposition_action?: string
+          trigger_type?: string
+          requires_approval?: boolean | null
+          category_suggestions?: string[] | null
+          is_system_template?: boolean | null
+          created_at?: string
+        }
+        Relationships: []
       }
       regulation_chunks: {
         Row: {

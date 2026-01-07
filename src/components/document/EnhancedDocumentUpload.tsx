@@ -70,6 +70,7 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
   const [showCamera, setShowCamera] = useState(false);
   const [enableRAG, setEnableRAG] = useState(true);
   const [enableClassification, setEnableClassification] = useState(false);
+  const [enableWorkflowSuggestion, setEnableWorkflowSuggestion] = useState(true);
   const [uploadComplete, setUploadComplete] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -363,7 +364,8 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
               saveToDatabase: true,
               documentId: documentData.id, // Pass document_id for backend to update
               yoloSignatureEnabled: false,
-              yoloFaceEnabled: false
+              yoloFaceEnabled: false,
+              skipWorkflowTrigger: !enableWorkflowSuggestion // Pass the user's workflow preference
             }),
           });
           
@@ -635,12 +637,16 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
     const failCount = pendingFiles.length - successCount;
 
     if (successCount > 0) {
+      const workflowMessage = enableWorkflowSuggestion 
+        ? 'Matching workflows will start automatically.'
+        : 'Workflows will not be auto-started.';
+      
       toast({
         title: "Upload Complete",
-        description: `${successCount} file(s) uploaded successfully${failCount > 0 ? `, ${failCount} failed` : ''}`,
+        description: `${successCount} file(s) uploaded successfully${failCount > 0 ? `, ${failCount} failed` : ''}. ${workflowMessage}`,
       });
 
-      documentIds.forEach(id => onDocumentProcessed?.(id));
+      // Workflow auto-start is controlled by backend based on skip_workflow_trigger flag
       onAllComplete?.(documentIds);
 
       if (failCount === 0) {
@@ -914,6 +920,31 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
               </Label>
               <p className="text-xs text-muted-foreground truncate">
                 Identify type and route
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+            enableWorkflowSuggestion ? 'border-blue-500 bg-blue-500/5' : 'border-border hover:border-muted-foreground/50 bg-card'
+          }`}
+          onClick={() => setEnableWorkflowSuggestion(!enableWorkflowSuggestion)}
+        >
+          <Checkbox
+            id="workflow-toggle"
+            checked={enableWorkflowSuggestion}
+            onCheckedChange={(checked) => setEnableWorkflowSuggestion(checked as boolean)}
+            className="h-4 w-4 flex-shrink-0"
+          />
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <ArrowRight className="h-4 w-4 text-blue-500 flex-shrink-0" />
+            <div className="min-w-0">
+              <Label htmlFor="workflow-toggle" className="text-sm font-medium cursor-pointer block truncate">
+                Auto-Start Workflows
+              </Label>
+              <p className="text-xs text-muted-foreground truncate">
+                {enableWorkflowSuggestion ? 'Workflows start automatically (always enabled)' : 'Manual workflow start only'}
               </p>
             </div>
           </div>

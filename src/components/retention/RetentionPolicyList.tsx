@@ -33,12 +33,16 @@ interface RetentionPolicyListProps {
   policies: RetentionPolicy[];
   templates: RetentionPolicyTemplate[];
   onCreatePolicy: () => void;
+  onEditPolicy?: (policy: RetentionPolicy) => void;
+  onDuplicatePolicy?: (policy: RetentionPolicy) => void;
 }
 
 export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
   policies,
   templates,
   onCreatePolicy,
+  onEditPolicy,
+  onDuplicatePolicy,
 }) => {
   const { updatePolicy, deletePolicy } = useRetentionPolicies();
   const [searchQuery, setSearchQuery] = useState('');
@@ -196,7 +200,21 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
                       <Switch
                         checked={policy.is_active}
                         onCheckedChange={(checked) => updatePolicy(policy.id, { is_active: checked })}
+                        className={cn(
+                          // smaller switch sizing and use primary color when checked
+                          "h-5 w-9",
+                          policy.is_active ? "data-[state=checked]:bg-primary-600" : "data-[state=unchecked]:bg-gray-200"
+                        )}
                       />
+                      <Badge
+                        variant={policy.is_active ? "default" : "secondary"}
+                        className={cn(
+                          "text-xs font-medium min-w-[40px] text-center",
+                          policy.is_active ? "bg-primary-600 text-white" : "bg-gray-300 text-gray-800"
+                        )}
+                      >
+                        {policy.is_active ? 'ON' : 'OFF'}
+                      </Badge>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon">
@@ -204,11 +222,11 @@ export const RetentionPolicyList: React.FC<RetentionPolicyListProps> = ({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onEditPolicy?.(policy)}>
                             <Edit className="h-4 w-4 mr-2" />
                             Edit Policy
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onDuplicatePolicy?.(policy)}>
                             <Copy className="h-4 w-4 mr-2" />
                             Duplicate
                           </DropdownMenuItem>

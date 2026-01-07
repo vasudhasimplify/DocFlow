@@ -58,6 +58,7 @@ export const QuickAccessPanel: React.FC<QuickAccessPanelProps> = ({
   const [calculatingScores, setCalculatingScores] = useState(false);
   const [showAllAI, setShowAllAI] = useState(false);
   const [showAllFrequent, setShowAllFrequent] = useState(false);
+  const [showAllRecent, setShowAllRecent] = useState(false);
 
   const handleCalculateScores = async () => {
     try {
@@ -124,6 +125,18 @@ export const QuickAccessPanel: React.FC<QuickAccessPanelProps> = ({
   
   const frequentDocs = showAllFrequent ? allFrequentDocs : allFrequentDocs.slice(0, 5);
 
+  // Recently accessed documents (last 24 hours or last 10 documents)
+  const allRecentDocs = enrichedDocuments
+    .filter(d => d.lastAccessed)
+    .sort((a, b) => {
+      const dateA = a.lastAccessed ? new Date(a.lastAccessed).getTime() : 0;
+      const dateB = b.lastAccessed ? new Date(b.lastAccessed).getTime() : 0;
+      return dateB - dateA;
+    })
+    .slice(0, 20); // Limit to 20 most recent
+  
+  const recentDocs = showAllRecent ? allRecentDocs : allRecentDocs.slice(0, 5);
+
   const renderDocumentItem = (doc: typeof enrichedDocuments[0], showAIBadge = false) => (
     <div
       key={doc.id}
@@ -145,12 +158,12 @@ export const QuickAccessPanel: React.FC<QuickAccessPanelProps> = ({
               <Tooltip>
                 <TooltipTrigger>
                   <Badge variant="secondary" className="text-xs px-1.5 py-0 flex items-center gap-1">
-                    <Brain className="h-3 w-3" />
-                    {doc.aiScore.toFixed(1)}
+                    <Sparkles className="h-3 w-3" />
+                    AI
                   </Badge>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs">
-                  <p className="text-xs font-semibold mb-1">AI Reasoning:</p>
+                  <p className="text-xs font-semibold mb-1">AI Score: {doc.aiScore.toFixed(2)}</p>
                   <p className="text-xs">{doc.aiReason || 'Suggested based on frequent access patterns and recent usage'}</p>
                 </TooltipContent>
               </Tooltip>
@@ -238,7 +251,11 @@ export const QuickAccessPanel: React.FC<QuickAccessPanelProps> = ({
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold">Quick Access</h3>
-          <p className="text-sm text-muted-foreground">Priority and frequently accessed documents</p>
+          <p className="text-sm text-muted-foreground">
+            {allRecentDocs.length === 0 
+              ? 'Open documents to see them in Recently Opened • Priority and frequently accessed documents'
+              : 'Priority and frequently accessed documents'}
+          </p>
         </div>
         <TooltipProvider>
           <Tooltip>
@@ -310,15 +327,64 @@ export const QuickAccessPanel: React.FC<QuickAccessPanelProps> = ({
         </Card>
       )}
 
+      {/* Recently Opened */}
+      {allRecentDocs.length > 0 && (
+        <Card className="bg-gradient-to-br from-blue-50/50 to-cyan-50/50 dark:from-blue-950/20 dark:to-cyan-950/20 border-blue-200/50 dark:border-blue-800/50">
+          <CardHeader className="pb-2">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <CardTitle className="text-sm flex items-center gap-2 cursor-help">
+                    <Clock className="h-4 w-4 text-blue-600" />
+                    Recently Opened
+                    <Badge variant="secondary" className="ml-auto bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+                      {allRecentDocs.length}
+                    </Badge>
+                  </CardTitle>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Documents you've opened most recently, sorted by last access time</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="space-y-1">
+              {recentDocs.map(doc => renderDocumentItem(doc))}
+            </div>
+            {allRecentDocs.length > 5 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full mt-2 text-xs"
+                onClick={() => setShowAllRecent(!showAllRecent)}
+              >
+                {showAllRecent ? 'Show Less' : `Show ${allRecentDocs.length - 5} More`}
+                <ChevronRight className={`h-3 w-3 ml-1 transition-transform ${showAllRecent ? 'rotate-90' : ''}`} />
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Frequently Accessed */}
       {allFrequentDocs.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-green-600" />
-              Frequently Accessed
-              <Badge variant="secondary" className="ml-auto">{allFrequentDocs.length}</Badge>
-            </CardTitle>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <CardTitle className="text-sm flex items-center gap-2 cursor-help">
+                    <TrendingUp className="h-4 w-4 text-green-600" />
+                    Most Accessed
+                    <Badge variant="secondary" className="ml-auto">{allFrequentDocs.length}</Badge>
+                  </CardTitle>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Documents you've opened the most times, sorted by total access count</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="space-y-1">
@@ -340,7 +406,7 @@ export const QuickAccessPanel: React.FC<QuickAccessPanelProps> = ({
       )}
 
       {/* Empty State */}
-      {pinnedDocs.length === 0 && allAISuggestedDocs.length === 0 && allFrequentDocs.length === 0 && (
+      {pinnedDocs.length === 0 && allAISuggestedDocs.length === 0 && allRecentDocs.length === 0 && allFrequentDocs.length === 0 && (
         <Card className="border-dashed">
           <CardContent className="p-8 text-center">
             <Zap className="h-12 w-12 text-muted-foreground mx-auto mb-4" />

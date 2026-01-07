@@ -31,6 +31,7 @@ import {
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { EscalationAction, PRIORITY_CONFIG, ESCALATION_ACTION_CONFIG } from '@/types/workflow';
 import { CreateEscalationRuleDialog } from './CreateEscalationRuleDialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const actionIcons: Record<EscalationAction, React.ReactNode> = {
   notify: <Bell className="h-4 w-4" />,
@@ -42,14 +43,23 @@ const actionIcons: Record<EscalationAction, React.ReactNode> = {
 };
 
 export const EscalationRulesPanel: React.FC = () => {
-  const { escalationRules, updateEscalationRule, deleteEscalationRule, isLoading } = useWorkflows();
+  const { workflows, escalationRules, updateEscalationRule, deleteEscalationRule, isLoading } = useWorkflows();
   const [searchQuery, setSearchQuery] = useState('');
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | 'workflow'>('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
-  const filteredRules = escalationRules.filter(rule =>
-    rule.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    rule.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredRules = escalationRules.filter(rule => {
+    const matchesSearch = rule.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         rule.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesScope = scopeFilter === 'all' || 
+                        (scopeFilter === 'global' && rule.is_global) ||
+                        (scopeFilter === 'workflow' && !rule.is_global && rule.workflow_id);
+    return matchesSearch && matchesScope;
+  });
+
+  // Count rules by scope
+  const globalCount = escalationRules.filter(r => r.is_global).length;
+  const workflowCount = escalationRules.filter(r => !r.is_global && r.workflow_id).length;
 
   const handleToggleActive = async (rule: any) => {
     await updateEscalationRule(rule.id, { is_active: !rule.is_active });
@@ -73,6 +83,30 @@ export const EscalationRulesPanel: React.FC = () => {
           Create Rule
         </Button>
       </div>
+
+      {/* Scope Filter Tabs */}
+      <Tabs value={scopeFilter} onValueChange={(v: any) => setScopeFilter(v)}>
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="all">
+            All Rules
+            <Badge variant="secondary" className="ml-2">{escalationRules.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="global">
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 rounded-full bg-blue-500" />
+              Global
+              <Badge variant="secondary" className="ml-1">{globalCount}</Badge>
+            </div>
+          </TabsTrigger>
+          <TabsTrigger value="workflow">
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 rounded-full bg-purple-500" />
+              Workflow-Specific
+              <Badge variant="secondary" className="ml-1">{workflowCount}</Badge>
+            </div>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Info Card */}
       <Card className="bg-muted/50">
@@ -128,8 +162,22 @@ export const EscalationRulesPanel: React.FC = () => {
                         </div>
 
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
                             <span className="font-medium">{rule.name}</span>
+                            
+                            {/* Scope Badge */}
+                            {rule.is_global ? (
+                              <Badge variant="outline" className="gap-1">
+                                <div className="h-2 w-2 rounded-full bg-blue-500" />
+                                Global
+                              </Badge>
+                            ) : rule.workflow_id ? (
+                              <Badge variant="outline" className="gap-1">
+                                <div className="h-2 w-2 rounded-full bg-purple-500" />
+                                {workflows?.find(w => w.id === rule.workflow_id)?.name || 'Workflow'}
+                              </Badge>
+                            ) : null}
+                            
                             <Badge className={priorityConfig.color}>
                               {priorityConfig.label}
                             </Badge>

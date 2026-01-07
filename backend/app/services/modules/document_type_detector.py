@@ -302,3 +302,364 @@ Examples: pan-card, aadhaar-card, passport, bank-statement, invoice, salary-slip
     def get_all_document_types(self) -> list[Dict[str, Any]]:
         """Returns empty list - types are determined dynamically by LLM."""
         return []
+    async def extract_document_fields(
+        self,
+        storage_path: str,
+        document_type: str,
+        schema: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Extract structured fields from document based on schema.
+        
+        Args:
+            storage_path: Path to document in storage
+            document_type: Type of document (invoice, po, contract, etc.)
+            schema: Field schema defining what to extract
+            
+        Returns:
+            Dict with extracted field values, or None if extraction fails
+        """
+        try:
+            logger.info(f"Extracting fields for document type: {document_type}")
+            
+            if not self.llm_client:
+                logger.warning("No LLM client available for field extraction")
+                return None
+            
+            # Get document bytes from storage
+            # NOTE: In production, fetch from Supabase storage
+            # For now, assuming we have the file bytes
+            try:
+                from supabase import create_client
+                import os
+                
+                supabase_url = os.environ.get("SUPABASE_URL")
+                supabase_key = os.environ.get("SUPABASE_KEY")
+                
+                if not supabase_url or not supabase_key:
+                    logger.error("Supabase credentials not configured")
+                    return None
+                
+                supabase = create_client(supabase_url, supabase_key)
+                
+                # Download file from Supabase storage
+                bucket_name = "documents"
+                file_data = supabase.storage.from_(bucket_name).download(storage_path)
+                file_bytes = file_data
+                
+            except Exception as e:
+                logger.error(f"Error downloading document from storage: {e}")
+                return None
+            
+            # Convert PDF to images (reuse existing method)
+            if self._is_image_file(storage_path, file_bytes):
+                images = [file_bytes]
+            else:
+                images = await self._convert_pdf_to_images(file_bytes)
+                
+            if not images:
+                logger.warning("Could not convert document to images for extraction")
+                return None
+            
+            # Build extraction prompt based on schema
+            prompt = self._build_extraction_prompt(document_type, schema)
+            
+            # Call LLM Vision to extract fields
+            extracted_data = await self._extract_fields_from_images(images, prompt, schema)
+            
+            return extracted_data
+            
+        except Exception as e:
+            logger.error(f"Error extracting document fields: {e}")
+            return None
+    
+    def _build_extraction_prompt(self, document_type: str, schema: Dict[str, Any]) -> str:
+        """Build prompt for field extraction based on schema."""
+        
+        fields_description = []
+        required_fields = []
+        
+        for field_name, field_config in schema.get("fields", {}).items():
+            field_type = field_config.get("type")
+            label = field_config.get("label", field_name)
+            required = field_config.get("required", False)
+            
+            if required:
+                required_fields.append(label)
+            
+            fields_description.append(f"- {label} ({field_type})")
+        
+        prompt = f"""You are an AI assistant specialized in extracting structured data from {schema.get('display_name', document_type)} documents.
+
+Analyze this document image and extract the following fields:
+
+{chr(10).join(fields_description)}
+
+REQUIRED FIELDS: {', '.join(required_fields) if required_fields else 'None'}
+
+Instructions:
+1. Extract ALL visible fields accurately
+2. For dates, use YYYY-MM-DD format
+3. For amounts, extract numeric values only (no currency symbols)
+4. For line items/arrays, extract all rows
+5. If a field is not visible or unclear, return null for that field
+6. Return ONLY valid JSON matching the schema
+
+Return the extracted data as a JSON object."""
+        
+        return prompt
+    
+    async def _extract_fields_from_images(
+        self,
+        images: List[bytes],
+        prompt: str,
+        schema: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Extract fields from images using LLM Vision."""
+        try:
+            # Encode images as base64
+            import base64
+            encoded_images = []
+            for img_bytes in images[:2]:  # Use first 2 pages
+                b64_image = base64.b64encode(img_bytes).decode('utf-8')
+                encoded_images.append(b64_image)
+            
+            # Call LLM with images and extraction prompt
+            # NOTE: Implementation depends on your LLM client interface
+            # This is a simplified version
+            response = await self.llm_client.extract_fields(
+                images=encoded_images,
+                prompt=prompt,
+                schema=schema
+            )
+            
+            # Parse response
+            if isinstance(response, dict):
+                return response
+            elif isinstance(response, str):
+                # Try to parse as JSON
+                try:
+                    data = json.loads(response.strip())
+                    return data
+                except json.JSONDecodeError:
+                    logger.error(f"Could not parse extraction response as JSON")
+                    return None
+            else:
+                logger.error(f"Unexpected response type: {type(response)}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in field extraction: {e}")
+            return None
+    
+    async def extract_fields_from_analysis(
+        self,
+        analysis_result: Dict[str, Any],
+        extracted_text: Optional[str],
+        document_type: str,
+        schema: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Extract structured fields from EXISTING analysis_result (from RAG system).
+        This avoids re-processing documents that were already analyzed during upload.
+        
+        PERFORMANCE OPTIMIZATION: Reuses existing document analysis instead of
+        downloading and re-processing PDFs, saving API calls and processing time.
+        
+        Args:
+            analysis_result: The analysis_result JSON from documents table (RAG extraction)
+            extracted_text: The extracted_text from documents table (optional)
+            document_type: Type of document (invoice, purchase-order, etc.)
+            schema: Field schema for extraction
+            
+        Returns:
+            Dictionary of extracted field values
+        """
+        try:
+            logger.info(f"♻️  Extracting structured fields from existing analysis for {document_type}")
+            
+            # Build extraction prompt from schema
+            prompt = self._build_extraction_prompt(document_type, schema)
+            
+            # Add context from existing analysis
+            prompt += "\n\n## DOCUMENT ANALYSIS DATA:\n"
+            prompt += json.dumps(analysis_result, indent=2)
+            
+            if extracted_text:
+                prompt += f"\n\n## EXTRACTED TEXT:\n{extracted_text[:5000]}"  # First 5000 chars
+            
+            prompt += "\n\nBased on the above analysis data, extract the requested fields and return as JSON."
+            
+            # Call LLM with text-only (no images needed since we have the analysis)
+            if not self.llm_client:
+                logger.error("No LLM client available")
+                return None
+                
+            response = await self.llm_client.call_api(
+                prompt=prompt,
+                image_data=None,  # No image needed - we have the analysis!
+                response_format={},
+                task="structured_field_extraction",
+                document_name=document_type
+            )
+            
+            # Parse and return extracted fields
+            fields = self._parse_extraction_response(response, schema)
+            if fields:
+                logger.info(f"✅ Extracted {len(fields)} fields from existing analysis")
+            else:
+                logger.warning("⚠️  Failed to extract fields from analysis")
+            return fields
+            
+        except Exception as e:
+            logger.error(f"Error extracting fields from analysis: {e}")
+            return None
+    
+    async def extract_fields_dynamic(
+        self,
+        analysis_result: Dict[str, Any],
+        extracted_text: Optional[str],
+        document_type: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        DYNAMIC EXTRACTION: Extract key fields from ANY document type without requiring a schema.
+        This is the fallback for documents that don't have predefined schemas.
+        
+        Production-ready approach:
+        - Works for any document type automatically
+        - Extracts common fields intelligently
+        - No manual schema creation needed
+        
+        Args:
+            analysis_result: The analysis_result JSON from documents table
+            extracted_text: The extracted_text from documents table
+            document_type: Type of document (for context)
+            
+        Returns:
+            Dictionary of extracted fields (any relevant fields found)
+        """
+        try:
+            logger.info(f"🔄 Dynamic extraction for {document_type} (no schema required)")
+            
+            # Build intelligent extraction prompt
+            prompt = f"""You are a professional data extraction specialist. Extract COMPREHENSIVE information from this {document_type} document.
+
+CRITICAL INSTRUCTIONS:
+1. Read through the ENTIRE document content provided below
+2. Extract EVERY piece of business-relevant information you can find
+3. Be thorough - don't skip any details
+4. Use clear, descriptive field names (use underscores for spaces)
+5. Organize related data in nested objects or arrays
+6. Do NOT include null values - omit fields that are not present
+
+REQUIRED CATEGORIES TO EXTRACT (extract ALL that apply):
+
+📋 Document Identification:
+- All document numbers (invoice_number, po_number, contract_number, reference_number, confirmation_number, etc.)
+- Document dates (issue_date, invoice_date, due_date, delivery_date, start_date, end_date, booking_date, etc.)
+- Document status (if present)
+
+👥 Parties and Entities:
+- All party names (vendor_name, client_name, buyer, seller, supplier, customer, passenger_name, etc.)
+- All addresses (vendor_address, client_address, billing_address, shipping_address, etc.)
+- All contact information (email, phone, fax, mobile, website, etc.)
+- Tax IDs, registration numbers, GST numbers, etc.
+
+💰 Financial Information:
+- All amounts (total_amount, subtotal, tax_amount, discount, shipping_cost, grand_total, balance_due, etc.)
+- Currency
+- Payment terms (net_30, payment_due_date, payment_method, etc.)
+- Bank details (if present)
+
+📦 Items/Products/Services:
+- Line items with ALL details:
+  * Item description/name
+  * Quantity
+  * Unit price
+  * Total price
+  * SKU/Product code
+  * Tax per item
+  * Any other item-specific details
+
+✈️ Transaction Details (for bookings, travel, etc.):
+- Flight/train/booking details
+- Origin and destination
+- Dates and times
+- Booking codes/PNRs
+- Seat/class information
+
+📝 Terms and Conditions:
+- Payment terms
+- Delivery terms
+- Warranty information
+- Special conditions or notes
+- Cancellation policies
+
+🔖 Additional Details:
+- Any other relevant business information
+- Notes, comments, or special instructions
+- Signatures or approvals (if mentioned)
+- Department or cost center codes
+
+OUTPUT FORMAT:
+Return a comprehensive JSON object with ALL extracted information organized logically.
+Use nested objects for related data and arrays for multiple items.
+
+DOCUMENT CONTENT TO ANALYZE:
+
+## ANALYSIS DATA:
+{json.dumps(analysis_result, indent=2) if analysis_result else "No analysis data"}
+"""
+            
+            if extracted_text:
+                # Use substantial text sample for comprehensive extraction
+                text_sample = extracted_text[:50000] if len(extracted_text) > 50000 else extracted_text
+                prompt += f"\n\n## FULL DOCUMENT TEXT:\n{text_sample}"
+                
+                if len(extracted_text) > 50000:
+                    prompt += f"\n\n[Document continues for {len(extracted_text) - 50000} more characters]"
+            
+            prompt += "\n\nNow extract ALL relevant information as a comprehensive, well-organized JSON object:"
+            
+            # Call LLM
+            if not self.llm_client:
+                logger.error("No LLM client available")
+                return None
+                
+            response = await self.llm_client.call_api(
+                prompt=prompt,
+                image_data=None,
+                response_format={},
+                task="dynamic_field_extraction",
+                document_name=document_type
+            )
+            
+            # Parse response
+            if isinstance(response, dict):
+                extracted = response
+            elif isinstance(response, str):
+                try:
+                    # Try to extract JSON from response
+                    import re
+                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                    if json_match:
+                        extracted = json.loads(json_match.group())
+                    else:
+                        extracted = json.loads(response.strip())
+                except json.JSONDecodeError:
+                    logger.error("Could not parse dynamic extraction response")
+                    return None
+            else:
+                logger.error(f"Unexpected response type: {type(response)}")
+                return None
+            
+            if extracted and isinstance(extracted, dict):
+                logger.info(f"✅ Dynamically extracted {len(extracted)} fields from {document_type}")
+                return extracted
+            else:
+                logger.warning("⚠️  No fields extracted dynamically")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in dynamic field extraction: {e}")
+            return None

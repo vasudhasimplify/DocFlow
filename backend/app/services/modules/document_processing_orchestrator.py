@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any, Tuple, List
 from datetime import datetime
 import uuid
 from app.services.modules.processing_queue_service import ProcessingQueueService
+from app.services.workflow_trigger_service import WorkflowTriggerService
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class DocumentProcessingOrchestrator:
         self.bucket_manager = bucket_manager
         self.database_service = database_service
         self.queue_service = ProcessingQueueService()
+        self.workflow_trigger_service = None  # Will be initialized when needed
         
     async def process_document(
         self,
@@ -136,12 +138,14 @@ class DocumentProcessingOrchestrator:
                 if document_id:
                     self.queue_service.update_stage(document_id, 'indexing')
                 
+            if extraction_result.get("success") and options.get("save_to_database", True):
                 await self._save_to_database(
                     user_id=user_id,
                     filename=filename,
                     document_type=document_type,
                     extraction_result=extraction_result,
-                    storage_result=upload_result
+                    storage_result=upload_result,
+                    skip_workflow_trigger=options.get("skip_workflow_trigger", False)
                 )
                 
                 # Stage 6: Completed
@@ -310,7 +314,8 @@ class DocumentProcessingOrchestrator:
         filename: str,
         document_type: str,
         extraction_result: Dict[str, Any],
-        storage_result: Dict[str, Any]
+        storage_result: Dict[str, Any],
+        skip_workflow_trigger: bool = False
     ) -> None:
         """Save processed document to database."""
         try:
@@ -326,6 +331,30 @@ class DocumentProcessingOrchestrator:
                         "processing_status": "completed"  # Mark processing as complete!
                     }).eq("id", doc_id).execute()
                     logger.info(f"Document {doc_id} updated with type: {document_type}, status: completed")
+                    logger.info(f"Document {doc_id} updated with type: {document_type}")
+                    
+                    # Trigger workflows if enabled
+                    if not skip_workflow_trigger:
+                        logger.info(f"🔍 WORKFLOW CHECK: Triggering workflows for document type: {document_type}")
+                        try:
+                            # Initialize workflow trigger service if not already done
+                            if self.workflow_trigger_service is None:
+                                self.workflow_trigger_service = WorkflowTriggerService(
+                                    supabase=self.database_service.supabase
+                                )
+                            
+                            # Trigger workflows
+                            await self.workflow_trigger_service.check_and_trigger_on_document_upload(
+                                document_id=doc_id,
+                                document_name=filename,
+                                document_type=document_type,
+                                user_id=user_id
+                            )
+                        except Exception as workflow_error:
+                            logger.error(f"❌ Error triggering workflows: {workflow_error}")
+                            logger.exception("Workflow trigger error:")
+                    else:
+                        logger.info(f"⏭️  WORKFLOW CHECK: Skipped (user disabled auto-start)")
             else:
                 logger.info(f"No saved document to update with type: {document_type}")
             
@@ -387,7 +416,8 @@ class DocumentProcessingOrchestrator:
         yolo_face_enabled: Optional[bool] = None,
         cancellation_token: Optional[threading.Event] = None,
         request_id: Optional[str] = None,
-        document_type: Optional[str] = None
+        document_type: Optional[str] = None,
+        skip_workflow_trigger: bool = False
     ) -> Dict[str, Any]:
         """
         Compatibility method that matches the old DocumentAnalysisService signature.
@@ -418,6 +448,8 @@ class DocumentProcessingOrchestrator:
                 "request_id": request_id,
                 "save_to_database": save_to_database,
                 "document_id": document_id  # Pass document_id for update instead of create
+                "save_to_database": save_to_database,
+                "skip_workflow_trigger": skip_workflow_trigger
             }
 
             # Call the new process_document method

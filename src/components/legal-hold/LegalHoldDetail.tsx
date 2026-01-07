@@ -51,6 +51,8 @@ import type { EnhancedLegalHold, LegalHoldCustodian, LegalHoldAuditEntry } from 
 import { LEGAL_HOLD_STATUS_CONFIG, CUSTODIAN_STATUS_CONFIG } from '@/types/legalHold';
 import { formatDistanceToNow, format, differenceInDays } from 'date-fns';
 import { useLegalHolds } from '@/hooks/useLegalHolds';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 
 interface LegalHoldDetailProps {
   hold: EnhancedLegalHold;
@@ -63,21 +65,68 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
   onBack,
   onRelease
 }) => {
-  const { sendReminder, escalateCustodian, addCustodian, removeCustodian, getAuditTrail } = useLegalHolds();
+  const { sendReminder, escalateCustodian, acknowledgeCustodian, addCustodian, removeCustodian, getAuditTrail, sendNotifications } = useLegalHolds();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
   const [auditEntries, setAuditEntries] = useState<LegalHoldAuditEntry[]>([]);
   const [showReleaseDialog, setShowReleaseDialog] = useState(false);
   const [releaseReason, setReleaseReason] = useState('');
   const [releasing, setReleasing] = useState(false);
+  const [createdByEmail, setCreatedByEmail] = useState<string>('');
+  const [showAddCustodianDialog, setShowAddCustodianDialog] = useState(false);
+  const [newCustodianName, setNewCustodianName] = useState('');
+  const [newCustodianEmail, setNewCustodianEmail] = useState('');
+  const [showNotificationsDialog, setShowNotificationsDialog] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState('');
+  const [selectedCustodians, setSelectedCustodians] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Fetch creator's email from auth metadata
+    const fetchCreatorEmail = async () => {
+      if (hold.created_by) {
+        // Try to get user data from Supabase auth
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        // If current user is the creator, use their email
+        if (user && user.id === hold.created_by) {
+          setCreatedByEmail(user.email || hold.created_by);
+        } else {
+          // Otherwise, try profiles table
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('email, full_name')
+            .eq('id', hold.created_by)
+            .single();
+          
+          if (data && !error) {
+            setCreatedByEmail(data.full_name || data.email || hold.created_by);
+          } else {
+            // If profiles doesn't work, just show UUID (we can't access other users' auth data)
+            setCreatedByEmail(hold.created_by);
+          }
+        }
+      }
+    };
+    fetchCreatorEmail();
+  }, [hold.created_by]);
+
+  const handleViewDocuments = () => {
+    navigate('/documents', { state: { legalHoldId: hold.id, legalHoldName: hold.name } });
+  };
 
   useEffect(() => {
     getAuditTrail(hold.id).then(setAuditEntries);
   }, [hold.id, getAuditTrail]);
 
   const statusConfig = LEGAL_HOLD_STATUS_CONFIG[hold.status];
-  const daysActive = differenceInDays(new Date(), new Date(hold.effective_date));
-  const acknowledgedPercent = hold.stats
-    ? (hold.stats.acknowledged_custodians / hold.stats.total_custodians) * 100
+  
+  // Use stats.days_active or calculate from created_at
+  const daysActive = hold.stats?.days_active ?? 
+    (hold.created_at ? differenceInDays(new Date(), new Date(hold.created_at)) : 0);
+  
+  // Fix acknowledgedPercent calculation
+  const acknowledgedPercent = hold.stats && hold.stats.total_custodians > 0
+    ? ((hold.stats.custodians_acknowledged || 0) / hold.stats.total_custodians) * 100
     : 0;
 
   const formatBytes = (bytes: number) => {
@@ -116,6 +165,12 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
     return <History className="w-4 h-4" />;
   };
 
+  const formatAuditAction = (action: string) => {
+    // Replace underscores with spaces and capitalize first letter of each word at sentence start
+    const text = action.replace(/_/g, ' ');
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  };
+
   return (
     <div className="min-h-dvh flex flex-col bg-background">
       {/* Header */}
@@ -147,7 +202,13 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
             <div className="flex items-center gap-2">
               {hold.status === 'active' && (
                 <>
-                  <Button variant="outline">
+                  <Button 
+                    variant="outline"
+                    onClick={() => {
+                      setSelectedCustodians(hold.custodians.map(c => c.id));
+                      setShowNotificationsDialog(true);
+                    }}
+                  >
                     <Mail className="w-4 h-4 mr-2" />
                     Send Notifications
                   </Button>
@@ -265,7 +326,7 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
                       <div className="space-y-4">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-sm text-muted-foreground">
-                            {hold.stats.acknowledged_custodians} of {hold.stats.total_custodians} custodians acknowledged
+                            {hold.stats.custodians_acknowledged || 0} of {hold.stats.total_custodians} custodians acknowledged
                           </span>
                           <span className="font-medium">{acknowledgedPercent.toFixed(0)}%</span>
                         </div>
@@ -274,17 +335,17 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
                         <div className="grid grid-cols-3 gap-4 pt-4">
                           <div className="text-center p-3 bg-green-500/10 rounded-lg">
                             <CheckCircle2 className="w-5 h-5 text-green-500 mx-auto mb-1" />
-                            <p className="text-xl font-bold">{hold.stats.acknowledged_custodians}</p>
+                            <p className="text-xl font-bold">{hold.stats.custodians_acknowledged || 0}</p>
                             <p className="text-xs text-muted-foreground">Acknowledged</p>
                           </div>
                           <div className="text-center p-3 bg-orange-500/10 rounded-lg">
                             <Clock className="w-5 h-5 text-orange-500 mx-auto mb-1" />
-                            <p className="text-xl font-bold">{hold.stats.pending_custodians}</p>
+                            <p className="text-xl font-bold">{hold.stats.pending_custodians || 0}</p>
                             <p className="text-xs text-muted-foreground">Pending</p>
                           </div>
                           <div className="text-center p-3 bg-red-500/10 rounded-lg">
                             <AlertTriangle className="w-5 h-5 text-red-500 mx-auto mb-1" />
-                            <p className="text-xl font-bold">{hold.stats.escalated_custodians}</p>
+                            <p className="text-xl font-bold">{hold.stats.escalated_custodians || 0}</p>
                             <p className="text-xs text-muted-foreground">Escalated</p>
                           </div>
                         </div>
@@ -303,13 +364,25 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
                   <CardContent className="space-y-4">
                     <div>
                       <p className="text-xs text-muted-foreground">Issue Date</p>
-                      <p className="font-medium">{format(new Date(hold.issue_date), 'PPP')}</p>
+                      <p className="font-medium">
+                        {hold.issue_date && !isNaN(new Date(hold.issue_date).getTime()) 
+                          ? format(new Date(hold.issue_date), 'PPP') 
+                          : hold.created_at && !isNaN(new Date(hold.created_at).getTime())
+                          ? format(new Date(hold.created_at), 'PPP')
+                          : 'Not set'}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Effective Date</p>
-                      <p className="font-medium">{format(new Date(hold.effective_date), 'PPP')}</p>
+                      <p className="font-medium">
+                        {hold.effective_date && !isNaN(new Date(hold.effective_date).getTime()) 
+                          ? format(new Date(hold.effective_date), 'PPP') 
+                          : hold.created_at && !isNaN(new Date(hold.created_at).getTime())
+                          ? format(new Date(hold.created_at), 'PPP')
+                          : 'Not set'}
+                      </p>
                     </div>
-                    {hold.anticipated_end_date && (
+                    {hold.anticipated_end_date && !isNaN(new Date(hold.anticipated_end_date).getTime()) && (
                       <div>
                         <p className="text-xs text-muted-foreground">Anticipated End</p>
                         <p className="font-medium">{format(new Date(hold.anticipated_end_date), 'PPP')}</p>
@@ -322,7 +395,7 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Created By</p>
-                      <p className="font-medium">{hold.created_by}</p>
+                      <p className="font-medium">{createdByEmail || hold.created_by}</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -360,7 +433,10 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-base">Custodians</CardTitle>
-                <Button size="sm">
+                <Button 
+                  size="sm"
+                  onClick={() => setShowAddCustodianDialog(true)}
+                >
                   <User className="w-4 h-4 mr-2" />
                   Add Custodian
                 </Button>
@@ -401,11 +477,25 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
                               </p>
                             </div>
                           ) : (
-                            <div className="text-orange-600">
-                              <p>Pending</p>
-                              {custodian.reminder_count > 0 && (
-                                <p className="text-xs">{custodian.reminder_count} reminders sent</p>
-                              )}
+                            <div className="space-y-2">
+                              <div className="text-orange-600">
+                                <p>Pending</p>
+                                {custodian.reminder_count > 0 && (
+                                  <p className="text-xs">{custodian.reminder_count} reminders sent</p>
+                                )}
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="w-full"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await acknowledgeCustodian(hold.id, custodian.id);
+                                }}
+                              >
+                                <CheckCircle2 className="w-3 h-3 mr-1" />
+                                Acknowledge
+                              </Button>
                             </div>
                           )}
                         </div>
@@ -416,16 +506,20 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => sendReminder(hold.id, custodian.id)}>
+                            <DropdownMenuItem onClick={async () => {
+                              await sendReminder(hold.id, custodian.id);
+                            }}>
                               <Send className="w-4 h-4 mr-2" />
                               Send Reminder
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={handleViewDocuments}>
                               <Eye className="w-4 h-4 mr-2" />
                               View Documents
                             </DropdownMenuItem>
                             {custodian.status === 'pending' && (
-                              <DropdownMenuItem onClick={() => escalateCustodian(hold.id, custodian.id)}>
+                              <DropdownMenuItem onClick={async () => {
+                                await escalateCustodian(hold.id, custodian.id);
+                              }}>
                                 <AlertTriangle className="w-4 h-4 mr-2" />
                                 Escalate
                               </DropdownMenuItem>
@@ -433,7 +527,11 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
                             <DropdownMenuSeparator />
                             <DropdownMenuItem 
                               className="text-destructive"
-                              onClick={() => removeCustodian(hold.id, custodian.id)}
+                              onClick={async () => {
+                                if (confirm(`Remove ${custodian.name} from this legal hold?`)) {
+                                  await removeCustodian(hold.id, custodian.id);
+                                }
+                              }}
                             >
                               <XCircle className="w-4 h-4 mr-2" />
                               Remove
@@ -458,7 +556,7 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
                 <p className="text-muted-foreground mb-4">
                   View and manage documents under this legal hold
                 </p>
-                <Button>
+                <Button onClick={handleViewDocuments}>
                   <Eye className="w-4 h-4 mr-2" />
                   View Protected Documents
                 </Button>
@@ -482,9 +580,13 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
                         </div>
                         <div className="flex-1">
                           <p className="text-sm">
-                            <span className="font-medium">{entry.actor_name || entry.actor_id}</span>
-                            {' '}
-                            {entry.action.replace(/_/g, ' ')}
+                            {entry.actor_name && entry.actor_name !== 'System Migration' && (
+                              <>
+                                <span className="font-medium">{entry.actor_name}</span>
+                                {' '}
+                              </>
+                            )}
+                            {formatAuditAction(entry.action)}
                             {entry.target_name && (
                               <>
                                 {' - '}
@@ -546,6 +648,110 @@ export const LegalHoldDetail: React.FC<LegalHoldDetailProps> = ({
               variant="destructive"
             >
               {releasing ? 'Releasing...' : 'Release Hold'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Custodian Dialog */}
+      <Dialog open={showAddCustodianDialog} onOpenChange={setShowAddCustodianDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Custodian</DialogTitle>
+            <DialogDescription>
+              Add a new custodian to this legal hold
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Name</label>
+              <input
+                type="text"
+                className="w-full mt-1 px-3 py-2 border rounded-md"
+                value={newCustodianName}
+                onChange={(e) => setNewCustodianName(e.target.value)}
+                placeholder="John Doe"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Email</label>
+              <input
+                type="email"
+                className="w-full mt-1 px-3 py-2 border rounded-md"
+                value={newCustodianEmail}
+                onChange={(e) => setNewCustodianEmail(e.target.value)}
+                placeholder="john.doe@company.com"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowAddCustodianDialog(false);
+                setNewCustodianName('');
+                setNewCustodianEmail('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (newCustodianName && newCustodianEmail) {
+                  await addCustodian(hold.id, { name: newCustodianName, email: newCustodianEmail });
+                  setShowAddCustodianDialog(false);
+                  setNewCustodianName('');
+                  setNewCustodianEmail('');
+                }
+              }}
+              disabled={!newCustodianName || !newCustodianEmail}
+            >
+              Add Custodian
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send Notifications Dialog */}
+      <Dialog open={showNotificationsDialog} onOpenChange={setShowNotificationsDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send Notifications</DialogTitle>
+            <DialogDescription>
+              Send legal hold notifications to {selectedCustodians.length} custodian{selectedCustodians.length !== 1 ? 's' : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Additional Message (Optional)</label>
+              <Textarea
+                className="mt-1"
+                value={notificationMessage}
+                onChange={(e) => setNotificationMessage(e.target.value)}
+                placeholder="Add any additional instructions or context..."
+                rows={4}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowNotificationsDialog(false);
+                setNotificationMessage('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                await sendNotifications(hold.id, selectedCustodians, notificationMessage);
+                setShowNotificationsDialog(false);
+                setNotificationMessage('');
+              }}
+            >
+              <Mail className="w-4 h-4 mr-2" />
+              Send Notifications
             </Button>
           </DialogFooter>
         </DialogContent>

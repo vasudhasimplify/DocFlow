@@ -75,7 +75,8 @@ export function DocumentModals({
             <DialogTitle>Upload Documents</DialogTitle>
           </DialogHeader>
           <UnifiedDocumentUpload 
-            onComplete={() => onDocumentProcessed('uploaded')}
+            onDocumentProcessed={onDocumentProcessed}
+            onComplete={onCloseUploadModal}
           />
         </DialogContent>
       </Dialog>

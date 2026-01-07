@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -33,7 +33,8 @@ import {
   Mail,
   TrendingUp,
   Building,
-  Gavel
+  Gavel,
+  X
 } from 'lucide-react';
 import { useLegalHolds } from '@/hooks/useLegalHolds';
 import type { EnhancedLegalHold, LegalHoldStatus } from '@/types/legalHold';
@@ -41,13 +42,28 @@ import { LEGAL_HOLD_STATUS_CONFIG, MATTER_TYPES } from '@/types/legalHold';
 import { formatDistanceToNow, format, differenceInDays } from 'date-fns';
 import { CreateLegalHoldDialog } from './CreateLegalHoldDialog';
 import { LegalHoldDetail } from './LegalHoldDetail';
+import { SendNotificationsDialog } from './SendNotificationsDialog';
+import { useNavigate } from 'react-router-dom';
 
 export const LegalHoldDashboard: React.FC = () => {
-  const { holds, loading, createHold, releaseHold } = useLegalHolds();
+  const { holds, loading, createHold, updateHold, releaseHold, approveHold, rejectHold, fetchHolds, sendNotifications } = useLegalHolds();
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('active');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [selectedHold, setSelectedHold] = useState<EnhancedLegalHold | null>(null);
+  const [editingHold, setEditingHold] = useState<EnhancedLegalHold | null>(null);
+  const [notifyingHold, setNotifyingHold] = useState<EnhancedLegalHold | null>(null);
+
+  // Update selectedHold when holds change (e.g., after acknowledgement)
+  useEffect(() => {
+    if (selectedHold) {
+      const updatedHold = holds.find(h => h.id === selectedHold.id);
+      if (updatedHold) {
+        setSelectedHold(updatedHold);
+      }
+    }
+  }, [holds, selectedHold]);
 
   const activeHolds = holds.filter(h => h.status === 'active');
   const pendingHolds = holds.filter(h => h.status === 'pending_approval' || h.status === 'draft');
@@ -61,7 +77,11 @@ export const LegalHoldDashboard: React.FC = () => {
     );
 
   const totalCustodians = activeHolds.reduce((sum, h) => sum + (h.stats?.total_custodians || 0), 0);
-  const pendingAcknowledgments = activeHolds.reduce((sum, h) => sum + (h.stats?.pending_custodians || 0), 0);
+  const pendingAcknowledgments = activeHolds.reduce((sum, h) => {
+    const total = h.stats?.total_custodians || 0;
+    const acknowledged = h.stats?.custodians_acknowledged || 0;
+    return sum + (total - acknowledged);
+  }, 0);
   const totalDocuments = activeHolds.reduce((sum, h) => sum + h.document_count, 0);
 
   const formatBytes = (bytes: number) => {
@@ -126,7 +146,26 @@ export const LegalHoldDashboard: React.FC = () => {
                     Some custodians have not yet acknowledged their legal hold obligations
                   </p>
                 </div>
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    // Find all holds with pending custodians and open notification dialog
+                    const holdsWithPending = [...activeHolds, ...pendingHolds].filter(
+                      hold => hold.stats.pending_custodians > 0
+                    );
+                    if (holdsWithPending.length > 0) {
+                      // For simplicity, send reminders to the first hold with pending custodians
+                      // In a real app, you might want to show a selection dialog
+                      const firstHold = holdsWithPending[0];
+                      const pendingCustodians = firstHold.custodians.filter(
+                        c => c.status === 'pending'
+                      );
+                      setSelectedHold(firstHold);
+                      setNotificationDialogOpen(true);
+                    }
+                  }}
+                >
                   <Bell className="w-4 h-4 mr-2" />
                   Send Reminders
                 </Button>
@@ -253,10 +292,12 @@ export const LegalHoldDashboard: React.FC = () => {
                 <div className="space-y-4">
                   {filteredHolds.map((hold) => {
                     const statusConfig = LEGAL_HOLD_STATUS_CONFIG[hold.status];
-                    const acknowledgedPercent = hold.stats
-                      ? (hold.stats.acknowledged_custodians / hold.stats.total_custodians) * 100
+                    const acknowledgedPercent = hold.stats && hold.stats.total_custodians > 0
+                      ? ((hold.stats.custodians_acknowledged || 0) / hold.stats.total_custodians) * 100
                       : 0;
-                    const daysActive = differenceInDays(new Date(), new Date(hold.effective_date));
+                    
+                    // Use days_active from stats if available
+                    const daysActive = hold.stats?.days_active ?? 0;
 
                     return (
                       <Card
@@ -330,7 +371,7 @@ export const LegalHoldDashboard: React.FC = () => {
                                   <div className="flex items-center justify-between text-xs mb-1">
                                     <span className="text-muted-foreground">Acknowledgment Progress</span>
                                     <span className="font-medium">
-                                      {hold.stats.acknowledged_custodians}/{hold.stats.total_custodians}
+                                      {hold.stats.custodians_acknowledged || 0}/{hold.stats.total_custodians}
                                     </span>
                                   </div>
                                   <Progress 
@@ -350,26 +391,73 @@ export const LegalHoldDashboard: React.FC = () => {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem onClick={() => setSelectedHold(hold)}>
+                                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setSelectedHold(hold); }}>
                                     <Eye className="w-4 h-4 mr-2" />
                                     View Details
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem>
+                                  
+                                  {hold.status === 'pending_approval' && (
+                                    <>
+                                      <DropdownMenuItem 
+                                        className="text-green-600" 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (confirm(`Approve legal hold "${hold.name}"? This will activate the hold and notify custodians.`)) {
+                                            approveHold(hold.id);
+                                          }
+                                        }}
+                                      >
+                                        <TrendingUp className="w-4 h-4 mr-2" />
+                                        Approve Hold
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem 
+                                        className="text-orange-600" 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const reason = prompt('Enter rejection reason:');
+                                          if (reason) {
+                                            rejectHold(hold.id, reason);
+                                          }
+                                        }}
+                                      >
+                                        <X className="w-4 h-4 mr-2" />
+                                        Reject Hold
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                    </>
+                                  )}
+                                  
+                                  <DropdownMenuItem onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    setEditingHold(hold);
+                                  }}>
                                     <Edit className="w-4 h-4 mr-2" />
                                     Edit Hold
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem>
+                                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigate('/documents', { state: { legalHoldId: hold.id, legalHoldName: hold.name } }); }}>
                                     <FileText className="w-4 h-4 mr-2" />
                                     View Documents
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem>
-                                    <Mail className="w-4 h-4 mr-2" />
-                                    Send Notifications
-                                  </DropdownMenuItem>
+                                  
+                                  {hold.status === 'active' && (
+                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setNotifyingHold(hold); }}>
+                                      <Mail className="w-4 h-4 mr-2" />
+                                      Send Notifications
+                                    </DropdownMenuItem>
+                                  )}
+                                  
                                   {hold.status === 'active' && (
                                     <>
                                       <DropdownMenuSeparator />
-                                      <DropdownMenuItem className="text-destructive">
+                                      <DropdownMenuItem 
+                                        className="text-destructive" 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (confirm(`Are you sure you want to release the hold "${hold.name}"?`)) {
+                                            releaseHold(hold.id, 'Released by user');
+                                          }
+                                        }}
+                                      >
                                         <Unlock className="w-4 h-4 mr-2" />
                                         Release Hold
                                       </DropdownMenuItem>
@@ -395,6 +483,30 @@ export const LegalHoldDashboard: React.FC = () => {
         onOpenChange={setShowCreateDialog}
         onCreateHold={createHold}
       />
+
+      {/* Edit Dialog */}
+      {editingHold && (
+        <CreateLegalHoldDialog
+          open={!!editingHold}
+          onOpenChange={(open) => !open && setEditingHold(null)}
+          onCreateHold={createHold}
+          onUpdateHold={updateHold}
+          initialData={editingHold}
+        />
+      )}
+
+      {/* Send Notifications Dialog */}
+      {notifyingHold && (
+        <SendNotificationsDialog
+          open={!!notifyingHold}
+          onOpenChange={(open) => !open && setNotifyingHold(null)}
+          hold={notifyingHold}
+          onSend={async (custodianIds, message) => {
+            await sendNotifications(notifyingHold.id, custodianIds, message);
+            setNotifyingHold(null);
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Clock, Search, Filter, Download, FileText,
-  Trash2, Archive, Lock, Unlock, RefreshCw, CheckCircle, AlertTriangle
+  Trash2, Archive, Lock, Unlock, RefreshCw, CheckCircle, AlertTriangle, Eye
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,17 +15,106 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import type { DispositionAuditLog } from '@/types/retention';
 import { cn } from '@/lib/utils';
+import { DocumentViewer } from '@/components/document-manager/DocumentViewer';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+
+interface Document {
+  id: string;
+  file_name: string;
+  file_type: string;
+  storage_url?: string;
+  storage_path?: string;
+}
 
 interface RetentionAuditLogProps {
   logs: DispositionAuditLog[];
 }
 
 export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) => {
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [actionFilter, setActionFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<'all' | '7d' | '30d' | '90d'>('30d');
+  const [documentNames, setDocumentNames] = useState<Record<string, string>>({});
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
+  const [showDocumentViewer, setShowDocumentViewer] = useState(false);
+  const [loadingDocumentId, setLoadingDocumentId] = useState<string | null>(null);
+
+  // Fetch document names for all logs
+  useEffect(() => {
+    const fetchDocumentNames = async () => {
+      const documentIds = [...new Set(logs.map(log => log.document_id))];
+      
+      const { data, error } = await supabase
+        .from('documents')
+        .select('id, file_name')
+        .in('id', documentIds);
+
+      if (!error && data) {
+        const namesMap: Record<string, string> = {};
+        data.forEach(doc => {
+          namesMap[doc.id] = doc.file_name;
+        });
+        setDocumentNames(namesMap);
+      }
+    };
+
+    if (logs.length > 0) {
+      fetchDocumentNames();
+    }
+  }, [logs]);
+
+  const handleViewDocument = async (documentId: string) => {
+    try {
+      setLoadingDocumentId(documentId);
+      
+      const { data: document, error } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('id', documentId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error fetching document:', error);
+        toast({
+          title: "Error loading document",
+          description: error.message || "Unable to load the document.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!document) {
+        toast({
+          title: "Document unavailable",
+          description: "This document may have been deleted or you no longer have access to it.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setSelectedDocument(document);
+      setShowDocumentViewer(true);
+    } catch (error) {
+      console.error('Error loading document:', error);
+      toast({
+        title: "Error loading document",
+        description: "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingDocumentId(null);
+    }
+  };
 
   const getFilteredLogs = () => {
     let filtered = logs;
@@ -34,6 +123,7 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
     if (searchQuery) {
       filtered = filtered.filter(log =>
         log.document_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        documentNames[log.document_id]?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         log.reason?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         log.certificate_number?.toLowerCase().includes(searchQuery.toLowerCase())
       );
@@ -64,6 +154,10 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
       case 'released': return Unlock;
       case 'extended': return RefreshCw;
       case 'exception_granted': return CheckCircle;
+      case 'policy_applied': return FileText;
+      case 'legal_hold_applied': return Lock;
+      case 'legal_hold_released': return Unlock;
+      case 'status_changed': return RefreshCw;
       default: return FileText;
     }
   };
@@ -76,7 +170,27 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
       case 'released': return 'text-green-500 bg-green-500/10';
       case 'extended': return 'text-orange-500 bg-orange-500/10';
       case 'exception_granted': return 'text-yellow-500 bg-yellow-500/10';
+      case 'policy_applied': return 'text-blue-500 bg-blue-500/10';
+      case 'legal_hold_applied': return 'text-purple-500 bg-purple-500/10';
+      case 'legal_hold_released': return 'text-green-500 bg-green-500/10';
+      case 'status_changed': return 'text-orange-500 bg-orange-500/10';
       default: return 'text-gray-500 bg-gray-500/10';
+    }
+  };
+
+  const getActionLabel = (action: string, reason?: string) => {
+    switch (action) {
+      case 'disposed': return 'Document Disposed';
+      case 'archived': return 'Document Archived';
+      case 'held': return 'Legal Hold Applied';
+      case 'released': return 'Legal Hold Released';
+      case 'extended': return 'Retention Period Extended';
+      case 'exception_granted': return 'Exception Granted';
+      case 'policy_applied': return 'Retention Policy Applied';
+      case 'legal_hold_applied': return 'Legal Hold Applied';
+      case 'legal_hold_released': return 'Legal Hold Released';
+      case 'status_changed': return 'Status Changed';
+      default: return action.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     }
   };
 
@@ -109,7 +223,7 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by document ID, reason, or certificate..."
+            placeholder="Search by document"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -189,18 +303,33 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium capitalize">
-                          {log.action.replace('_', ' ')}
-                        </span>
-                        <Badge variant="outline">
-                          {log.document_id.slice(0, 12)}...
-                        </Badge>
-                        {log.certificate_number && (
-                          <Badge variant="secondary" className="text-xs">
-                            {log.certificate_number}
-                          </Badge>
-                        )}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="font-medium cursor-help">
+                                {getActionLabel(log.action, log.reason)}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <div className="space-y-1">
+                                <p className="text-xs"><strong>Document ID:</strong> {log.document_id}</p>
+                                {log.certificate_number && (
+                                  <p className="text-xs"><strong>Certificate:</strong> {log.certificate_number}</p>
+                                )}
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </div>
+
+                      {documentNames[log.document_id] && (
+                        <div className="flex items-center gap-2 mb-1">
+                          <FileText className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-sm font-medium text-muted-foreground">
+                            {documentNames[log.document_id]}
+                          </span>
+                        </div>
+                      )}
 
                       {log.reason && (
                         <p className="text-sm text-muted-foreground mb-2">{log.reason}</p>
@@ -222,7 +351,16 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
                       </div>
                     </div>
 
-                    <div className="text-right shrink-0">
+                    <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleViewDocument(log.document_id)}
+                        disabled={loadingDocumentId === log.document_id}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        View
+                      </Button>
                       <p className="text-xs text-muted-foreground">
                         {new Date(log.created_at).toLocaleDateString()}
                       </p>
@@ -245,6 +383,16 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
           )}
         </div>
       </ScrollArea>
+
+      {/* Document Viewer Dialog */}
+      <DocumentViewer
+        document={selectedDocument}
+        isOpen={showDocumentViewer}
+        onClose={() => {
+          setShowDocumentViewer(false);
+          setSelectedDocument(null);
+        }}
+      />
     </div>
   );
 };

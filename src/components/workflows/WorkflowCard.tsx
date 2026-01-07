@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,11 +23,13 @@ import {
   FileCheck,
   FileSignature,
   Receipt,
-  FileText
+  FileText,
+  Zap
 } from 'lucide-react';
 import { STATUS_CONFIG, TRIGGER_TYPE_CONFIG } from '@/types/workflow';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { format } from 'date-fns';
+import { WorkflowDetailsDialog } from './WorkflowDetailsDialog';
 
 interface WorkflowCardProps {
   workflow: any;
@@ -43,10 +45,18 @@ const categoryIcons: Record<string, React.ReactNode> = {
 };
 
 export const WorkflowCard: React.FC<WorkflowCardProps> = ({ workflow, onEdit }) => {
-  const { activateWorkflow, pauseWorkflow, deleteWorkflow } = useWorkflows();
+  const { escalationRules, activateWorkflow, pauseWorkflow, deleteWorkflow, duplicateWorkflow } = useWorkflows();
+  const [showDetailsDialog, setShowDetailsDialog] = useState(false);
   const statusConfig = STATUS_CONFIG[workflow.status as keyof typeof STATUS_CONFIG];
   const triggerType = workflow.trigger_type || workflow.trigger?.type || 'manual';
   const triggerConfig = TRIGGER_TYPE_CONFIG[triggerType as keyof typeof TRIGGER_TYPE_CONFIG];
+  
+  // Get escalation rules for this workflow
+  const workflowRules = escalationRules.filter(rule => 
+    rule.is_global || rule.workflow_id === workflow.id
+  );
+  const workflowSpecificRules = escalationRules.filter(rule => rule.workflow_id === workflow.id);
+  const globalRules = escalationRules.filter(rule => rule.is_global);
 
   const handleToggleStatus = async () => {
     if (workflow.status === 'active') {
@@ -54,6 +64,16 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({ workflow, onEdit }) 
     } else if (workflow.status === 'draft' || workflow.status === 'paused') {
       await activateWorkflow(workflow.id);
     }
+  };
+
+  const handleDuplicate = async () => {
+    await duplicateWorkflow(workflow.id);
+  };
+
+  const handleViewRuns = () => {
+    // Navigate to instances tab with filter for this workflow
+    const event = new CustomEvent('view-workflow-instances', { detail: { workflowId: workflow.id } });
+    window.dispatchEvent(event);
   };
 
   return (
@@ -83,15 +103,19 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({ workflow, onEdit }) 
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setShowDetailsDialog(true)}>
+                <Eye className="h-4 w-4 mr-2" />
+                View Details
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onEdit?.(workflow)}>
                 <Edit className="h-4 w-4 mr-2" />
                 Edit
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={handleViewRuns}>
                 <Eye className="h-4 w-4 mr-2" />
                 View Runs
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDuplicate}>
                 <Copy className="h-4 w-4 mr-2" />
                 Duplicate
               </DropdownMenuItem>
@@ -135,6 +159,15 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({ workflow, onEdit }) 
             <CheckCircle2 className="h-4 w-4" />
             {workflow.run_count || workflow.stats?.total_runs || 0} runs
           </span>
+          <span className="flex items-center gap-1">
+            <Zap className="h-4 w-4" />
+            {workflowRules.length} rules
+            {workflowSpecificRules.length > 0 && (
+              <Badge variant="secondary" className="text-xs ml-1">
+                {workflowSpecificRules.length} specific
+              </Badge>
+            )}
+          </span>
         </div>
 
         {/* Footer */}
@@ -169,6 +202,12 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({ workflow, onEdit }) 
           </Button>
         </div>
       </CardContent>
+      
+      <WorkflowDetailsDialog
+        workflow={workflow}
+        open={showDetailsDialog}
+        onOpenChange={setShowDetailsDialog}
+      />
     </Card>
   );
 };

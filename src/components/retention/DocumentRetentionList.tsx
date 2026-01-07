@@ -24,10 +24,23 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { useRetentionPolicies } from '@/hooks/useRetentionPolicies';
 import { RETENTION_STATUS_CONFIG } from '@/types/retention';
 import type { RetentionStatus } from '@/types/retention';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/hooks/use-toast';
 
 export const DocumentRetentionList: React.FC = () => {
   const { 
@@ -41,9 +54,41 @@ export const DocumentRetentionList: React.FC = () => {
   
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'expiring' | 'created' | 'status'>('expiring');
+  const [documentsMap, setDocumentsMap] = useState<Map<string, { file_name: string }>>(new Map());
+  const [viewDocumentId, setViewDocumentId] = useState<string | null>(null);
+  const [changePolicyDocId, setChangePolicyDocId] = useState<string | null>(null);
+  const [selectedPolicyForChange, setSelectedPolicyForChange] = useState<string>('');
+  const [statusChangeDialog, setStatusChangeDialog] = useState<{ docId: string; newStatus: string } | null>(null);
+
+  // Fetch document details
+  React.useEffect(() => {
+    const fetchDocuments = async () => {
+      if (documentStatuses.length === 0) return;
+      
+      const uniqueDocIds = Array.from(new Set(documentStatuses.map(d => d.document_id)));
+      
+      // Import supabase dynamically
+      const { supabase } = await import('@/integrations/supabase/client');
+      
+      const { data, error } = await supabase
+        .from('documents')
+        .select('id, file_name')
+        .in('id', uniqueDocIds);
+      
+      if (data && !error) {
+        const newMap = new Map();
+        data.forEach(doc => newMap.set(doc.id, { file_name: doc.file_name }));
+        setDocumentsMap(newMap);
+      }
+    };
+    
+    fetchDocuments();
+  }, [documentStatuses]);
 
   const filteredDocs = documentStatuses.filter(doc => {
-    const matchesSearch = doc.document_id.toLowerCase().includes(searchQuery.toLowerCase());
+    const fileName = documentsMap.get(doc.document_id)?.file_name || doc.document_id;
+    const matchesSearch = fileName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                         doc.document_id.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesSearch;
   });
 
@@ -185,9 +230,35 @@ export const DocumentRetentionList: React.FC = () => {
                     {/* Document Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium truncate">
-                          Document {doc.document_id.slice(0, 12)}...
-                        </span>
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        <button
+                          onClick={async () => {
+                            try {
+                              const { data: docData, error } = await supabase
+                                .from('documents')
+                                .select('storage_path')
+                                .eq('id', doc.document_id)
+                                .single();
+                              
+                              if (error) throw error;
+                              if (docData?.storage_path) {
+                                const { data: urlData } = await supabase.storage
+                                  .from('documents')
+                                  .createSignedUrl(docData.storage_path, 3600);
+                                
+                                if (urlData?.signedUrl) {
+                                  window.open(urlData.signedUrl, '_blank');
+                                }
+                              }
+                            } catch (error) {
+                              console.error('Error opening document:', error);
+                              toast({ title: 'Error', description: 'Failed to open document', variant: 'destructive' });
+                            }
+                          }}
+                          className="font-medium truncate text-primary hover:underline cursor-pointer text-left"
+                        >
+                          {documentsMap.get(doc.document_id)?.file_name || `Document ${doc.document_id.slice(0, 12)}...`}
+                        </button>
                         <Badge 
                           variant="outline" 
                           className={cn("text-xs", statusConfig?.color.replace('bg-', 'border-'))}
@@ -254,13 +325,21 @@ export const DocumentRetentionList: React.FC = () => {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setViewDocumentId(doc.document_id)}>
                           <Eye className="h-4 w-4 mr-2" />
-                          View Document
+                          View Details
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setChangePolicyDocId(doc.document_id)}>
                           <Shield className="h-4 w-4 mr-2" />
                           Change Policy
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setStatusChangeDialog({ docId: doc.document_id, newStatus: 'pending_review' })}>
+                          <Eye className="h-4 w-4 mr-2" />
+                          Mark for Review
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setStatusChangeDialog({ docId: doc.document_id, newStatus: 'pending_approval' })}>
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          Mark for Approval
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => grantException(doc.document_id, 'Extended per request', 90)}>
                           <RefreshCw className="h-4 w-4 mr-2" />
@@ -269,18 +348,26 @@ export const DocumentRetentionList: React.FC = () => {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem 
                           onClick={() => disposeDocument(doc.document_id, 'archive')}
-                          disabled={isOnHold}
+                          disabled={isOnHold || doc.current_status === 'archived' || doc.current_status === 'disposed'}
                         >
                           <Archive className="h-4 w-4 mr-2" />
-                          Archive Now
+                          {doc.current_status === 'archived' ? 'Already Archived' : 'Archive Now'}
                         </DropdownMenuItem>
                         <DropdownMenuItem 
-                          className="text-destructive"
-                          onClick={() => disposeDocument(doc.document_id, 'delete')}
-                          disabled={isOnHold}
+                          className={doc.current_status === 'archived' ? 'text-orange-500' : 'text-destructive'}
+                          onClick={() => {
+                            if (doc.current_status === 'archived') {
+                              // For archived documents, mark for approval first
+                              setStatusChangeDialog({ docId: doc.document_id, newStatus: 'pending_approval' });
+                            } else {
+                              disposeDocument(doc.document_id, 'delete');
+                            }
+                          }}
+                          disabled={isOnHold || doc.current_status === 'disposed'}
                         >
                           <Trash2 className="h-4 w-4 mr-2" />
-                          Dispose Now
+                          {doc.current_status === 'disposed' ? 'Already Disposed' : 
+                           doc.current_status === 'archived' ? 'Request Disposal' : 'Dispose Now'}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -299,6 +386,165 @@ export const DocumentRetentionList: React.FC = () => {
           )}
         </div>
       </ScrollArea>
+
+      {/* View Document Dialog */}
+      <Dialog open={!!viewDocumentId} onOpenChange={() => setViewDocumentId(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Document Details</DialogTitle>
+            <DialogDescription>
+              Retention information for this document
+            </DialogDescription>
+          </DialogHeader>
+          {viewDocumentId && (() => {
+            const doc = documentStatuses.find(d => d.document_id === viewDocumentId);
+            const policy = policies.find(p => p.id === doc?.policy_id);
+            const fileName = documentsMap.get(viewDocumentId)?.file_name;
+            
+            if (!doc) return <p>Document not found</p>;
+            
+            const daysRemaining = Math.ceil((new Date(doc.retention_end_date).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+            const statusConfig = RETENTION_STATUS_CONFIG[doc.current_status as RetentionStatus];
+            
+            return (
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-semibold mb-2">File Information</h4>
+                  <p className="text-sm"><strong>Name:</strong> {fileName || 'Unknown'}</p>
+                  <p className="text-sm"><strong>Document ID:</strong> {doc.document_id}</p>
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-2">Retention Policy</h4>
+                  <p className="text-sm"><strong>Policy:</strong> {policy?.name || 'No policy'}</p>
+                  <p className="text-sm"><strong>Status:</strong> <Badge className={statusConfig?.color}>{statusConfig?.label}</Badge></p>
+                </div>
+                <div>
+                  <h4 className="font-semibold mb-2">Timeline</h4>
+                  <p className="text-sm"><strong>Start Date:</strong> {new Date(doc.retention_start_date).toLocaleDateString()}</p>
+                  <p className="text-sm"><strong>End Date:</strong> {new Date(doc.retention_end_date).toLocaleDateString()}</p>
+                  <p className="text-sm"><strong>Days Remaining:</strong> {daysRemaining > 0 ? daysRemaining : 'Expired'}</p>
+                </div>
+                {doc.legal_hold_ids && doc.legal_hold_ids.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold mb-2">Legal Holds</h4>
+                    <p className="text-sm text-purple-600">This document is under {doc.legal_hold_ids.length} legal hold(s)</p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button onClick={() => setViewDocumentId(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Change Policy Dialog */}
+      <Dialog open={!!changePolicyDocId} onOpenChange={() => setChangePolicyDocId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change Retention Policy</DialogTitle>
+            <DialogDescription>
+              Select a new policy for this document
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <RadioGroup value={selectedPolicyForChange} onValueChange={setSelectedPolicyForChange}>
+              {policies.filter(p => p.is_active).map(policy => (
+                <div key={policy.id} className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-muted/50">
+                  <RadioGroupItem value={policy.id} id={policy.id} />
+                  <Label htmlFor={policy.id} className="flex-1 cursor-pointer">
+                    <div>
+                      <p className="font-medium">{policy.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {policy.retention_period_days} days • {policy.disposition_action}
+                      </p>
+                    </div>
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setChangePolicyDocId(null)}>Cancel</Button>
+            <Button onClick={async () => {
+              if (!changePolicyDocId || !selectedPolicyForChange) return;
+              
+              try {
+                const policy = policies.find(p => p.id === selectedPolicyForChange);
+                if (!policy) return;
+                
+                const now = new Date();
+                const retentionEndDate = new Date(now.getTime() + policy.retention_period_days * 24 * 60 * 60 * 1000);
+                
+                const { error } = await supabase
+                  .from('document_retention_status')
+                  .update({
+                    policy_id: selectedPolicyForChange,
+                    retention_end_date: retentionEndDate.toISOString(),
+                    disposition_action: policy.disposition_action,
+                    updated_at: now.toISOString()
+                  })
+                  .eq('document_id', changePolicyDocId);
+                
+                if (error) throw error;
+                
+                toast({ title: 'Success', description: 'Policy changed successfully' });
+                setChangePolicyDocId(null);
+                setSelectedPolicyForChange('');
+                window.location.reload();
+              } catch (error) {
+                console.error('Error changing policy:', error);
+                toast({ title: 'Error', description: 'Failed to change policy', variant: 'destructive' });
+              }
+            }} disabled={!selectedPolicyForChange}>
+              Change Policy
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Status Change Dialog */}
+      <Dialog open={!!statusChangeDialog} onOpenChange={() => setStatusChangeDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change Document Status</DialogTitle>
+            <DialogDescription>
+              Mark this document for {statusChangeDialog?.newStatus === 'pending_review' ? 'review' : 'approval'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm">This will change the document status and notify relevant parties.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusChangeDialog(null)}>Cancel</Button>
+            <Button onClick={async () => {
+              if (!statusChangeDialog) return;
+              
+              try {
+                const { error } = await supabase
+                  .from('document_retention_status')
+                  .update({
+                    current_status: statusChangeDialog.newStatus,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('document_id', statusChangeDialog.docId);
+                
+                if (error) throw error;
+                
+                toast({ title: 'Success', description: 'Status updated successfully' });
+                setStatusChangeDialog(null);
+                window.location.reload();
+              } catch (error) {
+                console.error('Error updating status:', error);
+                toast({ title: 'Error', description: 'Failed to update status', variant: 'destructive' });
+              }
+            }}>
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

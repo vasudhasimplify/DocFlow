@@ -7,6 +7,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Download, ExternalLink, X, Tags, ChevronRight, ChevronLeft, CloudOff, ShieldAlert, GitBranch, Sparkles, Loader2, Plus, ChevronDown } from 'lucide-react';
 import { Download, ExternalLink, X, Tags, ChevronRight, ChevronLeft, CloudOff, ShieldAlert, Droplets } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { DocumentMetadataEditor } from '@/components/metadata';
@@ -15,6 +22,11 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { initOfflineDB } from '@/services/offlineStorage';
 import { useDocumentLock } from '@/hooks/useDocumentLock';
 import { DocumentLockBanner } from '@/components/version-control/DocumentLockBanner';
+import { StartWorkflowDialog } from '@/components/workflows/StartWorkflowDialog';
+import { CreateWorkflowDialog } from '@/components/workflows/CreateWorkflowDialog';
+import { WorkflowSuggestionDialog } from '@/components/workflows/WorkflowSuggestionDialog';
+import { API_BASE_URL } from '@/config/api';
+import { toast } from 'sonner';
 import { useWatermark, WatermarkSettings } from '@/hooks/useWatermark';
 import { useDocumentRestrictions, DocumentRestrictions } from '@/hooks/useDocumentRestrictions';
 
@@ -46,6 +58,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [isLoadingUrl, setIsLoadingUrl] = React.useState(false);
   const [showMetadata, setShowMetadata] = React.useState(false);
   const [isOfflineDocument, setIsOfflineDocument] = React.useState(false);
+  const [showStartWorkflow, setShowStartWorkflow] = React.useState(false);
+  const [showCreateWorkflow, setShowCreateWorkflow] = React.useState(false);
+  const [showWorkflowSuggestion, setShowWorkflowSuggestion] = React.useState(false);
+  const [aiDocumentType, setAiDocumentType] = React.useState<string | null>(null);
+  const [aiConfidence, setAiConfidence] = React.useState<number>(0);
+  const [isDetectingType, setIsDetectingType] = React.useState(false);
   const docxContainerRef = React.useRef<HTMLDivElement>(null);
   const [isLoadingDocx, setIsLoadingDocx] = React.useState(false);
 
@@ -104,6 +122,73 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   // DOCX check - Word document
   const isDocx = !isImage && !isPDF && (fileExt === 'docx' || document?.file_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+
+  // Function to detect document type using AI and open workflow suggestion
+  const handleAISuggestWorkflow = async () => {
+    if (!document?.id) return;
+    
+    setIsDetectingType(true);
+    try {
+      // First get the document file from storage
+      const { data: docData } = await supabase
+        .from('documents')
+        .select('storage_path')
+        .eq('id', document.id)
+        .single();
+      
+      if (!docData?.storage_path) {
+        throw new Error('Document storage path not found');
+      }
+
+      // Download the file
+      const { data: fileData, error: downloadError } = await supabase.storage
+        .from('documents')
+        .download(docData.storage_path);
+      
+      if (downloadError ||!fileData) {
+        throw new Error('Failed to download document');
+      }
+
+      // Send to AI for document type detection
+      const formData = new FormData();
+      formData.append('file', fileData, document.file_name);
+      
+      const response = await fetch(`${API_BASE_URL}/api/v1/detect-document-type`, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to detect document type');
+      }
+      
+      const result = await response.json();
+      
+      // Store the detected type and open suggestion dialog
+      setAiDocumentType(result.document_type || 'unknown');
+      setAiConfidence(result.confidence || 0);
+      setShowWorkflowSuggestion(true);
+      
+    } catch (error: any) {
+      console.error('Error detecting document type:', error);
+      let errorMessage = 'Failed to analyze document';
+      let description = 'Please try again';
+      
+      if (error.message?.includes('404')) {
+        errorMessage = 'AI Analysis Service Unavailable';
+        description = 'The backend service may not be running';
+      } else if (error.message?.includes('Failed to fetch')) {
+        errorMessage = 'Connection Error';
+        description = 'Unable to connect to the analysis service';
+      }
+      
+      toast.error(errorMessage, {
+        description,
+      });
+    } finally {
+      setIsDetectingType(false);
+    }
+  };
 
   // Check if document is available offline and load from IndexedDB
   React.useEffect(() => {
@@ -360,6 +445,48 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               )}
             </div>
             <div className="flex items-center gap-2">
+              {/* Workflow Actions Group */}
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50 border">
+                <span className="text-xs font-medium text-muted-foreground px-2">Workflow</span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 h-8"
+                    >
+                      <GitBranch className="w-4 h-4" />
+                      Manual
+                      <ChevronDown className="w-3 h-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem onClick={() => setShowStartWorkflow(true)}>
+                      <GitBranch className="w-4 h-4 mr-2" />
+                      Choose Existing Workflow
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setShowCreateWorkflow(true)}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Create New Workflow
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <div className="w-px h-4 bg-border" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleAISuggestWorkflow}
+                  disabled={isDetectingType}
+                  className="gap-2 h-8"
+                >
+                  {isDetectingType ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-4 h-4" />
+                  )}
+                  AI Suggest
+                </Button>
+              </div>
               <Button
                 variant={showMetadata ? "default" : "outline"}
                 size="sm"
@@ -576,6 +703,47 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           )}
         </div>
       </DialogContent>
+
+      {/* Start Workflow Dialog */}
+      {document && (
+        <StartWorkflowDialog
+          open={showStartWorkflow}
+          onOpenChange={setShowStartWorkflow}
+          document={document}
+          onSuccess={(instanceId) => {
+            console.log('Workflow started:', instanceId);
+            // Could navigate to workflow instances view here
+          }}
+        />
+      )}
+
+      {/* Create Workflow Dialog */}
+      <CreateWorkflowDialog
+        open={showCreateWorkflow}
+        onOpenChange={setShowCreateWorkflow}
+      />
+
+      {/* AI Workflow Suggestion Dialog */}
+      {document && aiDocumentType && (
+        <WorkflowSuggestionDialog
+          open={showWorkflowSuggestion}
+          onOpenChange={setShowWorkflowSuggestion}
+          document={document}
+          documentType={aiDocumentType}
+          confidence={aiConfidence}
+          onStartWorkflow={(workflowId) => {
+            console.log('AI suggested workflow started:', workflowId);
+          }}
+          onCreateWorkflow={() => {
+            // Could navigate to workflow creation here
+            toast.info('Navigate to Workflows tab to create a new workflow');
+          }}
+          onSkip={() => {
+            setAiDocumentType(null);
+            setAiConfidence(0);
+          }}
+        />
+      )}
     </Dialog>
   );
 };

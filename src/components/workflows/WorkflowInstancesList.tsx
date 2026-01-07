@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,11 +24,14 @@ import {
   User,
   FileText,
   ChevronRight,
-  Play
+  Play,
+  Trash2
 } from 'lucide-react';
 import { useWorkflows } from '@/hooks/useWorkflows';
+import { useAuth } from '@/hooks/useAuth';
 import { PRIORITY_CONFIG } from '@/types/workflow';
 import { format, formatDistanceToNow } from 'date-fns';
+import { ExtractedDataViewer } from './ExtractedDataViewer';
 
 const stepStatusConfig: Record<string, { icon: React.ReactNode; color: string; bgColor: string }> = {
   pending: { icon: <Clock className="h-4 w-4" />, color: 'text-gray-500', bgColor: 'bg-gray-100' },
@@ -39,8 +42,13 @@ const stepStatusConfig: Record<string, { icon: React.ReactNode; color: string; b
   escalated: { icon: <AlertTriangle className="h-4 w-4" />, color: 'text-orange-500', bgColor: 'bg-orange-100' }
 };
 
-export const WorkflowInstancesList: React.FC = () => {
-  const { instances, approveStep, rejectStep, isLoading } = useWorkflows();
+interface WorkflowInstancesListProps {
+  filter?: 'active' | 'completed';
+}
+
+export const WorkflowInstancesList: React.FC<WorkflowInstancesListProps> = ({ filter = 'active' }) => {
+  const { instances, approveStep, rejectStep, deleteInstance, isLoading, fetchInstances } = useWorkflows();
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInstance, setSelectedInstance] = useState<any | null>(null);
   const [actionDialog, setActionDialog] = useState<{
@@ -48,9 +56,31 @@ export const WorkflowInstancesList: React.FC = () => {
     instance: any;
     step: any;
   } | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<any | null>(null);
   const [comment, setComment] = useState('');
 
-  const filteredInstances = instances.filter(inst =>
+  // Listen for open-workflow-instance event (from email links)
+  useEffect(() => {
+    const handleOpenInstance = (event: CustomEvent) => {
+      const { instanceId } = event.detail;
+      const instance = instances.find(i => i.id === instanceId);
+      if (instance) {
+        setSelectedInstance(instance);
+      }
+    };
+
+    window.addEventListener('open-workflow-instance' as any, handleOpenInstance);
+    return () => {
+      window.removeEventListener('open-workflow-instance' as any, handleOpenInstance);
+    };
+  }, [instances]);
+
+  // Filter instances by status based on filter prop
+  const statusFilteredInstances = filter === 'completed' 
+    ? instances.filter(inst => inst.status === 'completed' || inst.status === 'rejected')
+    : instances.filter(inst => inst.status === 'active' || inst.status === 'paused');
+
+  const filteredInstances = statusFilteredInstances.filter(inst =>
     (inst.document_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (inst.workflow?.name || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -67,6 +97,15 @@ export const WorkflowInstancesList: React.FC = () => {
     setActionDialog(null);
     setComment('');
     setSelectedInstance(null);
+  };
+  
+  const handleDelete = async () => {
+    if (!deleteDialog) return;
+    
+    await deleteInstance(deleteDialog.id);
+    setDeleteDialog(null);
+    setSelectedInstance(null);
+    fetchInstances();
   };
 
   const getProgress = (instance: any) => {
@@ -139,6 +178,11 @@ export const WorkflowInstancesList: React.FC = () => {
                             <Badge className={priorityConfig.color}>
                               {priorityConfig.label}
                             </Badge>
+                            {instance.status === 'paused' && (
+                              <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                                ⏸️ Paused
+                              </Badge>
+                            )}
                             {hasOverdue && (
                               <Badge variant="destructive">Overdue</Badge>
                             )}
@@ -172,10 +216,10 @@ export const WorkflowInstancesList: React.FC = () => {
                               >
                                 {currentStep.step_name || currentStep.step?.name}
                               </Badge>
-                              {currentStep.assigned_to && (
+                              {(currentStep.assigned_email || currentStep.assigned_to) && (
                                 <span className="text-muted-foreground flex items-center gap-1">
                                   <User className="h-3 w-3" />
-                                  {currentStep.assigned_to}
+                                  {currentStep.assigned_email || currentStep.assigned_to}
                                 </span>
                               )}
                             </div>
@@ -188,16 +232,29 @@ export const WorkflowInstancesList: React.FC = () => {
                                 Started {formatDistanceToNow(new Date(instance.started_at))} ago
                               </span>
                             )}
-                            {instance.started_by && (
+                            {instance.started_by && instance.started_by === user?.id && (
                               <span className="flex items-center gap-1">
                                 <User className="h-3 w-3" />
-                                by {instance.started_by}
+                                by You
                               </span>
                             )}
                           </div>
                         </div>
 
-                        <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteDialog(instance);
+                            }}
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                          <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                        </div>
                       </div>
                     </div>
                   );
@@ -229,15 +286,28 @@ export const WorkflowInstancesList: React.FC = () => {
               </DialogHeader>
 
               <ScrollArea className="max-h-[60vh] pr-4">
-                {/* Steps Timeline */}
-                <div className="space-y-4">
-                  <h4 className="font-medium">Workflow Steps</h4>
-                  <div className="relative">
-                    {/* Timeline line */}
-                    <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
+                <div className="space-y-6">
+                  {/* Extracted Data Section - Phase 2 */}
+                  <ExtractedDataViewer instance={selectedInstance} />
+
+                  {/* Steps Timeline */}
+                  <div className="space-y-4">
+                    <h4 className="font-medium">Workflow Steps</h4>
+                    <div className="relative">
+                      {/* Timeline line */}
+                      <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
 
                     <div className="space-y-4">
-                      {(selectedInstance.step_instances || []).map((stepInst: any, index: number) => {
+                      {(selectedInstance.step_instances || [])
+                        .filter((stepInst: any) => {
+                          // If step has manual email assignment, match by email only
+                          if (stepInst.assigned_email) {
+                            return stepInst.assigned_email.toLowerCase() === user?.email?.toLowerCase();
+                          }
+                          // Otherwise, match by user ID (legacy/system assignments)
+                          return stepInst.assigned_to === user?.id;
+                        })
+                        .map((stepInst: any, index: number) => {
                         const stepConfig = stepStatusConfig[stepInst.status] || stepStatusConfig.pending;
                         const overdue = isOverdue(stepInst);
 
@@ -260,10 +330,10 @@ export const WorkflowInstancesList: React.FC = () => {
                                 </div>
                               </div>
 
-                              {stepInst.assigned_to && (
+                              {(stepInst.assigned_email || stepInst.assigned_to) && (
                                 <div className="flex items-center gap-2 text-sm mb-2">
                                   <User className="h-4 w-4 text-muted-foreground" />
-                                  {stepInst.assigned_to}
+                                  {stepInst.assigned_email || stepInst.assigned_to}
                                 </div>
                               )}
 
@@ -287,8 +357,12 @@ export const WorkflowInstancesList: React.FC = () => {
                                 </div>
                               )}
 
-                              {/* Action Buttons */}
-                              {stepInst.status === 'in_progress' && stepInst.step?.type === 'approval' && (
+                              {/* Action Buttons - Only show if user is assigned */}
+                              {stepInst.status === 'in_progress' && 
+                               (stepInst.assigned_email 
+                                 ? stepInst.assigned_email.toLowerCase() === user?.email?.toLowerCase()
+                                 : stepInst.assigned_to === user?.id
+                               ) && (
                                 <div className="flex gap-2 mt-3 pt-3 border-t">
                                   <Button
                                     size="sm"
@@ -300,13 +374,14 @@ export const WorkflowInstancesList: React.FC = () => {
                                         step: stepInst
                                       });
                                     }}
+                                    className="bg-green-600 hover:bg-green-700"
                                   >
                                     <CheckCircle2 className="h-4 w-4 mr-2" />
                                     Approve
                                   </Button>
                                   <Button
                                     size="sm"
-                                    variant="outline"
+                                    variant="destructive"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setActionDialog({
@@ -328,6 +403,7 @@ export const WorkflowInstancesList: React.FC = () => {
                     </div>
                   </div>
                 </div>
+              </div>
               </ScrollArea>
 
               <DialogFooter>
@@ -389,6 +465,43 @@ export const WorkflowInstancesList: React.FC = () => {
                   Reject
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteDialog} onOpenChange={() => setDeleteDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Delete Workflow Instance
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this workflow instance? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {deleteDialog && (
+            <div className="bg-muted p-4 rounded-lg">
+              <p className="font-medium">{deleteDialog.workflow?.name || 'Workflow'}</p>
+              <p className="text-sm text-muted-foreground">
+                Document: {deleteDialog.document_name || 'No document'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Started: {deleteDialog.started_at ? formatDistanceToNow(new Date(deleteDialog.started_at)) : 'Unknown'} ago
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialog(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

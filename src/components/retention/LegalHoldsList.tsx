@@ -25,19 +25,25 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useRetentionPolicies } from '@/hooks/useRetentionPolicies';
+import { useLegalHoldDocCounts } from '@/hooks/useLegalHoldDocCounts';
 import type { LegalHold } from '@/types/retention';
 import { cn } from '@/lib/utils';
+import { useNavigate } from 'react-router-dom';
 
 interface LegalHoldsListProps {
   holds: LegalHold[];
   onCreateHold: () => void;
+  onEditHold?: (hold: LegalHold) => void;
 }
 
 export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
   holds,
   onCreateHold,
+  onEditHold,
 }) => {
   const { releaseLegalHold } = useRetentionPolicies();
+  const { docCounts } = useLegalHoldDocCounts(holds.map(h => h.id));
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
@@ -163,7 +169,7 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
                         )}
                         <span className="flex items-center gap-1">
                           <FileText className="h-3 w-3" />
-                          {hold.document_ids?.length || 0} documents
+                          {docCounts.get(hold.id) || 0} documents
                         </span>
                       </div>
                       {hold.status === 'released' && hold.release_reason && (
@@ -180,11 +186,11 @@ export const LegalHoldsList: React.FC<LegalHoldsListProps> = ({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onEditHold?.(hold)}>
                         <Edit className="h-4 w-4 mr-2" />
                         Edit Hold
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate('/documents', { state: { legalHoldId: hold.id, legalHoldName: hold.name } })}>
                         <FileText className="h-4 w-4 mr-2" />
                         View Documents
                       </DropdownMenuItem>

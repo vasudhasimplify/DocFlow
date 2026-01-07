@@ -143,7 +143,8 @@ CREATE POLICY "Users can view audit log" ON public.legal_hold_audit_log
 CREATE POLICY "Users can insert audit log" ON public.legal_hold_audit_log
     FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
--- Triggers for updated_at
+-- Triggers for updated_at (drop if exists first to make migration idempotent)
+DROP TRIGGER IF EXISTS update_legal_holds_updated_at ON public.legal_holds;
 CREATE TRIGGER update_legal_holds_updated_at
     BEFORE UPDATE ON public.legal_holds
     FOR EACH ROW

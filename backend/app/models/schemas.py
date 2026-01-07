@@ -14,6 +14,7 @@ class DocumentAnalysisRequest(BaseModel):
     yoloSignatureEnabled: Optional[bool] = None  # Enable/disable YOLO signature detection (overrides env variable)
     yoloFaceEnabled: Optional[bool] = None  # Enable/disable YOLO face/photo ID detection (overrides env variable)
     documentType: Optional[str] = None  # Document type (e.g., "bank_statement") for special processing logic
+    skipWorkflowTrigger: Optional[bool] = False  # Skip auto-triggering workflows on document upload
 
 class FieldPosition(BaseModel):
     x: float

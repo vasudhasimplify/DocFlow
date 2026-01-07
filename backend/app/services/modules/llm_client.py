@@ -421,13 +421,13 @@ class LLMClient:
             # Log timing information
             logger.info(f"⏱️ LLM call completed - Task: {task}, Model: {model_to_use}, Duration: {duration:.2f}s")
             
-            # Add timing info to result if it's a dict
-            if isinstance(processed_result, dict):
-                processed_result["_timing"] = {
-                    "start_time": start_time,
-                    "end_time": time.time(),
-                    "duration_seconds": duration
-                }
+            # Don't add timing info to result for end users
+            # if isinstance(processed_result, dict):
+            #     processed_result["_timing"] = {
+            #         "start_time": start_time,
+            #         "end_time": time.time(),
+            #         "duration_seconds": duration
+            #     }
             
             return processed_result
         except Exception as e:
@@ -734,13 +734,13 @@ class LLMClient:
             logger.info(f"⏱️ LLM call completed - Task: {task}, Model: {model_to_use}, Duration: {duration:.2f}s")
             logger.debug(f"   📝 Request prep: {prep_time*1000:.1f}ms | 🔄 Response parse: {parse_time*1000:.1f}ms")
             
-            # Add timing info to result if it's a dict
-            if isinstance(processed_result, dict):
-                processed_result["_timing"] = {
-                    "start_time": start_time,
-                    "end_time": time.time(),
-                    "duration_seconds": duration
-                }
+            # Don't add timing info to result for end users
+            # if isinstance(processed_result, dict):
+            #     processed_result["_timing"] = {
+            #         "start_time": start_time,
+            #         "end_time": time.time(),
+            #         "duration_seconds": duration
+            #     }
             
             return processed_result
         except Exception as e:
@@ -889,12 +889,13 @@ class LLMClient:
                     duration = time.time() - start_time
                     logger.info(f"⏱️ LLM call completed - Task: {task}, Model: gemini-2.0-flash, Duration: {duration:.2f}s")
                     
-                    if isinstance(processed_result, dict):
-                        processed_result["_timing"] = {
-                            "start_time": start_time,
-                            "end_time": time.time(),
-                            "duration_seconds": duration
-                        }
+                    # Don't add timing info to result for end users
+                    # if isinstance(processed_result, dict):
+                    #     processed_result["_timing"] = {
+                    #         "start_time": start_time,
+                    #         "end_time": time.time(),
+                    #         "duration_seconds": duration
+                    #     }
                     
                     return processed_result
                     
@@ -977,8 +978,9 @@ class LLMClient:
                     "success": True,
                     "result": content,
                     "raw_response": content,
-                    "model": result.get("model", "unknown"),
-                    "usage": result.get("usage", {})
+                    "model": result.get("model", "unknown")
+                    # Don't include usage data for end users
+                    # "usage": result.get("usage", {})
                 }
             
             # For document_type_detection, return parsed JSON directly without normalization
@@ -1014,8 +1016,8 @@ class LLMClient:
                 # Attach parsed simple JSON so callers can run validation BEFORE normalization if needed
                 if isinstance(normalized_result, dict):
                     normalized_result["_parsed"] = parsed_result
-                    # Include usage information for token tracking
-                    normalized_result["usage"] = result.get("usage", {})
+                    # Don't include usage/token data in extraction responses for end users
+                    # normalized_result["usage"] = result.get("usage", {})
                 return normalized_result
                 
             except json.JSONDecodeError as e:
@@ -1033,8 +1035,8 @@ class LLMClient:
                         normalized_result = self._normalize_result_structure(parsed_result, task)
                         if isinstance(normalized_result, dict):
                             normalized_result["_parsed"] = parsed_result
-                            # Include usage information for token tracking
-                            normalized_result["usage"] = result.get("usage", {})
+                            # Don't include usage/token data in extraction responses
+                            # normalized_result["usage"] = result.get("usage", {})
                         return normalized_result
                     except json.JSONDecodeError as e2:
                         logger.error(f"❌ Failed to parse extracted JSON: {e2}")
@@ -1055,7 +1057,8 @@ class LLMClient:
                     normalized_result = self._normalize_result_structure(parsed_result, task)
                     if isinstance(normalized_result, dict):
                         normalized_result["_parsed"] = parsed_result
-                        normalized_result["usage"] = result.get("usage", {})
+                        # Don't include usage/token data
+                        # normalized_result["usage"] = result.get("usage", {})
                         normalized_result["_repaired"] = True  # Flag that JSON was repaired
                     return normalized_result
                 except json.JSONDecodeError as e3:

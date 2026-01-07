@@ -1,8 +1,18 @@
 import fitz  # PyMuPDF
 import base64
 import io
-import cv2
-import numpy as np
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+    cv2 = None
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
 import asyncio
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
@@ -679,8 +689,14 @@ class PDFProcessor:
         """
         Apply grayscale conversion and adaptive thresholding for better text clarity
         Optimized for speed while maintaining quality - keeps grayscale output
+        Falls back to simple grayscale if OpenCV/numpy not available
         """
         try:
+            # If OpenCV/numpy not available, fall back to simple grayscale conversion
+            if not CV2_AVAILABLE or not NUMPY_AVAILABLE:
+                logger.debug("OpenCV/numpy not available, using PIL grayscale conversion")
+                return image.convert('L')
+            
             # Convert PIL Image to OpenCV format
             img_array = np.array(image)
 

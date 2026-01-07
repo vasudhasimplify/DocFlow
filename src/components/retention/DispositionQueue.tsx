@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Trash2, Archive, Eye, CheckCircle, XCircle, Clock,
   AlertTriangle, FileText, Search, Filter, Send
@@ -29,6 +29,8 @@ import { useRetentionPolicies } from '@/hooks/useRetentionPolicies';
 import { DISPOSITION_ACTIONS } from '@/types/retention';
 import type { DispositionAction } from '@/types/retention';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 
 export const DispositionQueue: React.FC = () => {
   const { documentStatuses, policies, disposeDocument, grantException } = useRetentionPolicies();
@@ -38,16 +40,51 @@ export const DispositionQueue: React.FC = () => {
   const [bulkActionDialog, setBulkActionDialog] = useState(false);
   const [bulkAction, setBulkAction] = useState<DispositionAction>('archive');
   const [bulkReason, setBulkReason] = useState('');
+  const [documentsMap, setDocumentsMap] = useState<Map<string, { file_name: string }>>(new Map());
+  const { toast } = useToast();
 
-  // Get documents pending review or approval
-  const pendingDocs = documentStatuses.filter(doc => 
-    doc.current_status === 'pending_review' || 
-    doc.current_status === 'pending_approval' ||
-    (doc.current_status === 'active' && new Date(doc.retention_end_date) <= new Date())
-  );
+  // Fetch document names
+  useEffect(() => {
+    const fetchDocumentNames = async () => {
+      const docIds = documentStatuses.map(d => d.document_id);
+      if (docIds.length === 0) return;
+
+      const { data, error } = await supabase
+        .from('documents')
+        .select('id, file_name')
+        .in('id', docIds);
+
+      if (error) {
+        console.error('Error fetching document names:', error);
+        return;
+      }
+
+      if (data) {
+        const map = new Map(data.map(doc => [doc.id, { file_name: doc.file_name }]));
+        setDocumentsMap(map);
+      }
+    };
+
+    fetchDocumentNames();
+  }, [documentStatuses]);
+
+  // Get documents pending review or approval (exclude terminal states)
+  const pendingDocs = documentStatuses.filter(doc => {
+    // Exclude documents that are already disposed or archived
+    if (doc.current_status === 'disposed' || doc.current_status === 'archived') {
+      return false;
+    }
+    return doc.current_status === 'pending_review' || 
+           doc.current_status === 'pending_approval' ||
+           (doc.current_status === 'active' && new Date(doc.retention_end_date) <= new Date());
+  });
 
   const filteredDocs = pendingDocs.filter(doc => {
-    const matchesSearch = doc.document_id.toLowerCase().includes(searchQuery.toLowerCase());
+    const documentName = documentsMap.get(doc.document_id)?.file_name || '';
+    const matchesSearch = searchQuery === '' ||
+      doc.document_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      documentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      doc.disposition_notes?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesAction = actionFilter === 'all' || doc.disposition_action === actionFilter;
     return matchesSearch && matchesAction;
   });
@@ -69,12 +106,63 @@ export const DispositionQueue: React.FC = () => {
   };
 
   const handleBulkAction = async () => {
-    for (const docId of selectedDocs) {
-      await disposeDocument(docId, bulkAction, bulkReason);
+    try {
+      for (const docId of selectedDocs) {
+        await disposeDocument(docId, bulkAction, bulkReason);
+      }
+      toast({
+        title: "Success",
+        description: `${selectedDocs.length} document(s) ${bulkAction === 'archive' ? 'archived' : 'disposed'} successfully`,
+      });
+      setSelectedDocs([]);
+      setBulkActionDialog(false);
+      setBulkReason('');
+      // Refresh the page to show updated data
+      window.location.reload();
+    } catch (error) {
+      console.error('Error in bulk action:', error);
+      toast({
+        title: "Error",
+        description: `Failed to ${bulkAction} documents`,
+        variant: "destructive",
+      });
     }
-    setSelectedDocs([]);
-    setBulkActionDialog(false);
-    setBulkReason('');
+  };
+
+  const handleSingleDispose = async (docId: string, action: DispositionAction) => {
+    try {
+      await disposeDocument(docId, action);
+      toast({
+        title: "Success",
+        description: `Document ${action === 'archive' ? 'archived' : 'disposed'} successfully`,
+      });
+      window.location.reload();
+    } catch (error) {
+      console.error('Error disposing document:', error);
+      toast({
+        title: "Error",
+        description: `Failed to ${action} document`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleExtend = async (docId: string) => {
+    try {
+      await grantException(docId, 'Extended for review', 30);
+      toast({
+        title: "Success",
+        description: "Retention period extended by 30 days",
+      });
+      window.location.reload();
+    } catch (error) {
+      console.error('Error extending retention:', error);
+      toast({
+        title: "Error",
+        description: "Failed to extend retention period",
+        variant: "destructive",
+      });
+    }
   };
 
   const getActionIcon = (action: string) => {
@@ -152,7 +240,7 @@ export const DispositionQueue: React.FC = () => {
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search documents..."
+            placeholder="Search by document name"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -242,7 +330,7 @@ export const DispositionQueue: React.FC = () => {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium">
-                          Document {doc.document_id.slice(0, 12)}...
+                          {documentsMap.get(doc.document_id)?.file_name || `Document ${doc.document_id.slice(0, 12)}...`}
                         </span>
                         <Badge variant={isExpired ? "destructive" : "secondary"}>
                           {isExpired ? 'Expired' : doc.current_status.replace('_', ' ')}
@@ -265,7 +353,7 @@ export const DispositionQueue: React.FC = () => {
                       <Button 
                         size="sm" 
                         variant="outline"
-                        onClick={() => grantException(doc.document_id, 'Extended for review', 30)}
+                        onClick={() => handleExtend(doc.document_id)}
                       >
                         <Clock className="h-4 w-4 mr-2" />
                         Extend 30d
@@ -273,7 +361,7 @@ export const DispositionQueue: React.FC = () => {
                       <Button 
                         size="sm" 
                         variant="outline"
-                        onClick={() => disposeDocument(doc.document_id, 'archive')}
+                        onClick={() => handleSingleDispose(doc.document_id, 'archive')}
                       >
                         <Archive className="h-4 w-4 mr-2" />
                         Archive
@@ -281,7 +369,7 @@ export const DispositionQueue: React.FC = () => {
                       <Button 
                         size="sm" 
                         variant="destructive"
-                        onClick={() => disposeDocument(doc.document_id, 'delete')}
+                        onClick={() => handleSingleDispose(doc.document_id, 'delete')}
                       >
                         <Trash2 className="h-4 w-4 mr-2" />
                         Dispose

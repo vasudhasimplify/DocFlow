@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { 
   Shield, Clock, Archive, Trash2, Eye, Send, 
-  AlertTriangle, CheckCircle, Plus
+  AlertTriangle, CheckCircle, Plus, CalendarIcon, Pencil
 } from 'lucide-react';
+import { EditTemplateDialog } from './EditTemplateDialog';
+import { format } from 'date-fns';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +28,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Calendar } from '@/components/ui/calendar';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { useRetentionPolicies } from '@/hooks/useRetentionPolicies';
 import { 
   COMPLIANCE_FRAMEWORKS, 
@@ -42,15 +50,18 @@ interface CreatePolicyDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   templates: RetentionPolicyTemplate[];
+  initialData?: RetentionPolicy | null;
 }
 
 export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
   open,
   onOpenChange,
   templates,
+  initialData,
 }) => {
-  const { createPolicy, createFromTemplate } = useRetentionPolicies();
+  const { createPolicy, createFromTemplate, updatePolicy } = useRetentionPolicies();
   const [activeTab, setActiveTab] = useState<'template' | 'custom'>('template');
+  const [editingTemplate, setEditingTemplate] = useState<RetentionPolicyTemplate | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -66,6 +77,38 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
   const [notificationDays, setNotificationDays] = useState(30);
   const [categories, setCategories] = useState<string[]>([]);
   const [newCategory, setNewCategory] = useState('');
+  const [customStartDate, setCustomStartDate] = useState<Date | undefined>(undefined);
+
+  const isEditing = !!initialData?.id;
+
+  // Populate form when editing
+  React.useEffect(() => {
+    if (initialData) {
+      setName(initialData.name || '');
+      setDescription(initialData.description || '');
+      setDispositionAction(initialData.disposition_action);
+      setTriggerType(initialData.trigger_type);
+      setComplianceFramework(initialData.compliance_framework || '');
+      setRequiresApproval(initialData.requires_approval || false);
+      setNotificationDays(initialData.notification_days_before || 30);
+      setCategories(initialData.applies_to_categories || []);
+      
+      // Convert retention days to appropriate unit
+      const days = initialData.retention_period_days;
+      if (days >= 365 && days % 365 === 0) {
+        setRetentionUnit('years');
+        setRetentionDays(days / 365);
+      } else if (days >= 30 && days % 30 === 0) {
+        setRetentionUnit('months');
+        setRetentionDays(days / 30);
+      } else {
+        setRetentionUnit('days');
+        setRetentionDays(days);
+      }
+      
+      setActiveTab('custom');
+    }
+  }, [initialData]);
 
   const getRetentionInDays = () => {
     switch (retentionUnit) {
@@ -78,7 +121,20 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
-      if (activeTab === 'template' && selectedTemplate) {
+      if (isEditing && initialData?.id) {
+        // Update existing policy
+        await updatePolicy(initialData.id, {
+          name,
+          description,
+          retention_period_days: getRetentionInDays(),
+          disposition_action: dispositionAction,
+          trigger_type: triggerType,
+          applies_to_categories: categories,
+          compliance_framework: complianceFramework || undefined,
+          notification_days_before: notificationDays,
+          requires_approval: requiresApproval,
+        });
+      } else if (activeTab === 'template' && selectedTemplate) {
         await createFromTemplate(selectedTemplate, {
           name: name || undefined,
           description: description || undefined,
@@ -104,7 +160,7 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
       onOpenChange(false);
       resetForm();
     } catch (error) {
-      console.error('Failed to create policy:', error);
+      console.error('Failed to save policy:', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -122,6 +178,7 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
     setNotificationDays(30);
     setCategories([]);
     setSelectedTemplate(null);
+    setCustomStartDate(undefined);
   };
 
   const addCategory = () => {
@@ -147,7 +204,7 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5" />
-            Create Retention Policy
+            {isEditing ? 'Edit Retention Policy' : 'Create Retention Policy'}
           </DialogTitle>
           <DialogDescription>
             Define how long documents should be retained and what happens after
@@ -202,9 +259,22 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
                             <span className="capitalize">{template.disposition_action}</span>
                           </div>
                         </div>
-                        {selectedTemplate === template.id && (
-                          <CheckCircle className="h-5 w-5 text-primary shrink-0" />
-                        )}
+                        <div className="flex flex-col gap-1">
+                          {selectedTemplate === template.id && (
+                            <CheckCircle className="h-5 w-5 text-primary shrink-0" />
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingTemplate(template);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -236,166 +306,264 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
               )}
             </TabsContent>
 
-            <TabsContent value="custom" className="mt-0 space-y-4">
-              {/* Basic Info */}
+            <TabsContent value="custom" className="mt-0 space-y-6 px-1">
+              {/* Basic Info Section */}
               <div className="space-y-4">
-                <div>
-                  <Label>Policy Name *</Label>
-                  <Input
-                    placeholder="e.g., Financial Records - 7 Years"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <Label>Description</Label>
-                  <Textarea
-                    placeholder="Describe when this policy should be applied..."
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={2}
-                  />
-                </div>
-
-                <div>
-                  <Label>Compliance Framework</Label>
-                  <Select value={complianceFramework} onValueChange={(v) => setComplianceFramework(v as ComplianceFramework)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select framework (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {COMPLIANCE_FRAMEWORKS.map((fw) => (
-                        <SelectItem key={fw.value} value={fw.value}>
-                          <div>
-                            <span className="font-medium">{fw.label}</span>
-                            <span className="text-xs text-muted-foreground ml-2">{fw.description}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Retention Period */}
-              <div className="p-4 border rounded-lg">
-                <Label className="flex items-center gap-2 mb-3">
-                  <Clock className="h-4 w-4" />
-                  Retention Period
-                </Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min={1}
-                    value={retentionDays}
-                    onChange={(e) => setRetentionDays(parseInt(e.target.value) || 1)}
-                    className="w-24"
-                  />
-                  <Select value={retentionUnit} onValueChange={(v) => setRetentionUnit(v as typeof retentionUnit)}>
-                    <SelectTrigger className="w-32">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="days">Days</SelectItem>
-                      <SelectItem value="months">Months</SelectItem>
-                      <SelectItem value="years">Years</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <span className="text-sm text-muted-foreground">
-                    ({getRetentionInDays()} days total)
-                  </span>
-                </div>
-              </div>
-
-              {/* Trigger & Disposition */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Retention Starts From</Label>
-                  <Select value={triggerType} onValueChange={(v) => setTriggerType(v as TriggerType)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TRIGGER_TYPES.map((trigger) => (
-                        <SelectItem key={trigger.value} value={trigger.value}>
-                          {trigger.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label>Disposition Action</Label>
-                  <Select value={dispositionAction} onValueChange={(v) => setDispositionAction(v as DispositionAction)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {DISPOSITION_ACTIONS.map((action) => (
-                        <SelectItem key={action.value} value={action.value}>
-                          {action.label} - {action.description}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Categories */}
-              <div>
-                <Label>Apply to Categories</Label>
-                <div className="flex gap-2 mt-1">
-                  <Input
-                    placeholder="Add category..."
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCategory())}
-                  />
-                  <Button type="button" variant="outline" onClick={addCategory}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-                {categories.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {categories.map((cat) => (
-                      <Badge 
-                        key={cat} 
-                        variant="secondary"
-                        className="cursor-pointer"
-                        onClick={() => setCategories(categories.filter(c => c !== cat))}
-                      >
-                        {cat} ×
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Settings */}
-              <div className="space-y-4 p-4 border rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Require Approval</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Disposition requires approval before execution
-                    </p>
-                  </div>
-                  <Switch checked={requiresApproval} onCheckedChange={setRequiresApproval} />
-                </div>
-
-                <div>
-                  <Label>Notification Before Expiry</Label>
-                  <div className="flex items-center gap-2 mt-1">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  Basic Information
+                </h3>
+                
+                <div className="grid gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="policyName">Policy Name *</Label>
                     <Input
-                      type="number"
-                      min={0}
-                      value={notificationDays}
-                      onChange={(e) => setNotificationDays(parseInt(e.target.value) || 0)}
-                      className="w-24"
+                      id="policyName"
+                      placeholder="e.g., Financial Records - 7 Years"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
                     />
-                    <span className="text-sm text-muted-foreground">days before</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="policyDesc">Description</Label>
+                    <Textarea
+                      id="policyDesc"
+                      placeholder="Describe when this policy should be applied..."
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      rows={2}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Compliance Framework</Label>
+                    <Select value={complianceFramework} onValueChange={(v) => setComplianceFramework(v as ComplianceFramework)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select framework (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {COMPLIANCE_FRAMEWORKS.map((fw) => (
+                          <SelectItem key={fw.value} value={fw.value}>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{fw.label}</span>
+                              <span className="text-xs text-muted-foreground">{fw.description}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Retention Period Section */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  Retention Period
+                </h3>
+                
+                <div className="p-4 border rounded-lg bg-muted/20 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-primary shrink-0" />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm">Retain for</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={retentionDays}
+                        onChange={(e) => setRetentionDays(parseInt(e.target.value) || 1)}
+                        className="w-20 h-8"
+                      />
+                      <Select value={retentionUnit} onValueChange={(v) => setRetentionUnit(v as typeof retentionUnit)}>
+                        <SelectTrigger className="w-28 h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="days">Days</SelectItem>
+                          <SelectItem value="months">Months</SelectItem>
+                          <SelectItem value="years">Years</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="text-sm text-muted-foreground">
+                        = {getRetentionInDays().toLocaleString()} days
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Trigger & Disposition Section */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  Trigger & Action
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Retention Starts From</Label>
+                    <Select value={triggerType} onValueChange={(v) => setTriggerType(v as TriggerType)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TRIGGER_TYPES.map((trigger) => (
+                          <SelectItem key={trigger.value} value={trigger.value}>
+                            <div className="flex flex-col">
+                              <span>{trigger.label}</span>
+                              <span className="text-xs text-muted-foreground">{trigger.description}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    
+                    {/* Custom Date Picker - shown when custom_date is selected */}
+                    {triggerType === 'custom_date' && (
+                      <div className="mt-3 p-3 border rounded-lg bg-muted/30">
+                        <Label className="text-xs text-muted-foreground mb-2 block">
+                          Select Custom Start Date
+                        </Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "w-full justify-start text-left font-normal",
+                                !customStartDate && "text-muted-foreground"
+                              )}
+                            >
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {customStartDate ? format(customStartDate, "PPP") : "Pick a date"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={customStartDate}
+                              onSelect={setCustomStartDate}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>When Expired</Label>
+                    <Select value={dispositionAction} onValueChange={(v) => setDispositionAction(v as DispositionAction)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DISPOSITION_ACTIONS.map((action) => (
+                          <SelectItem key={action.value} value={action.value}>
+                            <div className="flex flex-col">
+                              <span>{action.label}</span>
+                              <span className="text-xs text-muted-foreground">{action.description}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Categories Section */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  Apply To Categories
+                  <span className="ml-2 text-xs font-normal normal-case">(optional)</span>
+                </h3>
+                
+                <div className="p-4 border rounded-lg bg-muted/20">
+                  <p className="text-xs text-muted-foreground mb-3">
+                    This policy will automatically apply to documents tagged with these categories.
+                    Leave empty to apply manually to individual documents.
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Type a category and press Enter..."
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCategory())}
+                      className="flex-1"
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={addCategory}>
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {categories.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {categories.map((cat) => (
+                        <Badge 
+                          key={cat} 
+                          variant="secondary"
+                          className="cursor-pointer hover:bg-destructive/20 transition-colors"
+                          onClick={() => setCategories(categories.filter(c => c !== cat))}
+                        >
+                          {cat} ×
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Advanced Settings Section */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  Advanced Settings
+                </h3>
+                
+                <div className="p-4 border rounded-lg bg-muted/20 space-y-4">
+                  <div className={cn(
+                    "flex items-center justify-between p-3 rounded-lg border-2 transition-colors",
+                    requiresApproval 
+                      ? "bg-primary/10 border-primary/30" 
+                      : "bg-muted/30 border-muted"
+                  )}>
+                    <div className="space-y-1 flex-1">
+                      <Label className="font-medium flex items-center gap-2">
+                        Require Approval
+                        <Badge 
+                          variant={requiresApproval ? "default" : "secondary"}
+                          className="text-[10px] px-1.5 py-0"
+                        >
+                          {requiresApproval ? "ON" : "OFF"}
+                        </Badge>
+                      </Label>
+                      <p className={cn(
+                        "text-xs",
+                        requiresApproval ? "text-primary font-medium" : "text-muted-foreground"
+                      )}>
+                        {requiresApproval 
+                          ? "✓ Disposition will require manual approval before execution"
+                          : "⚠ Disposition will execute automatically when retention expires"
+                        }
+                      </p>
+                    </div>
+                    <Switch 
+                      checked={requiresApproval} 
+                      onCheckedChange={setRequiresApproval}
+                      className="data-[state=checked]:bg-primary"
+                    />
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <Label className="font-medium">Notification Before Expiry</Label>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="text-sm text-muted-foreground">Send alert</span>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={notificationDays}
+                        onChange={(e) => setNotificationDays(parseInt(e.target.value) || 0)}
+                        className="w-20 h-8"
+                      />
+                      <span className="text-sm text-muted-foreground">days before expiry</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -412,10 +580,20 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
             disabled={isSubmitting || (activeTab === 'template' ? !selectedTemplate : !name)}
           >
             <Shield className="h-4 w-4 mr-2" />
-            Create Policy
+            {isEditing ? 'Update Policy' : 'Create Policy'}
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* Edit Template Dialog */}
+      <EditTemplateDialog
+        open={!!editingTemplate}
+        onOpenChange={(open) => !open && setEditingTemplate(null)}
+        template={editingTemplate}
+        onSuccess={() => {
+          // Template updated - parent will refresh
+        }}
+      />
     </Dialog>
   );
 };

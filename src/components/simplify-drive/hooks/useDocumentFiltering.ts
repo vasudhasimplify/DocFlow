@@ -21,6 +21,17 @@ export function useDocumentFiltering({
   const filteredDocuments = useMemo(() => {
     console.log('🔍 useDocumentFiltering: Input documents:', documents.length, 'selectedFolder:', selectedFolder);
     
+    // Check if search query has legal hold filter with document IDs
+    const legalHoldMatch = searchQuery.match(/legal_hold:(\S+):(\S+)/);
+    let legalHoldDocumentIds: string[] = [];
+    let cleanSearchQuery = searchQuery;
+    
+    if (legalHoldMatch) {
+      const [, , documentIdsStr] = legalHoldMatch;
+      legalHoldDocumentIds = documentIdsStr.split(',');
+      cleanSearchQuery = searchQuery.replace(/legal_hold:\S+:\S+/, '').trim();
+    }
+    
     let filtered = documents.filter(doc => {
       const searchLower = searchQuery.toLowerCase();
       
@@ -96,6 +107,17 @@ export function useDocumentFiltering({
         doc.tags?.some(tag => tag.name.toLowerCase().includes(searchLower)) ||
         // Search in document type
         doc.file_type?.toLowerCase().includes(searchLower);
+      // Legal hold filter - filter by document IDs
+      if (legalHoldDocumentIds.length > 0) {
+        if (!legalHoldDocumentIds.includes(doc.id)) {
+          return false;
+        }
+      }
+
+      const matchesSearch = cleanSearchQuery === '' || 
+        doc.file_name.toLowerCase().includes(cleanSearchQuery.toLowerCase()) ||
+        doc.extracted_text?.toLowerCase().includes(cleanSearchQuery.toLowerCase()) ||
+        doc.insights?.summary?.toLowerCase().includes(cleanSearchQuery.toLowerCase());
 
       // Debug: Log search results for non-empty queries
       if (searchQuery && searchQuery.length > 2) {
