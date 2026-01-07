@@ -214,15 +214,6 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
           supabase.from('document_folder_relationships').select('document_id').eq('folder_id', selectedFolder)
         ]);
 
-        // Get document IDs from both document_shortcuts AND document_folder_relationships
-        const documentIdSet = new Set<string>();
-
-        // Check document_shortcuts (manual assignments)
-        const { data: shortcuts, error: shortcutsError } = await supabase
-          .from('document_shortcuts')
-          .select('document_id')
-          .eq('folder_id', selectedFolder);
-
         if (shortcutsResult.error) {
           console.error('Error fetching folder shortcuts:', shortcutsResult.error);
         }
@@ -234,23 +225,6 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         const documentIdSet = new Set<string>();
         shortcutsResult.data?.forEach(s => documentIdSet.add(s.document_id));
         relationshipsResult.data?.forEach(r => documentIdSet.add(r.document_id));
-        if (shortcutsError) {
-          console.error('Error fetching folder shortcuts:', shortcutsError);
-        } else {
-          shortcuts?.forEach(s => documentIdSet.add(s.document_id));
-        }
-
-        // Check document_folder_relationships (AI-assigned)
-        const { data: relationships, error: relError } = await supabase
-          .from('document_folder_relationships')
-          .select('document_id')
-          .eq('folder_id', selectedFolder);
-
-        if (relError) {
-          console.error('Error fetching folder relationships:', relError);
-        } else {
-          relationships?.forEach(r => documentIdSet.add(r.document_id));
-        }
 
         const documentIds = Array.from(documentIdSet);
         console.log('📁 Document IDs in folder:', documentIds.length);
@@ -313,221 +287,144 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
             `)
             .in('document_id', documentIds);
 
-          if (documentIds.length > 0) {
-            const { data: shortcuts } = await supabase
-              .from('document_shortcuts')
-              .select(`
-            document_id,
-            folder_id,
-            smart_folders (
-              id,
-              name,
-              color,
-              icon,
-              document_count
-            )
-          `)
-              .in('document_id', documentIds);
-
-            // Group folders by document ID
-            shortcuts?.forEach((shortcut: any) => {
-              if (!foldersByDocument[shortcut.document_id]) {
-                foldersByDocument[shortcut.document_id] = [];
-              }
-              if (shortcut.smart_folders) {
-                foldersByDocument[shortcut.document_id].push(shortcut.smart_folders);
-              }
-            });
-          }
-        }
-
-        // Fetch restriction counts for all documents
-        let restrictionCounts: { [key: string]: number } = {};
-        if (documentIds.length > 0) {
-          const { data: applications } = await supabase
-            .from('content_rule_applications')
-            .select('document_id')
-            .in('document_id', documentIds);
-
-          applications?.forEach((app: any) => {
-            restrictionCounts[app.document_id] = (restrictionCounts[app.document_id] || 0) + 1;
+          // Group folders by document ID
+          shortcuts?.forEach((shortcut: any) => {
+            if (!foldersByDocument[shortcut.document_id]) {
+              foldersByDocument[shortcut.document_id] = [];
+            }
+            if (shortcut.smart_folders) {
+              foldersByDocument[shortcut.document_id].push(shortcut.smart_folders);
+            }
           });
         }
+      }
 
-        // OPTIMIZATION: Only generate signed URLs for documents without original_url
-        // Filter out documents with invalid or missing storage paths, and skip already-failed paths
-        const docsNeedingUrls = (documentsData || []).filter((doc: any) => {
-          if (!doc.storage_path || doc.original_url) return false;
-          const path = doc.storage_path.trim();
-          // Skip empty paths, paths that look like full URLs, and paths that already failed
-          if (path.length === 0 || path.startsWith('http') || failedStoragePathsCache.has(path)) {
-            return false;
-          }
-          return true;
+      // Fetch restriction counts for all documents
+      const documentIds = documentsData?.map((doc: any) => doc.id) || [];
+      let restrictionCounts: { [key: string]: number } = {};
+      if (documentIds.length > 0) {
+        const { data: applications } = await supabase
+          .from('content_rule_applications')
+          .select('document_id')
+          .in('document_id', documentIds);
+
+        applications?.forEach((app: any) => {
+          restrictionCounts[app.document_id] = (restrictionCounts[app.document_id] || 0) + 1;
         });
-        const urlMap: { [key: string]: string } = {};
+      }
 
-        if (docsNeedingUrls.length > 0) {
-          // Batch URL generation (limit to 10 at a time to avoid rate limits)
-          const batchSize = 10;
-          for (let i = 0; i < docsNeedingUrls.length; i += batchSize) {
-            const batch = docsNeedingUrls.slice(i, i + batchSize);
-            await Promise.all(
-              batch.map(async (doc: any) => {
-                try {
-                  const { data, error } = await supabase.storage
-                    .from('documents')
-                    .createSignedUrl(doc.storage_path, 3600);
-
-                  if (!error && data?.signedUrl) {
-                    urlMap[doc.id] = data.signedUrl;
-                  } else if (error) {
-                    // Cache this path as failed to avoid repeated 400 errors
-                    failedStoragePathsCache.add(doc.storage_path);
-                    // Silently log instead of letting Supabase spam console
-                    console.debug('⚠️ Storage path not found (cached):', doc.storage_path);
-                  }
-                } catch (err) {
-                  // Cache failed paths and suppress errors to avoid console spam
-                  failedStoragePathsCache.add(doc.storage_path);
-                  console.debug('⚠️ Failed to create signed URL (cached):', doc.storage_path);
-                }
-              })
-            );
-          }
+      // OPTIMIZATION: Only generate signed URLs for documents without original_url
+      // Filter out documents with invalid or missing storage paths, and skip already-failed paths
+      const docsNeedingUrls = (documentsData || []).filter((doc: any) => {
+        if (!doc.storage_path || doc.original_url) return false;
+        const path = doc.storage_path.trim();
+        // Skip empty paths, paths that look like full URLs, and paths that already failed
+        if (path.length === 0 || path.startsWith('http') || failedStoragePathsCache.has(path)) {
+          return false;
         }
+        return true;
+      });
+      const urlMap: { [key: string]: string } = {};
 
-        const documentsWithUrls = (documentsData || []).map((doc: any) => ({
-          ...doc,
-          storageUrl: doc.original_url || urlMap[doc.id] || undefined
-        }));
-        // Generate signed URLs for documents with storage_path
-        const documentsWithUrls = await Promise.all(
-          (documentsData || []).map(async (doc: any) => {
-            let storageUrl = doc.original_url || undefined;
-
-            // Generate signed URL from storage_path for offline downloads (valid for 1 hour)
-            if (!storageUrl && doc.storage_path) {
+      if (docsNeedingUrls.length > 0) {
+        // Batch URL generation (limit to 10 at a time to avoid rate limits)
+        const batchSize = 10;
+        for (let i = 0; i < docsNeedingUrls.length; i += batchSize) {
+          const batch = docsNeedingUrls.slice(i, i + batchSize);
+          await Promise.all(
+            batch.map(async (doc: any) => {
               try {
                 const { data, error } = await supabase.storage
                   .from('documents')
-                  .createSignedUrl(doc.storage_path, 3600); // 1 hour expiry
+                  .createSignedUrl(doc.storage_path, 3600);
 
                 if (!error && data?.signedUrl) {
-                  storageUrl = data.signedUrl;
+                  urlMap[doc.id] = data.signedUrl;
+                } else if (error) {
+                  // Cache this path as failed to avoid repeated 400 errors
+                  failedStoragePathsCache.add(doc.storage_path);
+                  // Silently log instead of letting Supabase spam console
+                  console.debug('⚠️ Storage path not found (cached):', doc.storage_path);
                 }
               } catch (err) {
-                console.warn('Failed to generate signed URL for:', doc.storage_path);
+                // Cache failed paths and suppress errors to avoid console spam
+                failedStoragePathsCache.add(doc.storage_path);
+                console.debug('⚠️ Failed to create signed URL (cached):', doc.storage_path);
               }
+            })
+          );
+        }
+      }
+
+      const documentsWithUrls = (documentsData || []).map((doc: any) => ({
+        ...doc,
+        storageUrl: doc.original_url || urlMap[doc.id] || undefined
+      }));
+
+      const processedDocuments: Document[] = documentsWithUrls.map((doc: any) => {
+        const displayName = doc.file_name || doc.original_name || doc.name || doc.file_path?.split('/').pop() || 'Unknown';
+
+        // OPTIMIZATION: We no longer fetch extracted_text & analysis_result in list view
+        // They will be fetched on-demand when opening a document
+
+        // Transform analysis_result from database to insights format
+        const analysisResult = doc.analysis_result;
+        const insights = analysisResult && Object.keys(analysisResult).length > 0 ? {
+          summary: analysisResult.summary || '',
+          key_topics: analysisResult.key_topics || [],
+          importance_score: analysisResult.importance_score || 0,
+          estimated_reading_time: analysisResult.estimated_reading_time || 0,
+          ai_generated_title: analysisResult.ai_generated_title || displayName,
+          suggested_actions: analysisResult.suggested_actions || []
+        } : undefined;
+
+        return {
+          id: doc.id,
+          file_name: displayName,
+          file_type: doc.document_type || doc.mime_type || 'unknown',
+          file_size: doc.file_size || 0,
+          created_at: doc.created_at,
+          updated_at: doc.updated_at,
+          extracted_text: '', // Loaded on-demand
+          processing_status: doc.processing_status || 'pending',
+          metadata: doc.metadata || {},
+          analysis_result: {}, // Loaded on-demand
+          storage_url: doc.storageUrl,
+          storage_path: doc.storage_path,
+          insights: undefined, // Loaded on-demand
+          tags: [],
+          folders: foldersByDocument[doc.id] || [],
+          has_restrictions: (restrictionCounts[doc.id] || 0) > 0,
+          restriction_count: restrictionCounts[doc.id] || 0
+        };
+      });
+
+      console.log('📊 useDocuments: Processed documents count:', processedDocuments.length);
+      console.log('📊 useDocuments: Sample document:', processedDocuments[0]);
+
+      // Set documents immediately without waiting for IndexedDB
+      setDocuments(processedDocuments);
+
+      // OPTIMIZATION: Only check IndexedDB in background (async, non-blocking)
+      getAllOfflineDocuments()
+        .then(async offlineDocs => {
+          let pendingUploads = offlineDocs.filter(d => d.metadata?.is_pending_upload);
+
+          // Auto-clear stuck pending uploads older than 1 hour
+          if (pendingUploads.length > 0) {
+            const { clearOldPendingUploads } = await import('@/services/offlineStorage');
+            const cleared = await clearOldPendingUploads(60 * 60 * 1000); // 1 hour
+            if (cleared > 0) {
+              // Re-fetch to get updated list
+              const { getAllOfflineDocuments: refetch } = await import('@/services/offlineStorage');
+              const updatedDocs = await refetch();
+              pendingUploads = updatedDocs.filter(d => d.metadata?.is_pending_upload);
             }
-
-            return { ...doc, storageUrl };
-          })
-        );
-
-        const processedDocuments: Document[] = documentsWithUrls.map((doc: any) => {
-          const displayName = doc.file_name || doc.original_name || doc.name || doc.file_path?.split('/').pop() || 'Unknown';
-
-          // OPTIMIZATION: We no longer fetch extracted_text & analysis_result in list view
-          // They will be fetched on-demand when opening a document
-
-          // Transform analysis_result from database to insights format
-          const analysisResult = doc.analysis_result;
-          const insights = analysisResult && Object.keys(analysisResult).length > 0 ? {
-            summary: analysisResult.summary || '',
-            key_topics: analysisResult.key_topics || [],
-            importance_score: analysisResult.importance_score || 0,
-            estimated_reading_time: analysisResult.estimated_reading_time || 0,
-            ai_generated_title: analysisResult.ai_generated_title || displayName,
-            suggested_actions: analysisResult.suggested_actions || []
-          } : undefined;
-
-          return {
-            id: doc.id,
-            file_name: displayName,
-            file_type: doc.document_type || doc.mime_type || 'unknown',
-            file_size: doc.file_size || 0,
-            created_at: doc.created_at,
-            updated_at: doc.updated_at,
-            extracted_text: '', // Loaded on-demand
-            processing_status: doc.processing_status || 'pending',
-            metadata: doc.metadata || {},
-            analysis_result: {}, // Loaded on-demand
-            storage_url: doc.storageUrl,
-            storage_path: doc.storage_path,
-            insights: undefined, // Loaded on-demand
-            tags: [],
-            folders: foldersByDocument[doc.id] || [],
-            has_restrictions: (restrictionCounts[doc.id] || 0) > 0,
-            restriction_count: restrictionCounts[doc.id] || 0
-          };
-        });
-
-        console.log('📊 useDocuments: Processed documents count:', processedDocuments.length);
-        console.log('📊 useDocuments: Sample document:', processedDocuments[0]);
-
-        // Set documents immediately without waiting for IndexedDB
-        setDocuments(processedDocuments);
-
-        // OPTIMIZATION: Only check IndexedDB in background (async, non-blocking)
-        getAllOfflineDocuments()
-          .then(async offlineDocs => {
-            let pendingUploads = offlineDocs.filter(d => d.metadata?.is_pending_upload);
-
-            // Auto-clear stuck pending uploads older than 1 hour
-            if (pendingUploads.length > 0) {
-              const { clearOldPendingUploads } = await import('@/services/offlineStorage');
-              const cleared = await clearOldPendingUploads(60 * 60 * 1000); // 1 hour
-              if (cleared > 0) {
-                // Re-fetch to get updated list
-                const { getAllOfflineDocuments: refetch } = await import('@/services/offlineStorage');
-                const updatedDocs = await refetch();
-                pendingUploads = updatedDocs.filter(d => d.metadata?.is_pending_upload);
-              }
-            }
-
-            if (pendingUploads.length > 0) {
-              console.log('📤 Found', pendingUploads.length, 'pending uploads in IndexedDB');
-
-              const pendingDocuments: Document[] = pendingUploads.map((doc) => ({
-                id: doc.id,
-                file_name: doc.file_name,
-                file_type: doc.file_type,
-                file_size: doc.file_size,
-                created_at: doc.created_at,
-                updated_at: doc.updated_at,
-                extracted_text: doc.extracted_text || '',
-                processing_status: 'pending',
-                metadata: {
-                  ...doc.metadata,
-                  is_pending_upload: true,
-                },
-                storage_url: doc.storage_url,
-                storage_path: undefined,
-                insights: undefined,
-                tags: [],
-                folders: []
-              }));
-
-              // Prepend pending uploads to current state (do not overwrite concurrent updates)
-              setDocuments(prev => [...pendingDocuments, ...prev]);
-            }
-          })
-          .catch(err => {
-            console.warn('Could not fetch pending uploads from IndexedDB:', err);
-          });
-
-
-        // Also fetch pending uploads from IndexedDB (even when online)
-        // so they remain visible with "Queued for Upload" badge
-        try {
-          const offlineDocs = await getAllOfflineDocuments();
-          const pendingUploads = offlineDocs.filter(doc => doc.metadata?.is_pending_upload);
+          }
 
           if (pendingUploads.length > 0) {
             console.log('📤 Found', pendingUploads.length, 'pending uploads in IndexedDB');
 
-            // Convert to Document format
             const pendingDocuments: Document[] = pendingUploads.map((doc) => ({
               id: doc.id,
               file_name: doc.file_name,
@@ -548,36 +445,34 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
               folders: []
             }));
 
-            // Merge with Supabase documents (pending uploads first)
-            setDocuments([...pendingDocuments, ...processedDocuments]);
-          } else {
-            setDocuments(processedDocuments);
+            // Prepend pending uploads to current state (do not overwrite concurrent updates)
+            setDocuments(prev => [...pendingDocuments, ...prev]);
           }
-        } catch (offlineError) {
-          console.warn('Could not fetch pending uploads from IndexedDB:', offlineError);
-          setDocuments(processedDocuments);
-        }
+        })
+        .catch(err => {
+          console.warn('Could not fetch pending uploads from IndexedDB:', err);
+        });
 
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching from server:', error);
+
+      // If fetch fails (network error), try offline mode
+      console.log('📴 Server fetch failed, trying offline fallback...');
+      try {
+        await fetchOfflineDocuments();
+      } catch (offlineError) {
+        console.error('Offline fallback also failed:', offlineError);
+        toast({
+          title: "Error",
+          description: "Failed to load documents. Check your connection.",
+          variant: "destructive",
+        });
+        setDocuments([]);
         setLoading(false);
-      } catch (error) {
-        console.error('Error fetching from server:', error);
-
-        // If fetch fails (network error), try offline mode
-        console.log('📴 Server fetch failed, trying offline fallback...');
-        try {
-          await fetchOfflineDocuments();
-        } catch (offlineError) {
-          console.error('Offline fallback also failed:', offlineError);
-          toast({
-            title: "Error",
-            description: "Failed to load documents. Check your connection.",
-            variant: "destructive",
-          });
-          setDocuments([]);
-          setLoading(false);
-        }
       }
-    }, [toast, selectedFolder, fetchOfflineDocuments]);
+    }
+  }, [toast, selectedFolder, fetchOfflineDocuments]);
 
   useEffect(() => {
     console.log('🔄 useDocuments: useEffect triggered, selectedFolder:', selectedFolder, 'isOffline:', !navigator.onLine);
