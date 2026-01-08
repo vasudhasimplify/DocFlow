@@ -17,6 +17,7 @@ router = APIRouter(prefix="/editor", tags=["Document Editor"])
 class DocumentContentRequest(BaseModel):
     storage_url: str
     file_type: str
+    file_name: Optional[str] = None  # Optional: original filename for extension-based detection
     document_id: Optional[str] = None  # Optional: if provided, extracted text will be saved
     version_id: Optional[str] = None  # Optional: if provided, saves to document_versions table
 
@@ -56,6 +57,7 @@ async def extract_document_content(request: DocumentContentRequest):
             file_bytes = response.content
 
         file_type = request.file_type.lower()
+        file_name = request.file_name or ""
         content = ""
         content_type = "html"
         extracted_text = ""
@@ -67,6 +69,16 @@ async def extract_document_content(request: DocumentContentRequest):
         elif "doc" in file_type or "word" in file_type:
             content = await extract_word_content(file_bytes)
             extracted_text = content
+        elif "presentation" in file_type or "powerpoint" in file_type or file_name.lower().endswith(('.pptx', '.ppt')):
+            # PowerPoint files
+            from app.services.office_processor import office_processor
+            extracted_text = office_processor.extract_from_powerpoint(file_bytes)
+            content = f"<p>{extracted_text.replace(chr(10)+chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"
+        elif "spreadsheet" in file_type or "excel" in file_type or file_name.lower().endswith(('.xlsx', '.xls', '.csv')):
+            # Excel/CSV files
+            from app.services.office_processor import office_processor
+            extracted_text = office_processor.extract_from_excel(file_bytes, file_name)
+            content = f"<pre>{extracted_text}</pre>"
         elif "txt" in file_type or "text" in file_type:
             extracted_text = file_bytes.decode('utf-8', errors='ignore')
             content = f"<p>{extracted_text.replace(chr(10)+chr(10), '</p><p>').replace(chr(10), '<br/>')}</p>"

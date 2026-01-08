@@ -42,7 +42,14 @@ import {
   CheckCircle2,
   Circle,
   FolderPlus,
-  CloudUpload
+  CloudUpload,
+  File,
+  FileSpreadsheet,
+  FileImage,
+  FileVideo,
+  FileAudio,
+  FileArchive,
+  FileCode
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -59,6 +66,7 @@ import { TransferOwnershipDialog } from '@/components/ownership/TransferOwnershi
 import { DocumentEditorModal } from './DocumentEditorModal';
 import { ApplyComplianceLabelDialog } from '@/components/compliance/ApplyComplianceLabelDialog';
 import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
+import { MoveToFolderDialog } from './MoveToFolderDialog';
 
 interface Document {
   id: string;
@@ -122,6 +130,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   const [showComplianceDialog, setShowComplianceDialog] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
   const [showEditorModal, setShowEditorModal] = useState(false);
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
 
   // Delete confirmation dialog states
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -230,6 +239,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         variant: "destructive"
       });
     }
+  };
+
+  const handleMoveToFolder = (document: Document) => {
+    setSelectedDocument(document);
+    setMoveDialogOpen(true);
   };
 
   const handleRestore = async (document: Document) => {
@@ -381,7 +395,63 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       });
     }
   };
-  const getFileIcon = (_fileType: string) => {
+  const getFileIcon = (fileType: string, fileName?: string) => {
+    // Combine file type and file name for better detection
+    const type = fileType?.toLowerCase() || '';
+    const name = fileName?.toLowerCase() || '';
+    const combined = `${type} ${name}`;
+    
+    // PDF
+    if (combined.includes('pdf')) {
+      return <FileText className="w-5 h-5 text-red-500" />;
+    }
+    
+    // Word documents
+    if (combined.includes('word') || combined.includes('docx') || combined.includes('.doc') || type.includes('msword') || type.includes('officedocument.wordprocessing')) {
+      return <FileText className="w-5 h-5 text-blue-600" />;
+    }
+    
+    // Excel/Spreadsheets
+    if (combined.includes('excel') || combined.includes('spreadsheet') || combined.includes('xls') || combined.includes('csv') || type.includes('officedocument.spreadsheet')) {
+      return <FileSpreadsheet className="w-5 h-5 text-green-600" />;
+    }
+    
+    // PowerPoint
+    if (combined.includes('powerpoint') || combined.includes('presentation') || combined.includes('ppt') || type.includes('officedocument.presentation')) {
+      return <FileText className="w-5 h-5 text-orange-500" />;
+    }
+    
+    // Images
+    if (type.includes('image') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.gif') || name.endsWith('.svg') || name.endsWith('.webp')) {
+      return <FileImage className="w-5 h-5 text-purple-500" />;
+    }
+    
+    // Videos
+    if (type.includes('video') || name.endsWith('.mp4') || name.endsWith('.avi') || name.endsWith('.mov') || name.endsWith('.mkv')) {
+      return <FileVideo className="w-5 h-5 text-pink-500" />;
+    }
+    
+    // Audio
+    if (type.includes('audio') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.m4a')) {
+      return <FileAudio className="w-5 h-5 text-indigo-500" />;
+    }
+    
+    // Archives
+    if (combined.includes('zip') || combined.includes('rar') || combined.includes('7z') || combined.includes('tar') || type.includes('compressed')) {
+      return <FileArchive className="w-5 h-5 text-yellow-600" />;
+    }
+    
+    // Code files
+    if (name.endsWith('.js') || name.endsWith('.ts') || name.endsWith('.json') || name.endsWith('.html') || name.endsWith('.css') || name.endsWith('.py') || type.includes('javascript') || type.includes('json')) {
+      return <FileCode className="w-5 h-5 text-cyan-600" />;
+    }
+    
+    // Text files
+    if (type.includes('text/plain') || name.endsWith('.txt')) {
+      return <File className="w-5 h-5 text-gray-500" />;
+    }
+    
+    // Default
     return <FileText className="w-5 h-5 text-blue-500" />;
   };
 
@@ -420,7 +490,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                     if (starred) {
                       unpinDocument(document.id);
                     } else {
-                      pinDocument(document);
+                      pinDocument(document.id);
                     }
                   }
                 });
@@ -527,7 +597,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 
                     {/* Icon & AI Indicators */}
                     <div className="flex items-center gap-2">
-                      {getFileIcon(document.file_type)}
+                      {getFileIcon(document.file_type, document.file_name)}
                       {document.insights && (
                         <div className="flex items-center gap-1">
                           <Brain className="w-4 h-4 text-blue-500" />
@@ -991,11 +1061,16 @@ export const DocumentList: React.FC<DocumentListProps> = ({
             onOpenChange={setShowTransferDialog}
             documentId={selectedDocument.id}
             documentName={selectedDocument.file_name}
+          />
+
+          <MoveToFolderDialog
+            open={moveDialogOpen}
+            onOpenChange={setMoveDialogOpen}
+            document={selectedDocument}
             onSuccess={() => {
-              toast({
-                title: "Transfer initiated",
-                description: "The recipient will be notified to accept or reject the transfer.",
-              });
+              setMoveDialogOpen(false);
+              setSelectedDocument(null);
+              if (onRefresh) onRefresh();
             }}
           />
 

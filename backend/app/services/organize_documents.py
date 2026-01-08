@@ -89,8 +89,6 @@ class OrganizeDocumentsService:
                 extracted_text,
                 created_at,
                 metadata,
-                document_type,
-                importance_score,
                 analysis_result,
                 document_insights (
                     importance_score,
@@ -122,7 +120,7 @@ class OrganizeDocumentsService:
                         # Format document with insights
                         # Priority 1: Use document_insights table
                         # Priority 2: Use analysis_result (rich AI-extracted data)
-                        # Priority 3: Fallback to document-level fields
+                        # Priority 3: Fallback to empty data
                         insights_data = {}
                         if document.get('document_insights') and len(document['document_insights']) > 0:
                             insights_data = document['document_insights'][0]
@@ -130,16 +128,16 @@ class OrganizeDocumentsService:
                             # Use analysis_result as rich fallback (contains AI-extracted data)
                             analysis = document['analysis_result']
                             insights_data = {
-                                "importance_score": analysis.get('importance_score', document.get('importance_score')),
-                                "document_type": analysis.get('document_type', document.get('document_type')),
+                                "importance_score": analysis.get('importance_score'),
+                                "document_type": analysis.get('document_type'),
                                 "summary": analysis.get('summary'),
                                 "key_topics": analysis.get('key_topics', []),
                             }
                         else:
-                            # Final fallback to basic document fields
+                            # Final fallback - no insights available
                             insights_data = {
-                                "importance_score": document.get('importance_score'),
-                                "document_type": document.get('document_type'),
+                                "importance_score": None,
+                                "document_type": None,
                             }
                         
                         formatted_document = {

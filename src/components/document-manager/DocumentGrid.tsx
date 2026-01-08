@@ -48,6 +48,13 @@ import {
   CloudDownload,
   RotateCcw,
   Edit,
+  File,
+  FileSpreadsheet,
+  FileImage,
+  FileVideo,
+  FileAudio,
+  FileArchive,
+  FileCode,
   Shield,
   CheckCircle2,
   Circle,
@@ -411,8 +418,63 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
       });
     }
   };
-  const getFileIcon = (_fileType: string) => {
-    // You can expand this based on file types
+  const getFileIcon = (fileType: string, fileName?: string) => {
+    // Combine file type and file name for better detection
+    const type = fileType?.toLowerCase() || '';
+    const name = fileName?.toLowerCase() || '';
+    const combined = `${type} ${name}`;
+    
+    // PDF
+    if (combined.includes('pdf')) {
+      return <FileText className="w-8 h-8 text-red-500" />;
+    }
+    
+    // Word documents
+    if (combined.includes('word') || combined.includes('docx') || combined.includes('.doc') || type.includes('msword') || type.includes('officedocument.wordprocessing')) {
+      return <FileText className="w-8 h-8 text-blue-600" />;
+    }
+    
+    // Excel/Spreadsheets
+    if (combined.includes('excel') || combined.includes('spreadsheet') || combined.includes('xls') || combined.includes('csv') || type.includes('officedocument.spreadsheet')) {
+      return <FileSpreadsheet className="w-8 h-8 text-green-600" />;
+    }
+    
+    // PowerPoint
+    if (combined.includes('powerpoint') || combined.includes('presentation') || combined.includes('ppt') || type.includes('officedocument.presentation')) {
+      return <FileText className="w-8 h-8 text-orange-500" />;
+    }
+    
+    // Images
+    if (type.includes('image') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.gif') || name.endsWith('.svg') || name.endsWith('.webp')) {
+      return <FileImage className="w-8 h-8 text-purple-500" />;
+    }
+    
+    // Videos
+    if (type.includes('video') || name.endsWith('.mp4') || name.endsWith('.avi') || name.endsWith('.mov') || name.endsWith('.mkv')) {
+      return <FileVideo className="w-8 h-8 text-pink-500" />;
+    }
+    
+    // Audio
+    if (type.includes('audio') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.m4a')) {
+      return <FileAudio className="w-8 h-8 text-indigo-500" />;
+    }
+    
+    // Archives
+    if (combined.includes('zip') || combined.includes('rar') || combined.includes('7z') || combined.includes('tar') || type.includes('compressed')) {
+      return <FileArchive className="w-8 h-8 text-yellow-600" />;
+    }
+    
+    // Code files
+    if (name.endsWith('.js') || name.endsWith('.ts') || name.endsWith('.json') || name.endsWith('.html') || name.endsWith('.css') || name.endsWith('.py') || type.includes('javascript') || type.includes('json')) {
+      return <FileCode className="w-8 h-8 text-cyan-600" />;
+    }
+    
+    // Text files
+    if (type.includes('text/plain') || name.endsWith('.txt')) {
+      return <File className="w-8 h-8 text-gray-500" />;
+    }
+    
+    // Default
     return <FileText className="w-8 h-8 text-blue-500" />;
   };
 
@@ -451,7 +513,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                     if (starred) {
                       unpinDocument(document.id);
                     } else {
-                      pinDocument(document);
+                      pinDocument(document.id);
                     }
                   }
                 });
@@ -564,7 +626,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                   {/* Header */}
                   <div className="flex items-start justify-between mb-3 pl-8\">
                     <div className="flex items-center gap-2">
-                      {getFileIcon(document.file_type)}
+                      {getFileIcon(document.file_type, document.file_name)}
                       {document.insights && (
                         <div className="flex items-center gap-1">
                           <Brain className="w-3 h-3 text-blue-500" />
