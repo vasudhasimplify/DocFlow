@@ -22,7 +22,7 @@ export interface DocumentSummary {
   };
 }
 
-export type SummaryType = 'brief' | 'detailed' | 'executive' | 'bullet' | 'action-items';
+export type SummaryType = 'brief' | 'detailed' | 'executive' | 'bullet' | 'action-items' | string;
 
 /**
  * Generate a summary for a specific document
@@ -44,7 +44,7 @@ export async function generateDocumentSummary(
     body: JSON.stringify({
       documentId,
       userId: user.id,
-      summary_type: summaryType,
+      summary_type: summaryType, // Send the actual custom type
       language,
     }),
   });

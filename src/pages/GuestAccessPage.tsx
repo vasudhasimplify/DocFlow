@@ -20,6 +20,7 @@ import { EnhancedShareLink } from '@/types/shareLink';
 import { useToast } from '@/hooks/use-toast';
 import { useDocumentComments } from '@/hooks/useDocumentComments';
 import CommentsSidebar from '@/components/collaboration/CommentsSidebar';
+import { RequestCheckoutButton } from '@/components/checkout-requests/RequestCheckoutButton';
 
 interface ShareData {
   id: string;
@@ -1202,6 +1203,16 @@ export default function GuestAccessPage() {
                 Print
               </Button>
             )}
+            {/* Request Edit Access for view-only links */}
+            {permission !== 'edit' && document && (
+              <RequestCheckoutButton
+                documentId={document.id}
+                documentName={resourceName}
+                shareLinkId={token}
+                userEmail={visitorEmail || anonymousGuestId}
+                userName={visitorEmail ? visitorEmail.split('@')[0] : 'Guest User'}
+              />
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -1394,6 +1405,19 @@ export default function GuestAccessPage() {
               View Document
             </Button>
           </div>
+
+          {/* Request Edit Access for view-only shares */}
+          {permission !== 'edit' && document && (
+            <div className="pt-4 border-t border-gray-700">
+              <RequestCheckoutButton
+                documentId={document.id}
+                documentName={resourceName}
+                shareLinkId={token}
+                userEmail={visitorEmail || anonymousGuestId}
+                userName={visitorEmail ? visitorEmail.split('@')[0] : 'Guest User'}
+              />
+            </div>
+          )}
 
           {/* Footer note */}
           <p className="text-center text-xs text-gray-500">

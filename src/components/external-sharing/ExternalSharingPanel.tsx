@@ -38,11 +38,13 @@ import {
   Check,
   ChevronsUpDown,
   AlertCircle,
+  Edit,
 } from 'lucide-react';
 import { useExternalSharing, ExternalShare, CreateExternalShareParams } from '@/hooks/useExternalSharing';
 import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { RequestCheckoutButton } from '@/components/checkout-requests/RequestCheckoutButton';
 
 interface ExternalSharingPanelProps {
   documents?: { id: string; file_name: string }[];
@@ -803,6 +805,17 @@ function SharesList({
                       </div>
                     )}
                   </div>
+                  {/* Request Edit Access button for view-only shares */}
+                  {share.status === 'accepted' && share.permission !== 'edit' && (
+                    <div className="mt-3">
+                      <RequestCheckoutButton
+                        documentId={share.resource_id}
+                        shareId={share.id}
+                        userEmail={share.guest_email}
+                        userName={share.guest_name}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>

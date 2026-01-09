@@ -82,7 +82,7 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
   workflowId,
   workflowName
 }) => {
-  const { workflows, createEscalationRule, isLoading } = useWorkflows();
+  const { workflows, createEscalationRule, isLoading, fetchEscalationRules } = useWorkflows();
   const [step, setStep] = useState(1);
   const [users, setUsers] = useState<{ email: string; name?: string }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -137,6 +137,8 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
       max_escalations: formData.max_escalations,
       actions: formData.actions
     });
+    // Refresh the list to ensure it's up to date
+    await fetchEscalationRules();
     onOpenChange(false);
     resetForm();
   };
@@ -399,9 +401,10 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
                         <Input
                           id="trigger-minutes"
                           type="number"
+                          step="0.01"
                           placeholder="Minutes"
                           value={formData.trigger_after_minutes || ''}
-                          onChange={(e) => setFormData(prev => ({ ...prev, trigger_after_minutes: parseInt(e.target.value) || undefined }))}
+                          onChange={(e) => setFormData(prev => ({ ...prev, trigger_after_minutes: parseFloat(e.target.value) || undefined }))}
                         />
                         <span className="text-xs text-muted-foreground mt-0.5 block">minutes (testing)</span>
                       </div>
@@ -425,9 +428,10 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
                         <Input
                           id="repeat-minutes"
                           type="number"
+                          step="0.01"
                           placeholder="Minutes"
                           value={formData.repeat_every_minutes || ''}
-                          onChange={(e) => setFormData(prev => ({ ...prev, repeat_every_minutes: parseInt(e.target.value) || undefined }))}
+                          onChange={(e) => setFormData(prev => ({ ...prev, repeat_every_minutes: parseFloat(e.target.value) || undefined }))}
                         />
                         <span className="text-xs text-muted-foreground mt-0.5 block">minutes (testing)</span>
                       </div>

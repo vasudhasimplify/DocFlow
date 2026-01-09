@@ -77,6 +77,7 @@ interface OnlyOfficeEditorProps {
   userId?: string;
   userName?: string;
   callbackUrl?: string;
+  guestEmail?: string; // For guest checkout validation
 }
 
 const ONLYOFFICE_SERVER = 'http://localhost:8080';
@@ -97,6 +98,7 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
   userId = 'user1',
   userName = 'User',
   callbackUrl,
+  guestEmail,
 }) => {
   const editorRef = useRef<OnlyOfficeEditor | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -105,6 +107,41 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
   const [scriptLoaded, setScriptLoaded] = useState(false);
   const [showSaveButton, setShowSaveButton] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [guestAccessValidated, setGuestAccessValidated] = useState(false);
+
+  // Validate guest access if guestEmail is provided and mode is edit
+  useEffect(() => {
+    if (!guestEmail || mode !== 'edit') {
+      setGuestAccessValidated(true);
+      return;
+    }
+
+    const validateAccess = async () => {
+      try {
+        const response = await fetch(
+          `/api/v1/editor/validate-guest-access?document_id=${documentId}&guest_email=${encodeURIComponent(guestEmail)}`
+        );
+        
+        const data = await response.json();
+        
+        if (!data.allowed) {
+          setError(data.message);
+          setIsLoading(false);
+          onError?.(data.message);
+          return;
+        }
+        
+        setGuestAccessValidated(true);
+      } catch (err) {
+        const errorMsg = 'Failed to validate guest access';
+        setError(errorMsg);
+        setIsLoading(false);
+        onError?.(errorMsg);
+      }
+    };
+
+    validateAccess();
+  }, [guestEmail, documentId, mode, onError]);
 
   // Load OnlyOffice script
   useEffect(() => {
@@ -142,10 +179,14 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
     };
   }, []);
 
-  // Initialize editor when script is loaded
+  // Initialize editor when script is loaded and guest access validated
   useEffect(() => {
-    if (!scriptLoaded || !window.DocsAPI) {
-      console.log('Waiting for script/API...', { scriptLoaded, hasDocsAPI: !!window.DocsAPI });
+    if (!scriptLoaded || !window.DocsAPI || !guestAccessValidated) {
+      console.log('Waiting for script/API/validation...', { 
+        scriptLoaded, 
+        hasDocsAPI: !!window.DocsAPI,
+        guestAccessValidated 
+      });
       return;
     }
 
@@ -271,7 +312,7 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
         editorRef.current = null;
       }
     };
-  }, [scriptLoaded, documentUrl, documentId, documentName, fileType, mode, userId, userName, callbackUrl]);
+  }, [scriptLoaded, guestAccessValidated, documentUrl, documentId, documentName, fileType, mode, userId, userName, callbackUrl]);
 
   // Handle manual save to system
   const handleSaveToSystem = async () => {

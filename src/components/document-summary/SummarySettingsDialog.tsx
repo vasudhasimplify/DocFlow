@@ -28,10 +28,6 @@ import {
   getLanguages,
   saveSummaryTypes,
   saveLanguages,
-  addCustomSummaryType,
-  addCustomLanguage,
-  deleteSummaryType,
-  deleteLanguage,
   resetToDefaults,
   type SummaryTypeConfig,
   type LanguageConfig,
@@ -47,10 +43,6 @@ export function SummarySettingsDialog() {
   const [newTypeId, setNewTypeId] = useState('');
   const [newTypeLabel, setNewTypeLabel] = useState('');
   const [newTypeDesc, setNewTypeDesc] = useState('');
-  
-  // Custom language form
-  const [newLangCode, setNewLangCode] = useState('');
-  const [newLangLabel, setNewLangLabel] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -112,37 +104,9 @@ export function SummarySettingsDialog() {
     setNewTypeLabel('');
     setNewTypeDesc('');
 
-    toast.success('Custom summary type added');
-  };
-
-  const handleAddCustomLanguage = () => {
-    if (!newLangCode || !newLangLabel) {
-      toast.error('Please fill in required fields');
-      return;
-    }
-
-    // Check for duplicates
-    if (languages.some(l => l.code === newLangCode)) {
-      toast.error('Language code already exists');
-      return;
-    }
-
-    const newLang: LanguageConfig = {
-      code: newLangCode.toLowerCase(),
-      label: newLangLabel,
-      enabled: true,
-      custom: true,
-    };
-
-    const updated = [...languages, newLang];
-    setLanguages(updated);
-    saveLanguages(updated);
-
-    // Reset form
-    setNewLangCode('');
-    setNewLangLabel('');
-
-    toast.success('Custom language added');
+    toast.success(`${newTypeLabel} added. Note: AI quality may vary for custom summary types.`, {
+      duration: 4000,
+    });
   };
 
   const handleDeleteType = (id: string) => {
@@ -150,13 +114,6 @@ export function SummarySettingsDialog() {
     setSummaryTypes(updated);
     saveSummaryTypes(updated);
     toast.success('Summary type deleted');
-  };
-
-  const handleDeleteLanguage = (code: string) => {
-    const updated = languages.filter(l => l.code !== code);
-    setLanguages(updated);
-    saveLanguages(updated);
-    toast.success('Language deleted');
   };
 
   const handleReset = () => {
@@ -246,6 +203,11 @@ export function SummarySettingsDialog() {
                 <Plus className="h-4 w-4" />
                 Add Custom Summary Type
               </h4>
+              <div className="p-3 mb-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <p className="text-xs text-blue-600 dark:text-blue-400">
+                  💡 Custom types work! The AI will generate summaries based on your custom type name. Be specific: "Legal Review", "Financial Analysis", "Technical Spec", etc.
+                </p>
+              </div>
               <div className="grid gap-3">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -288,6 +250,11 @@ export function SummarySettingsDialog() {
           </TabsContent>
 
           <TabsContent value="languages" className="space-y-4 mt-4">
+            <div className="p-3 mb-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+              <p className="text-xs text-blue-600 dark:text-blue-400">
+                📌 These 12 languages have been tested and verified to work with AI summaries. You can enable or disable any of them.
+              </p>
+            </div>
             <ScrollArea className="h-[400px] pr-4">
               <div className="grid grid-cols-2 gap-2">
                 {languages.map(lang => (
@@ -296,70 +263,17 @@ export function SummarySettingsDialog() {
                     className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50"
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm truncate">{lang.label}</span>
-                        {lang.custom && (
-                          <Badge variant="secondary" className="text-xs">Custom</Badge>
-                        )}
-                      </div>
+                      <span className="font-medium text-sm truncate block">{lang.label}</span>
                       <p className="text-xs text-muted-foreground">{lang.code}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={lang.enabled}
-                        onCheckedChange={() => handleToggleLanguage(lang.code)}
-                      />
-                      {lang.custom && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-destructive"
-                          onClick={() => handleDeleteLanguage(lang.code)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
+                    <Switch
+                      checked={lang.enabled}
+                      onCheckedChange={() => handleToggleLanguage(lang.code)}
+                    />
                   </div>
                 ))}
               </div>
             </ScrollArea>
-
-            <div className="border-t pt-4 space-y-3">
-              <h4 className="text-sm font-medium flex items-center gap-2">
-                <Plus className="h-4 w-4" />
-                Add Custom Language
-              </h4>
-              <div className="grid gap-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label htmlFor="lang-code" className="text-xs">Code (ISO 639)*</Label>
-                    <Input
-                      id="lang-code"
-                      placeholder="e.g., hi, ta"
-                      value={newLangCode}
-                      onChange={(e) => setNewLangCode(e.target.value.toLowerCase())}
-                      className="h-8"
-                      maxLength={3}
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="lang-label" className="text-xs">Label*</Label>
-                    <Input
-                      id="lang-label"
-                      placeholder="e.g., Hindi (हिंदी)"
-                      value={newLangLabel}
-                      onChange={(e) => setNewLangLabel(e.target.value)}
-                      className="h-8"
-                    />
-                  </div>
-                </div>
-                <Button onClick={handleAddCustomLanguage} size="sm" className="w-full">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Language
-                </Button>
-              </div>
-            </div>
           </TabsContent>
         </Tabs>
 

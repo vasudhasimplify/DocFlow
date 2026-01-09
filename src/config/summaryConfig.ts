@@ -32,7 +32,6 @@ export interface LanguageConfig {
   code: string;
   label: string;
   enabled: boolean;
-  custom?: boolean; // User-added custom language
 }
 
 // Default summary types
@@ -127,7 +126,7 @@ export const DEFAULT_SUMMARY_TYPES: SummaryTypeConfig[] = [
   },
 ];
 
-// Default languages
+// Default languages - Only well-tested languages with proven AI support
 export const DEFAULT_LANGUAGES: LanguageConfig[] = [
   { code: 'en', label: 'English', enabled: true },
   { code: 'es', label: 'Spanish (Español)', enabled: true },
@@ -141,44 +140,45 @@ export const DEFAULT_LANGUAGES: LanguageConfig[] = [
   { code: 'ar', label: 'Arabic (العربية)', enabled: true },
   { code: 'hi', label: 'Hindi (हिंदी)', enabled: true },
   { code: 'id', label: 'Indonesian (Bahasa Indonesia)', enabled: true },
-  { code: 'ru', label: 'Russian (Русский)', enabled: false },
-  { code: 'nl', label: 'Dutch (Nederlands)', enabled: false },
-  { code: 'pl', label: 'Polish (Polski)', enabled: false },
-  { code: 'tr', label: 'Turkish (Türkçe)', enabled: false },
-  { code: 'vi', label: 'Vietnamese (Tiếng Việt)', enabled: false },
-  { code: 'th', label: 'Thai (ไทย)', enabled: false },
-  { code: 'sv', label: 'Swedish (Svenska)', enabled: false },
-  { code: 'no', label: 'Norwegian (Norsk)', enabled: false },
-  { code: 'da', label: 'Danish (Dansk)', enabled: false },
-  { code: 'fi', label: 'Finnish (Suomi)', enabled: false },
-  { code: 'cs', label: 'Czech (Čeština)', enabled: false },
-  { code: 'el', label: 'Greek (Ελληνικά)', enabled: false },
-  { code: 'he', label: 'Hebrew (עברית)', enabled: false },
-  { code: 'uk', label: 'Ukrainian (Українська)', enabled: false },
-  { code: 'ro', label: 'Romanian (Română)', enabled: false },
-  { code: 'hu', label: 'Hungarian (Magyar)', enabled: false },
-  { code: 'bn', label: 'Bengali (বাংলা)', enabled: false },
-  { code: 'ta', label: 'Tamil (தமிழ்)', enabled: false },
-  { code: 'te', label: 'Telugu (తెలుగు)', enabled: false },
-  { code: 'mr', label: 'Marathi (मराठी)', enabled: false },
-  { code: 'ur', label: 'Urdu (اردو)', enabled: false },
-  { code: 'fa', label: 'Persian (فارسی)', enabled: false },
-  { code: 'ms', label: 'Malay (Bahasa Melayu)', enabled: false },
-  { code: 'sw', label: 'Swahili (Kiswahili)', enabled: false },
 ];
 
 // LocalStorage keys
 const SUMMARY_TYPES_KEY = 'ai_summary_types_config';
 const LANGUAGES_KEY = 'ai_summary_languages_config';
 
+// Icon map for reconstructing icons from localStorage
+const ICON_MAP: Record<string, LucideIcon> = {
+  'BookOpen': BookOpen,
+  'FileText': FileText,
+  'Briefcase': Briefcase,
+  'List': List,
+  'ClipboardList': ClipboardList,
+  'Zap': Zap,
+  'Target': Target,
+  'TrendingUp': TrendingUp,
+  'MessageSquare': MessageSquare,
+  'FileQuestion': FileQuestion,
+  'Brain': Brain,
+};
+
 /**
  * Get summary types from localStorage or defaults
+ * Reconstructs icon components that were serialized to localStorage
  */
 export function getSummaryTypes(): SummaryTypeConfig[] {
   try {
     const stored = localStorage.getItem(SUMMARY_TYPES_KEY);
     if (stored) {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      // Reconstruct icon references from icon names
+      return parsed.map((type: any) => {
+        // Find the default type to get the icon
+        const defaultType = DEFAULT_SUMMARY_TYPES.find(t => t.id === type.id);
+        return {
+          ...type,
+          icon: defaultType?.icon || FileText, // Fallback to FileText if not found
+        };
+      });
     }
   } catch (error) {
     console.error('Error loading summary types config:', error);
@@ -188,10 +188,13 @@ export function getSummaryTypes(): SummaryTypeConfig[] {
 
 /**
  * Save summary types to localStorage
+ * Excludes icon components (they'll be reconstructed on load)
  */
 export function saveSummaryTypes(types: SummaryTypeConfig[]): void {
   try {
-    localStorage.setItem(SUMMARY_TYPES_KEY, JSON.stringify(types));
+    // Remove icon property before saving (can't serialize React components)
+    const serializable = types.map(({ icon, ...rest }) => rest);
+    localStorage.setItem(SUMMARY_TYPES_KEY, JSON.stringify(serializable));
   } catch (error) {
     console.error('Error saving summary types config:', error);
   }
@@ -249,17 +252,7 @@ export function addCustomSummaryType(type: Omit<SummaryTypeConfig, 'custom'>): v
   saveSummaryTypes([...types, newType]);
 }
 
-/**
- * Add a custom language
- */
-export function addCustomLanguage(language: Omit<LanguageConfig, 'custom'>): void {
-  const languages = getLanguages();
-  const newLanguage: LanguageConfig = {
-    ...language,
-    custom: true,
-  };
-  saveLanguages([...languages, newLanguage]);
-}
+
 
 /**
  * Update summary type enabled status
@@ -292,14 +285,7 @@ export function deleteSummaryType(id: string): void {
   saveSummaryTypes(filtered);
 }
 
-/**
- * Delete a custom language
- */
-export function deleteLanguage(code: string): void {
-  const languages = getLanguages();
-  const filtered = languages.filter(lang => lang.code !== code);
-  saveLanguages(filtered);
-}
+
 
 /**
  * Reset to defaults

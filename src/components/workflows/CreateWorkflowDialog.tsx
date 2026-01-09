@@ -42,6 +42,7 @@ import {
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
+import { TargetSystemConfig } from './TargetSystemConfig';
 import {
   TriggerType,
   StepType,
@@ -53,6 +54,7 @@ import {
 interface CreateWorkflowDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  workflow?: any; // For editing existing workflow
 }
 
 const WORKFLOW_COLORS = [
@@ -101,9 +103,10 @@ const getSchedulePreview = (formData: any): string => {
 
 export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
   open,
-  onOpenChange
+  onOpenChange,
+  workflow
 }) => {
-  const { createWorkflow, isLoading } = useWorkflows();
+  const { createWorkflow, updateWorkflow, isLoading } = useWorkflows();
   const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [useTemplate, setUseTemplate] = useState(false);
@@ -131,7 +134,16 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
       condition_field?: string;
       condition_operator?: string;
       condition_value?: string;
-    }>
+    }>,
+    target_system_config: {
+      enabled: false,
+      system_type: 'sap' as 'sap',
+      endpoint_url: '',
+      username: '',
+      password: '',
+      entity_set: '',
+      field_mapping: {} as Record<string, string>
+    }
   });
 
   const [employees, setEmployees] = useState<Array<{
@@ -151,7 +163,7 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
     operators: string[];
   }>>([]);
 
-  const totalSteps = 4;
+  const totalSteps = 5;
 
   // Fetch employees for suggestions
   useEffect(() => {
@@ -190,6 +202,35 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
     fetchAvailableFields();
   }, [open]);
 
+  // Populate form when editing existing workflow
+  useEffect(() => {
+    if (workflow && open) {
+      setFormData({
+        name: workflow.name || '',
+        description: workflow.description || '',
+        category: workflow.category || 'approval',
+        color: workflow.color || WORKFLOW_COLORS[0],
+        trigger_type: (workflow.trigger_type || workflow.trigger?.type || 'manual') as TriggerType,
+        trigger_document_types: workflow.trigger?.document_types || [],
+        schedule_type: workflow.trigger?.schedule_type || 'daily',
+        schedule_time: workflow.trigger?.schedule_time || '09:00',
+        schedule_day: workflow.trigger?.schedule_day || 'monday',
+        schedule_date: workflow.trigger?.schedule_date || 1,
+        schedule_cron: workflow.trigger?.schedule_cron || '',
+        steps: workflow.steps || [],
+        target_system_config: workflow.target_system_config || {
+          enabled: false,
+          system_type: 'sap',
+          endpoint_url: '',
+          username: '',
+          password: '',
+          entity_set: '',
+          field_mapping: {}
+        }
+      });
+    }
+  }, [workflow, open]);
+
   const handleNext = () => {
     if (step < totalSteps) setStep(step + 1);
   };
@@ -204,13 +245,13 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
       return;
     }
     
-    await createWorkflow({
+    const workflowData = {
       name: formData.name,
       description: formData.description,
       category: formData.category,
       color: formData.color,
-      version: 1,
-      status: 'draft',
+      version: workflow?.version || 1,
+      status: workflow?.status || 'draft',
       trigger_type: formData.trigger_type,
       trigger_config: {
         document_types: formData.trigger_document_types.length > 0 
@@ -259,8 +300,18 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
         channels: ['email', 'in_app'],
         digest_enabled: false,
         digest_frequency: 'daily'
-      }
-    });
+      },
+      target_system_config: formData.target_system_config.enabled ? formData.target_system_config : undefined
+    };
+
+    if (workflow) {
+      // Update existing workflow
+      await updateWorkflow(workflow.id, workflowData);
+    } else {
+      // Create new workflow
+      await createWorkflow(workflowData);
+    }
+    
     onOpenChange(false);
     resetForm();
   };
@@ -281,7 +332,16 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
       schedule_day: 'monday',
       schedule_date: 1,
       schedule_cron: '',
-      steps: []
+      steps: [],
+      target_system_config: {
+        enabled: false,
+        system_type: 'sap',
+        endpoint_url: '',
+        username: '',
+        password: '',
+        entity_set: '',
+        field_mapping: {}
+      }
     });
   };
 
@@ -345,14 +405,15 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <GitBranch className="h-5 w-5" />
-            Create Workflow
+            {workflow ? 'Edit Workflow' : 'Create Workflow'}
           </DialogTitle>
           <DialogDescription>
             Step {step} of {totalSteps} — 
             {step === 1 && ' Choose a starting point'}
             {step === 2 && ' Basic Information'}
             {step === 3 && ' Define Steps'}
-            {step === 4 && ' Review & Create'}
+            {step === 4 && ' Target System Integration'}
+            {step === 5 && ' Review & Create'}
           </DialogDescription>
         </DialogHeader>
 
@@ -924,8 +985,20 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
             </div>
           )}
 
-          {/* Step 4: Review */}
+          {/* Step 4: Target System Integration */}
           {step === 4 && (
+            <div className="space-y-4">
+              <TargetSystemConfig
+                config={formData.target_system_config}
+                onChange={(target_system_config) =>
+                  setFormData({ ...formData, target_system_config })
+                }
+              />
+            </div>
+          )}
+
+          {/* Step 5: Review */}
+          {step === 5 && (
             <div className="space-y-6">
               <div className="p-4 rounded-lg border bg-card">
                 <div className="flex items-center gap-3 mb-4">
@@ -987,15 +1060,20 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
+            {step === 4 && (
+              <Button variant="ghost" onClick={handleNext}>
+                Skip This Step
+              </Button>
+            )}
             {step < totalSteps ? (
               <Button onClick={handleNext}>
-                Next
+                {step === 4 ? 'Continue' : 'Next'}
                 <ChevronRight className="h-4 w-4 ml-2" />
               </Button>
             ) : (
               <Button onClick={handleCreate} disabled={isLoading || !formData.name}>
                 <Check className="h-4 w-4 mr-2" />
-                Create Workflow
+                {workflow ? 'Update Workflow' : 'Create Workflow'}
               </Button>
             )}
           </div>

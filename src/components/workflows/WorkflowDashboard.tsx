@@ -32,6 +32,7 @@ export const WorkflowDashboard: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | 'all'>('all');
   const [activeTab, setActiveTab] = useState('workflows');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [editingWorkflow, setEditingWorkflow] = useState<any>(null);
 
   // Handle instance query parameter from email links
   useEffect(() => {
@@ -276,7 +277,14 @@ export const WorkflowDashboard: React.FC = () => {
         <TabsContent value="workflows" className="mt-0">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredWorkflows.map((workflow) => (
-              <WorkflowCard key={workflow.id} workflow={workflow} />
+              <WorkflowCard 
+                key={workflow.id} 
+                workflow={workflow} 
+                onEdit={(wf) => {
+                  setEditingWorkflow(wf);
+                  setIsCreateDialogOpen(true);
+                }}
+              />
             ))}
             {filteredWorkflows.length === 0 && (
               <div className="col-span-full flex flex-col items-center justify-center py-12 text-center">
@@ -344,7 +352,11 @@ export const WorkflowDashboard: React.FC = () => {
 
       <CreateWorkflowDialog
         open={isCreateDialogOpen}
-        onOpenChange={setIsCreateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCreateDialogOpen(open);
+          if (!open) setEditingWorkflow(null); // Clear edit state when closing
+        }}
+        workflow={editingWorkflow}
       />
     </div>
   );
