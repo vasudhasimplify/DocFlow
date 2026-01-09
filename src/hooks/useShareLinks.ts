@@ -3,6 +3,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { EnhancedShareLink, CreateShareLinkParams } from '@/types/shareLink';
+import { logAuditEvent } from '@/utils/auditLogger';
 
 import {
   loadShareLinksFromStorage,
@@ -101,12 +102,41 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
   const createLink = useCallback(async (params: CreateShareLinkParams): Promise<EnhancedShareLink | null> => {
     setLoading(true);
     try {
+      // Generate a Supabase signed URL for the document (works from any browser)
+      let signedUrl: string | undefined;
+
+      if (params.resource_type === 'document') {
+        // Fetch document storage_path
+        const { data: docData, error: docError } = await supabase
+          .from('documents')
+          .select('storage_path')
+          .eq('id', params.resource_id)
+          .single();
+
+        if (!docError && docData?.storage_path) {
+          // Calculate expiry in seconds based on expires_in_hours (default to 7 days if not specified)
+          const expirySeconds = params.expires_in_hours
+            ? params.expires_in_hours * 60 * 60
+            : 7 * 24 * 60 * 60; // 7 days default
+
+          // Generate signed URL
+          const { data: urlData, error: urlError } = await supabase.storage
+            .from('documents')
+            .createSignedUrl(docData.storage_path, expirySeconds);
+
+          if (!urlError && urlData?.signedUrl) {
+            signedUrl = urlData.signedUrl;
+          }
+        }
+      }
+
       const newLink: EnhancedShareLink = {
         id: `link-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         resource_type: params.resource_type,
         resource_id: params.resource_id,
         resource_name: params.resource_name,
-        token: Math.random().toString(36).substring(2, 12),
+        invitation_token: Math.random().toString(36).substring(2, 12),
+        token: Math.random().toString(36).substring(2, 12), // Keep for backwards compatibility
         short_code: Math.random().toString(36).substring(2, 7),
         permission: params.permission,
         allow_download: params.allow_download ?? params.permission === 'download',
@@ -123,7 +153,7 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
         use_count: 0,
         expires_at: params.expires_in_hours
           ? new Date(Date.now() + params.expires_in_hours * 60 * 60 * 1000).toISOString()
-          : undefined,
+          : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Default 7 days
         notify_on_access: params.notify_on_access ?? false,
         track_views: true,
         watermark_enabled: params.watermark_enabled ?? false,
@@ -134,7 +164,8 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
         created_by: user?.id || 'anonymous',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-        is_active: true
+        is_active: true,
+        signed_url: signedUrl, // Direct signed URL that works anywhere
       };
 
       // Try to save to database
@@ -157,6 +188,21 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
         title: 'Link created',
         description: 'Share link has been created successfully'
       });
+
+      // Log share link creation to audit trail with recipient info
+      logAuditEvent({
+        action: 'document.shared',
+        category: 'access_control',
+        resourceType: params.resource_type as any,
+        resourceName: params.resource_name,
+        documentId: params.resource_type === 'document' ? params.resource_id : undefined,
+        details: {
+          permission_level: params.permission,
+          shared_with: params.guest_email ? [params.guest_email] : params.allowed_emails || [],
+          reason: 'Share link created',
+        },
+      });
+
       return newLink;
     } catch (err) {
       toast({
@@ -244,6 +290,21 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
         title: 'Link revoked',
         description: 'Share link has been disabled'
       });
+
+      // Log share link revocation to audit trail
+      if (originalLink) {
+        logAuditEvent({
+          action: 'access.revoked',
+          category: 'access_control',
+          resourceType: originalLink.resource_type as any,
+          resourceName: originalLink.resource_name,
+          documentId: originalLink.resource_type === 'document' ? originalLink.resource_id : undefined,
+          details: {
+            reason: 'Share link revoked',
+          },
+        });
+      }
+
       return true;
     } catch (err) {
       // Rollback on error
@@ -347,6 +408,7 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
     const duplicate: EnhancedShareLink = {
       ...original,
       id: `link-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      invitation_token: Math.random().toString(36).substring(2, 12),
       token: Math.random().toString(36).substring(2, 12),
       short_code: Math.random().toString(36).substring(2, 7),
       name: original.name ? `${original.name} (copy)` : 'Copy',

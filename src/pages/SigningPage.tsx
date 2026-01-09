@@ -45,49 +45,78 @@ export const SigningPage: React.FC = () => {
             setLoading(true);
             setError(null);
 
-            // Fetch signer details by token
-            const { data: signer, error: signerError } = await supabase
+            // Query Supabase directly using anon key (works from any browser)
+            // First, try to find the signer by access_token
+            const { data: signerResult, error: signerError } = await supabase
                 .from('signature_signers')
                 .select('*')
                 .eq('access_token', token)
-                .single();
+                .maybeSingle();
 
-            if (signerError || !signer) {
+            if (signerError) {
+                console.error('Error fetching signer:', signerError);
+                setError('Failed to load signing information');
+                setLoading(false);
+                return;
+            }
+
+            if (!signerResult) {
                 setError('Invalid or expired signing link');
                 setLoading(false);
                 return;
             }
 
-            setSignerData(signer);
-            setEmail(signer.email); // Pre-fill email
+            // Check if already signed
+            if (signerResult.signed_at) {
+                setError(`You have already signed this document on ${new Date(signerResult.signed_at).toLocaleDateString()}`);
+                setLoading(false);
+                return;
+            }
 
-            // Fetch signature request details
-            const { data: request, error: requestError } = await supabase
+            // Fetch the signature request details
+            const { data: requestResult, error: requestError } = await supabase
                 .from('signature_requests')
                 .select('*')
-                .eq('id', signer.request_id)
-                .single();
+                .eq('id', signerResult.request_id)
+                .maybeSingle();
 
-            if (requestError || !request) {
+            if (requestError || !requestResult) {
+                console.error('Error fetching request:', requestError);
                 setError('Signature request not found');
                 setLoading(false);
                 return;
             }
 
-            setRequestData(request);
+            // Check if request is expired
+            if (requestResult.expires_at) {
+                const expiresAt = new Date(requestResult.expires_at);
+                if (expiresAt < new Date()) {
+                    setError('This signing link has expired');
+                    setLoading(false);
+                    return;
+                }
+            }
+
+            // Set signer and request data
+            setSignerData({
+                ...signerResult,
+                request_id: signerResult.request_id
+            });
+            setEmail(signerResult.email); // Pre-fill email
+            setRequestData(requestResult);
             setLoading(false);
 
-            // If user is already authenticated, check email match before redirecting
+            // Check if user is already authenticated
             const { data: userData } = await supabase.auth.getUser();
             if (userData.user) {
                 // Verify logged-in user's email matches signer email
-                if (userData.user.email?.toLowerCase() === signer.email.toLowerCase()) {
+                if (userData.user.email?.toLowerCase() === signerResult.email.toLowerCase()) {
                     // Email matches - allow access
-                    navigate('/documents?feature=signatures&requestId=' + signer.request_id);
+                    navigate('/documents?feature=signatures&requestId=' + requestResult.id);
                 } else {
                     // Email doesn't match - set current user but show mismatch error
                     setCurrentUser(userData.user);
-                    setAuthError(`This document was sent to ${signer.email}. You are currently signed in as ${userData.user.email}. Please sign out and sign in with the correct email.`);
+                    setAuthError(`This document was sent to ${signerResult.email}. You are currently signed in as ${userData.user.email}. Please sign out and sign in with the correct email.`);
                 }
             }
         } catch (err) {

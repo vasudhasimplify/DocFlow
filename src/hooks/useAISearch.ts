@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { logAuditEvent } from '@/utils/auditLogger';
 
 export interface AISearchResult {
   id: string;
@@ -98,12 +99,25 @@ export const useAISearch = () => {
         description: data.summary,
       });
 
+      // Log AI search to audit trail
+      logAuditEvent({
+        action: 'system.search_performed',
+        category: 'ai_processing',
+        resourceType: 'system',
+        resourceName: 'AI Search',
+        details: {
+          query: query,
+          results_count: data.totalFound,
+          intent: data.analysis?.intent
+        }
+      });
+
       return data;
 
     } catch (error) {
       console.error('AI Search error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Search failed';
-      
+
       toast({
         title: 'Search Failed',
         description: errorMessage,

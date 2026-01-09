@@ -15,13 +15,13 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { 
-  Folder, 
-  FolderOpen, 
-  Plus, 
-  Brain, 
-  Star, 
-  Clock, 
+import {
+  Folder,
+  FolderOpen,
+  Plus,
+  Brain,
+  Star,
+  Clock,
   FileText,
   Briefcase,
   Receipt,
@@ -39,7 +39,8 @@ import {
   ChevronDown,
   Loader2,
   Edit2,
-  X
+  X,
+  Share2
 } from 'lucide-react';
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -94,11 +95,11 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
     e.preventDefault();
     e.stopPropagation();
     setDragOverFolderId(null);
-    
+
     try {
       const data = JSON.parse(e.dataTransfer.getData('application/json'));
       if (!data.documentId) return;
-      
+
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) {
         toast({
@@ -168,18 +169,18 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
 
   useEffect(() => {
     fetchSmartFolders();
-    
+
     // Set up interval to refresh folder counts every 5 seconds when component is mounted
     const interval = setInterval(() => {
       fetchSmartFolders();
     }, 5000);
-    
+
     // Listen for document deletion events to refresh immediately
     const handleDocumentDeleted = () => {
       fetchSmartFolders();
     };
     window.addEventListener('document-deleted', handleDocumentDeleted);
-    
+
     return () => {
       clearInterval(interval);
       window.removeEventListener('document-deleted', handleDocumentDeleted);
@@ -211,11 +212,11 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
 
       // Fetch actual document counts from document_folder_relationships
       const folderIds = data?.map(f => f.id) || [];
-      
+
       // Try document_folder_relationships first (used by smart folder AI)
       // Join with documents to exclude deleted ones
       let countsByFolder: { [key: string]: number } = {};
-      
+
       const { data: relationships, error: relError } = await supabase
         .from('document_folder_relationships')
         .select('folder_id, documents!inner(id, metadata)')
@@ -230,14 +231,14 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
           }
         });
       }
-      
+
       // Also check document_shortcuts for manually assigned documents
       // Join with documents to exclude deleted ones
       const { data: shortcuts } = await supabase
         .from('document_shortcuts')
         .select('folder_id, documents!inner(id, metadata)')
         .in('folder_id', folderIds);
-      
+
       if (shortcuts) {
         shortcuts.forEach((shortcut: any) => {
           // Only count if document is not deleted
@@ -254,7 +255,7 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.user.id)
         .eq('metadata->>is_deleted', 'true');
-      
+
       setRecycleBinCount(deletedCount || 0);
 
       // Update folders with actual counts and normalize field names
@@ -292,12 +293,12 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
       // Swap order_index values - higher order_index means higher in the list
       const currentOrderIndex = currentFolder.order_index ?? folderIndex;
       const previousOrderIndex = previousFolder.order_index ?? (folderIndex - 1);
-      
+
       const { error: error1 } = await supabase
         .from('smart_folders')
         .update({ order_index: previousOrderIndex })
         .eq('id', currentFolder.id);
-      
+
       const { error: error2 } = await supabase
         .from('smart_folders')
         .update({ order_index: currentOrderIndex })
@@ -309,7 +310,7 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
 
       // Refresh folders list
       await fetchSmartFolders();
-      
+
       toast({
         title: "Folder moved",
         description: `${currentFolder.name} moved up`,
@@ -335,12 +336,12 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
       // Swap order_index values - higher order_index means higher in the list
       const currentOrderIndex = currentFolder.order_index ?? folderIndex;
       const nextOrderIndex = nextFolder.order_index ?? (folderIndex + 1);
-      
+
       const { error: error1 } = await supabase
         .from('smart_folders')
         .update({ order_index: nextOrderIndex })
         .eq('id', currentFolder.id);
-      
+
       const { error: error2 } = await supabase
         .from('smart_folders')
         .update({ order_index: currentOrderIndex })
@@ -352,7 +353,7 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
 
       // Refresh folders list
       await fetchSmartFolders();
-      
+
       toast({
         title: "Folder moved",
         description: `${currentFolder.name} moved down`,
@@ -434,11 +435,11 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
         throw new Error(errorData.detail || 'Failed to organize documents');
       }
 
-      const result = await response.json() as { 
-        success?: boolean; 
-        message?: string; 
-        documentsOrganized?: number; 
-        foldersCreated?: unknown[] 
+      const result = await response.json() as {
+        success?: boolean;
+        message?: string;
+        documentsOrganized?: number;
+        foldersCreated?: unknown[]
       };
 
       if (result.success) {
@@ -446,7 +447,7 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
           title: "Smart Folders Created",
           description: result.message || `Organized ${result.documentsOrganized || 0} documents into ${result.foldersCreated?.length || 0} folders`,
         });
-        
+
         // Refresh folders list
         fetchSmartFolders();
       } else {
@@ -512,6 +513,23 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
         </div>
       </Button>
 
+      {/* Shared Docs */}
+      <Button
+        variant={selectedFolder === 'shared-docs' ? 'default' : 'ghost'}
+        className="w-full justify-start h-auto p-3"
+        onClick={() => onFolderSelect('shared-docs')}
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-1 bg-green-100 dark:bg-green-900 rounded">
+            <Share2 className="w-4 h-4 text-green-600" />
+          </div>
+          <div className="text-left">
+            <div className="font-medium">Shared Docs</div>
+            <div className="text-xs text-muted-foreground">Shared by me & others</div>
+          </div>
+        </div>
+      </Button>
+
       {/* Divider */}
       <div className="border-t border-border my-2"></div>
 
@@ -555,13 +573,12 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
       ) : (
         <div className="space-y-2">
           {folders.map((folder, index) => (
-            <div 
-              key={folder.id} 
-              className={`flex items-center gap-2 w-full transition-all duration-200 ${
-                dragOverFolderId === folder.id 
-                  ? 'bg-primary/20 rounded-lg ring-2 ring-primary ring-offset-2 scale-[1.02]' 
-                  : ''
-              }`}
+            <div
+              key={folder.id}
+              className={`flex items-center gap-2 w-full transition-all duration-200 ${dragOverFolderId === folder.id
+                ? 'bg-primary/20 rounded-lg ring-2 ring-primary ring-offset-2 scale-[1.02]'
+                : ''
+                }`}
               onDrop={(e) => handleDrop(e, folder.id)}
               onDragOver={(e) => handleDragOver(e, folder.id)}
               onDragLeave={handleDragLeave}
@@ -597,11 +614,11 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
                       onClick={() => onFolderSelect(folder.id)}
                     >
                       <div className="flex items-center gap-2 w-full min-w-0">
-                        <div 
+                        <div
                           className="p-1 rounded flex-shrink-0"
-                          style={{ 
+                          style={{
                             backgroundColor: `${folder.color}20`,
-                            color: folder.color 
+                            color: folder.color
                           }}
                         >
                           {iconMap[folder.icon] || <Folder className="w-4 h-4" />}
@@ -707,10 +724,10 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
             Documents are automatically organized based on content, type, and importance.
           </p>
           <div className="space-y-2">
-            <Button 
-              variant="default" 
-              size="sm" 
-              className="w-full" 
+            <Button
+              variant="default"
+              size="sm"
+              className="w-full"
               onClick={createSmartFoldersFromDocuments}
               disabled={isOrganizing}
             >

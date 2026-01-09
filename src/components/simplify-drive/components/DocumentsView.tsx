@@ -5,6 +5,7 @@ import { SmartFolders } from '@/components/document-manager/SmartFolders';
 import { AIRecommendations } from '@/components/document-manager/AIRecommendations';
 import { MediaBrowser } from '../MediaBrowser';
 import { FileText } from 'lucide-react';
+import { ShareLinksDashboard } from '@/components/sharing/ShareLinksDashboard';
 import type { Document, ViewMode } from '../types';
 
 interface DocumentsViewProps {
@@ -27,12 +28,12 @@ export function DocumentsView({
   onRefresh,
 }: DocumentsViewProps) {
   console.log('📄 DocumentsView: documents count:', documents.length, 'selectedFolder:', selectedFolder);
-  
+
   return (
     <div className="flex flex-col lg:flex-row gap-6 p-4 h-full">
       {aiInsightsEnabled && (
         <aside className="w-full lg:w-80 flex-shrink-0 flex flex-col gap-0 h-full overflow-y-auto scrollbar-hide">
-          <SmartFolders 
+          <SmartFolders
             onFolderSelect={onFolderSelect}
             selectedFolder={selectedFolder}
           />
@@ -41,7 +42,15 @@ export function DocumentsView({
       )}
 
       <main className="flex-1 min-w-0 overflow-y-auto scrollbar-hide">
-        {selectedFolder === 'media-browser' ? (
+        {selectedFolder === 'shared-docs' ? (
+          <div className="p-4">
+            <div className="mb-4">
+              <h2 className="text-2xl font-bold tracking-tight">Shared Documents</h2>
+              <p className="text-muted-foreground">Manage documents shared by you and with you</p>
+            </div>
+            <ShareLinksDashboard />
+          </div>
+        ) : selectedFolder === 'media-browser' ? (
           <MediaBrowser
             documents={documents}
             onDocumentSelect={(doc: Document) => onDocumentClick?.(doc)}
@@ -60,7 +69,7 @@ export function DocumentsView({
             </p>
           </div>
         ) : viewMode === 'grid' ? (
-          <DocumentGrid 
+          <DocumentGrid
             documents={documents}
             onDocumentClick={(doc: any) => {
               const fullDoc = documents.find(d => d.id === doc.id);
@@ -69,7 +78,7 @@ export function DocumentsView({
             onRefresh={onRefresh}
           />
         ) : (
-          <DocumentList 
+          <DocumentList
             documents={documents}
             onDocumentClick={(doc: any) => {
               const fullDoc = documents.find(d => d.id === doc.id);

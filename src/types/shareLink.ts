@@ -8,6 +8,7 @@ export interface EnhancedShareLink {
   resource_id: string;
   resource_name?: string;
   token: string;
+  invitation_token?: string; // Database column name for token
   short_code?: string; // Short URL code
 
   // Permissions
@@ -50,6 +51,9 @@ export interface EnhancedShareLink {
   updated_at: string;
   last_accessed_at?: string;
   is_active: boolean;
+
+  // Direct signed URL for sharing (works anywhere)
+  signed_url?: string;
 
   // Analytics summary
   analytics?: ShareLinkAnalytics;
@@ -158,7 +162,10 @@ export const EXPIRATION_OPTIONS = [
 ];
 
 export const generateShareUrl = (token: string, baseUrl?: string): string => {
-  const base = baseUrl || window.location.origin;
+  // Check for override env var first (allows testing on local network IPs)
+  // Otherwise default to window.location.origin (standard behavior)
+  const envHost = import.meta.env.VITE_SHARE_HOST;
+  const base = baseUrl || envHost || window.location.origin;
   return `${base}/s/${token}`;
 };
 

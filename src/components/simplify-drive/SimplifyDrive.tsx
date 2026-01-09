@@ -4,6 +4,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useOfflineMode } from '@/hooks/useOfflineMode';
 import { useSearchParams, useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { logDocumentViewed, logDocumentDownloaded } from '@/utils/auditLogger';
 
 import { FeatureNavigation } from './components/FeatureNavigation';
 import { SimplifyDriveHeader } from './components/SimplifyDriveHeader';
@@ -76,8 +77,8 @@ export function SimplifyDrive() {
   const [showSyncDialog, setShowSyncDialog] = useState(false);
 
   const { toast } = useToast();
-  const { 
-    status: offlineStatus, 
+  const {
+    status: offlineStatus,
     syncPendingChanges,
     getPendingUploadsData,
     syncSelectedUploads,
@@ -87,7 +88,7 @@ export function SimplifyDrive() {
 
   // Handle legal hold filter from navigation state
   useEffect(() => {
-    const state = location.state as { legalHoldId?: string; legalHoldName?: string };
+    const state = (location as any).state as { legalHoldId?: string; legalHoldName?: string };
     if (state?.legalHoldId) {
       setActiveFeature('documents');
       // Fetch documents under this legal hold
@@ -97,14 +98,14 @@ export function SimplifyDrive() {
             .from('document_retention_status')
             .select('document_id')
             .contains('legal_hold_ids', [state.legalHoldId]);
-          
+
           if (error) {
             console.error('Error fetching legal hold documents:', error);
             return;
           }
 
           const documentIds = retentionStatuses?.map(s => s.document_id) || [];
-          
+
           if (documentIds.length > 0) {
             setSearchQuery(`legal_hold:${state.legalHoldId}:${documentIds.join(',')}`);
             toast({
@@ -121,7 +122,7 @@ export function SimplifyDrive() {
           console.error('Error loading legal hold documents:', error);
         }
       };
-      
+
       fetchLegalHoldDocuments();
       // Clear the state after using it
       window.history.replaceState({}, document.title);
@@ -143,7 +144,7 @@ export function SimplifyDrive() {
 
   // Pending uploads state
   const [pendingUploads, setPendingUploads] = useState<any[]>([]);
-  
+
   // Track active uploads for processing banner
   const [activeUploadsCount, setActiveUploadsCount] = useState(0);
 
@@ -151,7 +152,7 @@ export function SimplifyDrive() {
   // OPTIMIZED: Increased interval from 2s to 5s to reduce database load
   // A typical document takes 60-90 seconds to process, so 5s polling is sufficient
   React.useEffect(() => {
-    const hasProcessingDocs = documents.some(doc => 
+    const hasProcessingDocs = documents.some(doc =>
       doc.processing_status === 'processing'
     );
 
@@ -182,16 +183,16 @@ export function SimplifyDrive() {
         });
         return;
       }
-      
+
       // Get all upload IDs
       const allIds = uploads.map(u => u.id);
-      
+
       // Sync all
       await syncSelectedUploads(allIds);
-      
+
       // Refetch documents
       refetch();
-      
+
       toast({
         title: "Sync complete",
         description: `${uploads.length} document(s) synced successfully`,
@@ -212,31 +213,49 @@ export function SimplifyDrive() {
       console.log('📡 Documents changed event received, refetching...');
       refetch();
     };
-    
+
     // Listen for upload started/completed events
     const handleUploadStarted = (event: CustomEvent) => {
       const count = event.detail?.count || 1;
       console.log('📤 Upload started:', count);
       setActiveUploadsCount(prev => prev + count);
     };
-    
+
     const handleUploadCompleted = (event: CustomEvent) => {
       const count = event.detail?.count || 1;
       console.log('✅ Upload completed:', count);
       setActiveUploadsCount(prev => Math.max(0, prev - count));
       refetch();
     };
-    
+
+    // Listen for preview-document event from Access Rules panel
+    const handlePreviewDocument = (event: CustomEvent) => {
+      const documentId = event.detail?.documentId;
+      if (documentId) {
+        console.log('👁️ Preview document requested:', documentId);
+        // Find the document in our documents array
+        const doc = documents.find(d => d.id === documentId);
+        if (doc) {
+          setSelectedDocument(doc);
+          setShowDocumentViewer(true);
+        } else {
+          console.warn('Document not found:', documentId);
+        }
+      }
+    };
+
     window.addEventListener('documents-changed', handleDocumentsChanged);
     window.addEventListener('upload-started', handleUploadStarted as EventListener);
     window.addEventListener('upload-completed', handleUploadCompleted as EventListener);
-    
+    window.addEventListener('preview-document', handlePreviewDocument as EventListener);
+
     return () => {
       window.removeEventListener('documents-changed', handleDocumentsChanged);
       window.removeEventListener('upload-started', handleUploadStarted as EventListener);
       window.removeEventListener('upload-completed', handleUploadCompleted as EventListener);
+      window.removeEventListener('preview-document', handlePreviewDocument as EventListener);
     };
-  }, [refetch]);
+  }, [refetch, documents]);
 
   // Handlers
   const handleDocumentProcessed = useCallback((_documentId: string) => {
@@ -246,10 +265,10 @@ export function SimplifyDrive() {
       title: "Document uploaded successfully",
       description: "Your document has been processed and organized automatically. Matching workflows will start automatically.",
     });
-    
+
     // The backend WorkflowTriggerService automatically handles workflow matching and starting
     // No need to show manual workflow suggestion dialog
-    
+
   }, [refetch, toast]);
 
   const handleViewDocument = useCallback((doc: Document) => {
@@ -257,6 +276,8 @@ export function SimplifyDrive() {
     setShowDocumentViewer(true);
     // Track document access for quick access feature
     trackAccess(doc.id);
+    // Log audit event
+    logDocumentViewed(doc.id, doc.file_name);
   }, [trackAccess]);
 
   const handleDownloadDocument = useCallback((doc: Document) => {
@@ -269,6 +290,9 @@ export function SimplifyDrive() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+
+      // Log audit event
+      logDocumentDownloaded(doc.id, doc.file_name);
 
       toast({
         title: "Download started",
@@ -321,7 +345,7 @@ export function SimplifyDrive() {
         const blob = await response.blob();
 
         // Use custom file name if provided
-        const finalFileName = pages.length === 1 
+        const finalFileName = pages.length === 1
           ? `${customFileName || 'scanned'}.pdf`
           : `${customFileName || 'scanned'}_page${i + 1}.pdf`;
 
@@ -337,7 +361,7 @@ export function SimplifyDrive() {
 
             // Use the same endpoint as regular upload
             const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-            
+
             const analysisResponse = await fetch(`${backendUrl}/api/v1/analyze-document`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -362,10 +386,10 @@ export function SimplifyDrive() {
             }
 
             console.log(`Scanned page ${i + 1} processed and saved via backend`);
-            
+
             // Update active uploads count as each completes
             setActiveUploadsCount(prev => Math.max(0, prev - 1));
-            
+
             // Refetch after each upload completes to show new document
             refetch();
           } catch (e) {
@@ -377,7 +401,7 @@ export function SimplifyDrive() {
           // Simple upload without AI processing
           const file = new File([blob], finalFileName, { type: blob.type || 'application/pdf' });
           const storagePath = `${user.data.user.id}/${Date.now()}_${finalFileName}`;
-          
+
           const { error: uploadError } = await supabase.storage
             .from('documents')
             .upload(storagePath, file);
@@ -401,13 +425,13 @@ export function SimplifyDrive() {
                 page_number: page.pageNumber,
                 rotation: page.rotation,
               }
-            });
+            } as any);
 
           if (insertError) {
             setActiveUploadsCount(prev => Math.max(0, prev - 1));
             throw insertError;
           }
-          
+
           // Update count and refetch
           setActiveUploadsCount(prev => Math.max(0, prev - 1));
           refetch();
@@ -416,10 +440,10 @@ export function SimplifyDrive() {
 
       // Ensure uploads count is reset
       setActiveUploadsCount(0);
-      
+
       // Final refetch to ensure all documents are shown
       refetch();
-      
+
       toast({
         title: "Upload complete!",
         description: `${pages.length} document(s) uploaded successfully`,
@@ -441,13 +465,13 @@ export function SimplifyDrive() {
   }
 
   const isDocumentsView = activeFeature === 'documents';
-  
+
   // Check for actively processing documents (only 'processing' status, not 'pending')
   // 'pending' is the default status for all documents, so we only show banner for actual active processing
-  const processingDocs = documents.filter(doc => 
+  const processingDocs = documents.filter(doc =>
     doc.processing_status === 'processing'
   );
-  
+
   // Total processing count: backend processing + active uploads
   const totalProcessingCount = processingDocs.length + activeUploadsCount;
 

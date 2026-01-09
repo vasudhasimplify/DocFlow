@@ -35,6 +35,7 @@ import Settings from "./pages/Settings";
 import BulkTest from "./pages/BulkTest";
 import EditorWrapper from "@/components/modern-editor/EditorWrapper";
 import { SigningPage } from "./pages/SigningPage";
+import SharedDocumentsPage from "./pages/SharedDocumentsPage";
 
 // Configure React Query client
 const queryClient = new QueryClient({
@@ -118,7 +119,11 @@ const protectedRoutes: RouteConfig[] = [
     element: <AppLayout><DocumentManager /></AppLayout>
   },
   {
-    path: ROUTES.HISTORY,
+    path: "/shared",
+    element: <AppLayout><SharedDocumentsPage /></AppLayout>
+  },
+  {
+    path: "/history",
     element: <AppLayout><History /></AppLayout>
   },
   {

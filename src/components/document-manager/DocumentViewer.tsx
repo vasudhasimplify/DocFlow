@@ -28,6 +28,7 @@ import { API_BASE_URL } from '@/config/api';
 import { toast } from 'sonner';
 import { useWatermark, WatermarkSettings } from '@/hooks/useWatermark';
 import { useDocumentRestrictions, DocumentRestrictions } from '@/hooks/useDocumentRestrictions';
+import { logDocumentViewed, logDocumentDownloaded } from '@/utils/auditLogger';
 
 interface Document {
   id: string;
@@ -125,7 +126,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   // Function to detect document type using AI and open workflow suggestion
   const handleAISuggestWorkflow = async () => {
     if (!document?.id) return;
-    
+
     setIsDetectingType(true);
     try {
       // First get the document file from storage
@@ -134,7 +135,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         .select('storage_path')
         .eq('id', document.id)
         .single();
-      
+
       if (!docData?.storage_path) {
         throw new Error('Document storage path not found');
       }
@@ -143,36 +144,36 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       const { data: fileData, error: downloadError } = await supabase.storage
         .from('documents')
         .download(docData.storage_path);
-      
-      if (downloadError ||!fileData) {
+
+      if (downloadError || !fileData) {
         throw new Error('Failed to download document');
       }
 
       // Send to AI for document type detection
       const formData = new FormData();
       formData.append('file', fileData, document.file_name);
-      
+
       const response = await fetch(`${API_BASE_URL}/api/v1/detect-document-type`, {
         method: 'POST',
         body: formData,
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to detect document type');
       }
-      
+
       const result = await response.json();
-      
+
       // Store the detected type and open suggestion dialog
       setAiDocumentType(result.document_type || 'unknown');
       setAiConfidence(result.confidence || 0);
       setShowWorkflowSuggestion(true);
-      
+
     } catch (error: any) {
       console.error('Error detecting document type:', error);
       let errorMessage = 'Failed to analyze document';
       let description = 'Please try again';
-      
+
       if (error.message?.includes('404')) {
         errorMessage = 'AI Analysis Service Unavailable';
         description = 'The backend service may not be running';
@@ -180,7 +181,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         errorMessage = 'Connection Error';
         description = 'Unable to connect to the analysis service';
       }
-      
+
       toast.error(errorMessage, {
         description,
       });
@@ -255,6 +256,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           console.log('✅ Signed URL generated:', data.signedUrl.substring(0, 100) + '...');
           setResolvedUrl(data.signedUrl);
           setIsOfflineDocument(false);
+          // Log document view to audit trail
+          logDocumentViewed(document.id, document.file_name);
         }
       } catch (err) {
         console.error('❌ Error generating signed URL:', err);
@@ -405,6 +408,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       a.click();
       globalThis.document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      // Log document download to audit trail
+      logDocumentDownloaded(document.id, document.file_name);
     } catch (error) {
       console.error('Download failed:', error);
     }

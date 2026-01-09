@@ -4,12 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuditTrail } from '@/hooks/useAuditTrail';
 import { useToast } from '@/hooks/use-toast';
+import { AuditCategory } from '@/types/audit';
 import AuditTimeline from './AuditTimeline';
 import AuditStatsCards from './AuditStatsCards';
-import { 
-  Activity, 
-  BarChart3, 
-  Download, 
+import {
+  Activity,
+  BarChart3,
+  Download,
   RefreshCw,
   Clock,
   Shield,
@@ -31,7 +32,7 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({
 }) => {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('timeline');
-  
+
   const {
     events,
     stats,
@@ -51,8 +52,8 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({
   const handleExport = async (format: 'csv' | 'json') => {
     try {
       const data = await exportEvents({}, format);
-      const blob = new Blob([data], { 
-        type: format === 'json' ? 'application/json' : 'text/csv' 
+      const blob = new Blob([data], {
+        type: format === 'json' ? 'application/json' : 'text/csv'
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -62,7 +63,7 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      
+
       toast({
         title: 'Export complete',
         description: `Audit trail exported as ${format.toUpperCase()}`,
@@ -141,14 +142,20 @@ const AuditDashboard: React.FC<AuditDashboardProps> = ({
 
         {showStats && (
           <TabsContent value="analytics" className="mt-6">
-            <AuditStatsCards stats={stats} isLoading={isLoading} />
+            <AuditStatsCards
+              stats={stats}
+              isLoading={isLoading}
+              events={events}
+              onRequestEvents={() => fetchEvents({})}
+              onSwitchToTimeline={() => setActiveTab('timeline')}
+            />
           </TabsContent>
         )}
 
         <TabsContent value="security" className="mt-6">
           <AuditTimeline
-            events={events.filter(e => 
-              e.action_category === 'access_control' || 
+            events={events.filter(e =>
+              e.action_category === 'access_control' ||
               e.action_category === 'security' ||
               e.action.includes('shared') ||
               e.action.includes('access')

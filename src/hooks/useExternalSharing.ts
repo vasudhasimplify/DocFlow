@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { logDocumentShared, logAuditEvent } from '@/utils/auditLogger';
 
 export interface ExternalShare {
   id: string;
@@ -149,6 +150,14 @@ export function useExternalSharing() {
         title: "Share invitation sent",
         description: `Invitation sent to ${params.guest_email}. Email is on its way!`,
       });
+
+      // Log guest share to audit trail
+      logDocumentShared(
+        params.resource_id,
+        params.resource_name || 'Document',
+        [params.guest_email],
+        params.permission
+      );
 
       await fetchShares();
       return data;

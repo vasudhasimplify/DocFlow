@@ -27,7 +27,8 @@ import {
   FileSpreadsheet,
   Presentation,
   Brain,
-  Sparkles
+  Sparkles,
+  Shield
 } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -36,6 +37,7 @@ import { CameraCapture } from "../CameraCapture";
 import { API_BASE_URL } from "@/config/api";
 import { autoClassifyDocument } from "@/services/autoClassificationService";
 import { useContentAccessRules } from '@/hooks/useContentAccessRules';
+import { logDocumentCreated, logAuditEvent } from '@/utils/auditLogger';
 
 interface UploadFile {
   id: string;
@@ -68,9 +70,11 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+
   const [enableRAG, setEnableRAG] = useState(true);
   const [enableClassification, setEnableClassification] = useState(false);
   const [enableWorkflowSuggestion, setEnableWorkflowSuggestion] = useState(true);
+  const [enableAccessRules, setEnableAccessRules] = useState(false);
   const [uploadComplete, setUploadComplete] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -159,12 +163,12 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
           enableRAG,
           enableClassification,
         });
-        
+
         if (queueId) {
-          updateFileStatus(uploadFile.id, { 
-            status: 'complete', 
+          updateFileStatus(uploadFile.id, {
+            status: 'complete',
             progress: 100,
-            documentId: queueId 
+            documentId: queueId
           });
           return queueId;
         } else {
@@ -185,12 +189,12 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
             enableRAG,
             enableClassification,
           });
-          
+
           if (queueId) {
-            updateFileStatus(uploadFile.id, { 
-              status: 'complete', 
+            updateFileStatus(uploadFile.id, {
+              status: 'complete',
               progress: 100,
-              documentId: queueId 
+              documentId: queueId
             });
             return queueId;
           } else {
@@ -205,12 +209,12 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
           enableRAG,
           enableClassification,
         });
-        
+
         if (queueId) {
-          updateFileStatus(uploadFile.id, { 
-            status: 'complete', 
+          updateFileStatus(uploadFile.id, {
+            status: 'complete',
             progress: 100,
-            documentId: queueId 
+            documentId: queueId
           });
           return queueId;
         } else {
@@ -238,10 +242,10 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
       // This allows us to add to processing queue immediately
       let documentData: any = null;
       let extractedText = '';
-      
+
       // Determine document type
       const docType = getDocumentType(uploadFile.file.type);
-      
+
       // Create initial document record
       const { data: initialDoc, error: docError } = await supabase
         .from('documents')
@@ -271,6 +275,18 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
 
       documentData = initialDoc;
       console.log('📄 Document record created:', documentData.id);
+
+      // Log audit event for document creation
+      try {
+        await logDocumentCreated(
+          documentData.id,
+          uploadFile.file.name,
+          documentData.file_size
+        );
+        console.log('📝 Audit event logged: document.created');
+      } catch (auditError) {
+        console.warn('Failed to log audit event:', auditError);
+      }
 
       // ADD TO PROCESSING QUEUE IMMEDIATELY (before processing starts)
       // Check for existing entry first to prevent duplicates
@@ -332,7 +348,7 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
         // Backend will process and update the document
         try {
           updateFileStatus(uploadFile.id, { status: 'processing', progress: 55 });
-          
+
           // NOTE: Don't dispatch upload-started here - the document with processing_status='processing'
           // will already be counted in SimplifyDrive's processingDocs array
           console.log('📤 Backend processing started (will be counted via processing_status)');
@@ -368,24 +384,127 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
               skipWorkflowTrigger: !enableWorkflowSuggestion // Pass the user's workflow preference
             }),
           });
-          
+
           // Trigger documents-changed event immediately
           setTimeout(() => {
             window.dispatchEvent(new Event('documents-changed'));
           }, 500);
-          
+
           const analysisResponse = await analysisPromise;
 
           if (analysisResponse.ok) {
             const analysisResult = await analysisResponse.json();
             extractedData = analysisResult.extractedData || {};
             extractedText = analysisResult.extractedText || '';
+
+            // If backend didn't return extracted text, fetch it from database
+            // The backend saves extracted_text to the database during processing
+            if (!extractedText || extractedText.length === 0) {
+              console.log('📝 Fetching extracted text from database for rule matching...');
+              try {
+                const { data: docData } = await supabase
+                  .from('documents')
+                  .select('extracted_text')
+                  .eq('id', documentData.id)
+                  .single();
+
+                if (docData?.extracted_text) {
+                  extractedText = docData.extracted_text;
+                  console.log('📝 Got extracted text from database:', extractedText.length, 'chars');
+                }
+              } catch (fetchErr) {
+                console.warn('Could not fetch extracted text from database:', fetchErr);
+              }
+            }
+
             // Document already exists, backend updated it
             console.log('Document processed by backend:', {
               documentId: documentData.id,
               textLength: extractedText.length,
               hasData: !!extractedData
             });
+
+            // Log AI processing audit event
+            try {
+              await logAuditEvent({
+                action: 'document.processed',
+                category: 'ai_processing',
+                resourceType: 'document',
+                resourceName: uploadFile.file.name,
+                documentId: documentData.id,
+                details: {
+                  ai_model: 'document-analyzer',
+                  processing_time_ms: Date.now() - new Date(documentData.created_at).getTime(),
+                  notes: 'AI text extraction and analysis completed',
+                },
+              });
+              console.log('📝 Audit event logged: document.processed (AI)');
+            } catch (auditErr) {
+              console.warn('Failed to log AI processing audit:', auditErr);
+            }
+
+            // Apply access rules if enabled - ALWAYS runs after AI processing
+            console.log('🔍 Access Rules toggle state:', enableAccessRules);
+            if (enableAccessRules) {
+              console.log('🛡️ Auto-applying access rules for document:', documentData.id, 'filename:', uploadFile.file.name);
+              try {
+                const appliedRules = await applyRulesToDocument(documentData.id, {
+                  name: uploadFile.file.name,
+                  file_type: uploadFile.file.type,
+                  file_size: uploadFile.file.size,
+                  content: extractedText,
+                });
+
+                console.log('📋 Applied rules result:', appliedRules?.length || 0, 'rules');
+
+                if (appliedRules && appliedRules.length > 0) {
+                  const ruleNames = appliedRules.map(r => r.name).join(', ');
+                  toast({
+                    title: "✅ Access Rules Applied",
+                    description: `Applied ${appliedRules.length} rule(s): ${ruleNames}`,
+                  });
+
+                  // Force refresh of document list
+                  setTimeout(() => {
+                    window.dispatchEvent(new Event('documents-changed'));
+                  }, 500);
+
+                  // Log access rules application
+                  try {
+                    await logAuditEvent({
+                      action: 'document.processed',
+                      category: 'security',
+                      resourceType: 'document',
+                      resourceName: uploadFile.file.name,
+                      documentId: documentData.id,
+                      details: {
+                        action: 'auto_apply_rules',
+                        rule_count: appliedRules.length,
+                        rule_names: appliedRules.map(r => r.name)
+                      }
+                    });
+                  } catch (e) {
+                    console.warn('Failed to log rule application audit:', e);
+                  }
+                } else {
+                  console.log('⚠️ No rules matched for document:', uploadFile.file.name);
+                  toast({
+                    title: "No Matching Rules",
+                    description: `No access rules matched "${uploadFile.file.name}"`,
+                    variant: "default"
+                  });
+                }
+              } catch (ruleError) {
+                console.error('❌ Failed to auto-apply rules:', ruleError);
+                toast({
+                  title: "Rule Application Failed",
+                  description: `Failed to apply rules: ${ruleError.message}`,
+                  variant: "destructive"
+                });
+              }
+            } else {
+              console.log('ℹ️ Access Rules toggle is OFF - skipping rule application');
+            }
           } else {
             throw new Error('Backend processing failed');
           }
@@ -397,7 +516,7 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
         // Simple upload: No backend processing, just update document status
         console.log('📤 Dispatching upload-started event (simple upload)');
         window.dispatchEvent(new CustomEvent('upload-started', { detail: { count: 1 } }));
-        
+
         // Try to extract text locally
         try {
           extractedText = await extractTextFromFile(uploadFile.file);
@@ -548,16 +667,34 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
         console.error('Auto-classification failed (non-blocking):', classifyErr);
       }
 
-      // Apply Access Rules
-      try {
-        await applyRulesToDocument(documentData.id, {
-          name: uploadFile.file.name,
-          file_type: uploadFile.file.type,
-          file_size: uploadFile.file.size,
-          content: extractedText
-        });
-      } catch (ruleErr) {
-        console.error('Failed to apply access rules:', ruleErr);
+      // Apply Access Rules (final check - runs for all upload paths)
+      if (enableAccessRules) {
+        console.log('🛡️ Final Access Rules check for document:', documentData.id);
+        try {
+          const appliedRules = await applyRulesToDocument(documentData.id, {
+            name: uploadFile.file.name,
+            file_type: uploadFile.file.type,
+            file_size: uploadFile.file.size,
+            content: extractedText
+          });
+
+          console.log('📋 Final applied rules result:', appliedRules?.length || 0, 'rules');
+
+          if (appliedRules && appliedRules.length > 0) {
+            const ruleNames = appliedRules.map(r => r.name).join(', ');
+            toast({
+              title: "✅ Access Rules Applied",
+              description: `Applied ${appliedRules.length} rule(s): ${ruleNames}`,
+            });
+
+            // Force refresh
+            setTimeout(() => {
+              window.dispatchEvent(new Event('documents-changed'));
+            }, 500);
+          }
+        } catch (ruleErr) {
+          console.error('Failed to apply access rules:', ruleErr);
+        }
       }
 
       // Mark processing queue as completed
@@ -570,7 +707,7 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
             completed_at: new Date().toISOString()
           })
           .eq('document_id', documentData.id);
-        
+
         // Also update search index queue
         await supabase
           .from('search_index_queue')
@@ -579,7 +716,7 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
             processed_at: new Date().toISOString()
           })
           .eq('document_id', documentData.id);
-          
+
         console.log('✅ Processing queue marked as completed for:', documentData.id);
       } catch (queueUpdateError) {
         console.warn('Could not update processing queue:', queueUpdateError);
@@ -599,7 +736,7 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
       // Dispatch upload-completed event to update processing banner and trigger document refresh
       console.log('✅ Dispatching upload-completed event for document:', documentData.id);
       window.dispatchEvent(new CustomEvent('upload-completed', { detail: { count: 1, documentId: documentData.id } }));
-      
+
       return documentData.id;
 
     } catch (error) {
@@ -637,10 +774,10 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
     const failCount = pendingFiles.length - successCount;
 
     if (successCount > 0) {
-      const workflowMessage = enableWorkflowSuggestion 
+      const workflowMessage = enableWorkflowSuggestion
         ? 'Matching workflows will start automatically.'
         : 'Workflows will not be auto-started.';
-      
+
       toast({
         title: "Upload Complete",
         description: `${successCount} file(s) uploaded successfully${failCount > 0 ? `, ${failCount} failed` : ''}. ${workflowMessage}`,
@@ -926,9 +1063,8 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
         </div>
 
         <div
-          className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-            enableWorkflowSuggestion ? 'border-blue-500 bg-blue-500/5' : 'border-border hover:border-muted-foreground/50 bg-card'
-          }`}
+          className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${enableWorkflowSuggestion ? 'border-blue-500 bg-blue-500/5' : 'border-border hover:border-muted-foreground/50 bg-card'
+            }`}
           onClick={() => setEnableWorkflowSuggestion(!enableWorkflowSuggestion)}
         >
           <Checkbox
@@ -944,7 +1080,31 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
                 Auto-Start Workflows
               </Label>
               <p className="text-xs text-muted-foreground truncate">
-                {enableWorkflowSuggestion ? 'Workflows start automatically (always enabled)' : 'Manual workflow start only'}
+                {enableWorkflowSuggestion ? 'Workflows start automatically' : 'Manual workflow start only'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${enableAccessRules ? 'border-indigo-500 bg-indigo-500/5' : 'border-border hover:border-muted-foreground/50 bg-card'
+            }`}
+          onClick={() => setEnableAccessRules(!enableAccessRules)}
+        >
+          <Checkbox
+            id="rules-toggle"
+            checked={enableAccessRules}
+            onCheckedChange={(checked) => setEnableAccessRules(checked as boolean)}
+            className="h-4 w-4 flex-shrink-0"
+          />
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <Shield className="h-4 w-4 text-indigo-500 flex-shrink-0" />
+            <div className="min-w-0">
+              <Label htmlFor="rules-toggle" className="text-sm font-medium cursor-pointer block truncate">
+                Auto-Apply Access Rules
+              </Label>
+              <p className="text-xs text-muted-foreground truncate">
+                Apply security rules automatically
               </p>
             </div>
           </div>

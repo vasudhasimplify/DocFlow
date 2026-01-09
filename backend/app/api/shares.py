@@ -9,6 +9,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 import uuid
 import os
+import json
 import logging
 from app.core.auth import get_current_user
 from app.services.email import send_guest_invitation
@@ -214,8 +215,33 @@ async def get_user_shares(current_user = Depends(get_current_user)):
         
         return [ShareResponse(**share) for share in response.data]
     
+        return [ShareResponse(**share) for share in response.data]
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch shares: {str(e)}")
+
+
+@router.get("/shared-with-me", response_model=List[ShareResponse])
+async def get_shared_with_me(current_user = Depends(get_current_user)):
+    """
+    Get shares where the current user is the guest (recipient)
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Get user's email
+        user_email = current_user.email
+        
+        response = supabase.table('external_shares')\
+            .select('*')\
+            .eq('guest_email', user_email)\
+            .order('created_at', desc=True)\
+            .execute()
+        
+        return [ShareResponse(**share) for share in response.data]
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch shared with me: {str(e)}")
 
 
 @router.get("/stats", response_model=ShareStatsResponse)
@@ -369,9 +395,27 @@ class LogAccessPublicRequest(BaseModel):
     accessor_email: Optional[str] = None
 
 
-# In-memory storage for access logs (for local share links)
-# In production, this would be in Redis or a database
-_access_logs_cache: dict = {}
+
+# In-memory storage with JSON persistence
+ANALYTICS_FILE = os.path.join(os.path.dirname(__file__), 'analytics_data.json')
+
+def load_analytics():
+    try:
+        if os.path.exists(ANALYTICS_FILE):
+            with open(ANALYTICS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading analytics: {e}")
+    return {}
+
+def save_analytics(data):
+    try:
+        with open(ANALYTICS_FILE, 'w') as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"Error saving analytics: {e}")
+
+_access_logs_cache: dict = load_analytics()
 
 
 @router.post("/log-access-public")
@@ -396,6 +440,9 @@ async def log_access_public(request: LogAccessPublicRequest):
         }
         
         _access_logs_cache[request.share_id].append(log_entry)
+        
+        # Save to file
+        save_analytics(_access_logs_cache)
         
         # Keep only last 50 logs per share
         _access_logs_cache[request.share_id] = _access_logs_cache[request.share_id][-50:]

@@ -252,83 +252,73 @@ export default function GuestAccessPage() {
         return;
       }
 
-      // If not found locally, try the database
+      // If not found locally, try fetching from Supabase directly (works from any browser)
       try {
-        const { data, error: dbError } = await supabase
+        // Query external_shares table directly using anon key
+        // The database column is 'invitation_token'
+        const { data: shareData, error: tokenError } = await supabase
           .from('external_shares')
           .select('*')
           .eq('invitation_token', token)
-          .single();
+          .maybeSingle();
 
-        if (dbError || !data) {
-          // Also try by token field
-          const { data: tokenData, error: tokenError } = await supabase
-            .from('external_shares')
-            .select('*')
-            .eq('token', token)
-            .single();
-
-          if (tokenError || !tokenData) {
-            setError('Invalid or expired share link');
-            setLoading(false);
-            return;
-          }
-
-          // Found by token field
-          if (tokenData.status === 'revoked' || !tokenData.is_active) {
-            setError('This share has been revoked');
-            setLoading(false);
-            return;
-          }
-          if (tokenData.expires_at && new Date(tokenData.expires_at) < new Date()) {
-            setError('This share link has expired');
-            setLoading(false);
-            return;
-          }
-
-          // Handle password protection for DB link
-          if (tokenData.password_protected) {
-            setIsLocked(true);
-            setShare(tokenData);
-            setLoading(false);
-            return;
-          }
-
-          setShare(tokenData);
-          setViewCount(tokenData.use_count || 0);
-          await fetchDocumentFromBackend();
-          // Track view via API
-          fetch(`/api/shares/${tokenData.id}/view`, { method: 'POST' }).catch(() => { });
+        if (tokenError) {
+          console.error('Error fetching share:', tokenError);
+          setError('Failed to load share link');
           setLoading(false);
           return;
         }
 
-        if (data.status === 'revoked') {
+        if (!shareData) {
+          setError('Invalid or expired share link');
+          setLoading(false);
+          return;
+        }
+
+        // Check if share is revoked
+        if (shareData.revoked || shareData.is_revoked) {
           setError('This share has been revoked');
           setLoading(false);
           return;
         }
-        if (data.status === 'expired' || (data.expires_at && new Date(data.expires_at) < new Date())) {
-          setError('This share link has expired');
-          setLoading(false);
-          return;
+
+        // Check if share is expired
+        if (shareData.expires_at) {
+          const expiresAt = new Date(shareData.expires_at);
+          if (expiresAt < new Date()) {
+            setError('This share link has expired');
+            setLoading(false);
+            return;
+          }
         }
 
         // Handle password protection for DB link
-        if (data.password_protected) {
+        if (shareData.password_protected) {
           setIsLocked(true);
-          setShare(data);
+          setShare(shareData);
           setLoading(false);
           return;
         }
 
-        setShare(data);
-        setViewCount(data.use_count || 0);
+        setShare(shareData);
+        setViewCount(shareData.view_count || 0);
+
+        // Fetch document using backend API (bypasses RLS for anonymous users)
         await fetchDocumentFromBackend();
-        // Track view via API
-        fetch(`/api/shares/${data.id}/view`, { method: 'POST' }).catch(() => { });
+
+        // Track view
+        try {
+          await supabase
+            .from('external_shares')
+            .update({ view_count: (shareData.view_count || 0) + 1 })
+            .eq('id', shareData.id);
+        } catch (e) {
+          // Ignore view tracking errors
+        }
+
         setLoading(false);
       } catch (err) {
+        console.error('Error fetching share:', err);
         setError('Failed to load share link');
         setLoading(false);
       }
@@ -710,37 +700,51 @@ export default function GuestAccessPage() {
   };
 
   const fetchDocumentDirect = async (resourceId: string) => {
-    // For localStorage share links - use backend API to bypass RLS
+    // Fetch document directly from Supabase (works from any browser)
     try {
-      console.log('🔍 Fetching document via backend API with resourceId:', resourceId);
+      console.log('🔍 Fetching document directly from Supabase with resourceId:', resourceId);
 
-      // Call the public backend endpoint that uses service role (bypasses RLS)
-      const response = await fetch(`/api/guest/document-by-id/${resourceId}`);
+      // Query document from Supabase
+      const { data: docData, error: docError } = await supabase
+        .from('documents')
+        .select('id, file_name, storage_path, file_type, mime_type')
+        .eq('id', resourceId)
+        .maybeSingle();
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-        console.error('❌ Backend API error:', errorData);
-        setError(errorData.detail || 'Failed to load document');
+      if (docError || !docData) {
+        console.error('❌ Error fetching document:', docError);
+        setError('Document not found');
         return;
       }
 
-      const data = await response.json();
-      console.log('✅ Document data received from backend:', data);
+      console.log('✅ Document data received:', docData);
 
       setDocument({
-        id: data.document_id,
-        file_name: data.file_name,
-        storage_path: data.storage_path,
-        file_type: data.file_type,
+        id: docData.id,
+        file_name: docData.file_name,
+        storage_path: docData.storage_path,
+        file_type: docData.file_type || docData.mime_type,
         extracted_text: null
       });
 
-      if (data.signed_url) {
-        console.log('✅ Signed URL received successfully');
-        setDocumentUrl(data.signed_url);
+      // Generate signed URL for the document
+      if (docData.storage_path) {
+        const { data: signedUrlData, error: signedUrlError } = await supabase
+          .storage
+          .from('documents')
+          .createSignedUrl(docData.storage_path, 3600); // 1 hour expiry
+
+        if (signedUrlError || !signedUrlData?.signedUrl) {
+          console.error('❌ Error generating signed URL:', signedUrlError);
+          setError('Failed to generate document URL');
+          return;
+        }
+
+        console.log('✅ Signed URL generated successfully');
+        setDocumentUrl(signedUrlData.signedUrl);
       } else {
-        console.error('❌ No signed URL in response');
-        setError('Failed to generate document URL');
+        console.error('❌ No storage path in document');
+        setError('Document has no file associated');
       }
     } catch (err) {
       console.error('❌ Error fetching document:', err);

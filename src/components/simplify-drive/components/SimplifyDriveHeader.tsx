@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Search, 
-  Upload, 
-  SortAsc, 
-  Grid, 
-  List, 
+import {
+  Search,
+  Upload,
+  SortAsc,
+  Grid,
+  List,
   Brain,
   Scan,
   Cloud,
@@ -17,7 +17,8 @@ import {
   MessageSquare,
   HardDrive,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  Share2
 } from 'lucide-react';
 import type { DocumentStats, ViewMode, SortOrder } from '../types';
 
@@ -78,7 +79,7 @@ export function SimplifyDriveHeader({
           </div>
         </div>
       )}
-      
+
       {/* Stats Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
@@ -180,12 +181,12 @@ export function SimplifyDriveHeader({
           ) : (
             <CloudOff className="h-4 w-4 text-destructive" />
           )}
-          
+
           {/* Offline Documents Button */}
           {onOfflinePanel && (
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               onClick={onOfflinePanel}
               className="gap-2"
             >
@@ -198,12 +199,12 @@ export function SimplifyDriveHeader({
               )}
             </Button>
           )}
-          
+
           {/* Sync Button */}
           {onSync && pendingSyncCount > 0 && isOnline && (
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               onClick={onSync}
               disabled={isSyncing}
               className="gap-2"
@@ -216,6 +217,9 @@ export function SimplifyDriveHeader({
             </Button>
           )}
         </div>
+
+
+
 
         {/* Upload Actions */}
         <div className="flex items-center gap-2 ml-auto">
