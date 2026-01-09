@@ -353,7 +353,7 @@ class AutoOrganizeService:
         try:
             logger.info(f"🔄 Processing pending documents for user: {user_id}")
             
-            # Get documents without analysis
+            # Get documents
             query = self.supabase.from_('documents').select(
                 'id, file_name, document_type, extracted_text, analysis_result'
             ).eq('user_id', user_id)
@@ -371,10 +371,15 @@ class AutoOrganizeService:
                     "message": "No pending documents found"
                 }
             
-            # Filter documents that need processing (no analysis_result or empty {} means not processed)
+            # Get document IDs that already have entries in document_insights
+            doc_ids = [doc['id'] for doc in docs_response.data]
+            insights_response = self.supabase.from_('document_insights').select('document_id').in_('document_id', doc_ids).execute()
+            processed_doc_ids = set(insight['document_id'] for insight in (insights_response.data or []))
+            
+            # Filter documents that DON'T have entries in document_insights table
             pending_docs = [
                 doc for doc in docs_response.data
-                if not doc.get('analysis_result') or (isinstance(doc.get('analysis_result'), dict) and len(doc.get('analysis_result')) == 0)
+                if doc['id'] not in processed_doc_ids
             ]
             
             if not pending_docs:
@@ -411,6 +416,33 @@ class AutoOrganizeService:
                         'analysis_result': analysis_result,
                         'processing_status': 'completed'
                     }).eq('id', doc['id']).execute()
+                    
+                    # Also create/update document_insights entry for the document
+                    # This is used by the frontend to determine if a document has been processed
+                    try:
+                        insights_data = {
+                            'document_id': doc['id'],
+                            'user_id': user_id,
+                            'summary': analysis_result.get('summary', ''),
+                            'key_topics': analysis_result.get('key_topics', []),
+                            'importance_score': analysis_result.get('importance_score', 0.5),
+                            'ai_generated_title': analysis_result.get('ai_generated_title', doc.get('file_name', 'Unknown')),
+                            'suggested_actions': []
+                        }
+                        
+                        # Check if entry already exists
+                        existing = self.supabase.from_('document_insights').select('id').eq('document_id', doc['id']).execute()
+                        
+                        if existing.data and len(existing.data) > 0:
+                            # Update existing entry
+                            self.supabase.from_('document_insights').update(insights_data).eq('document_id', doc['id']).execute()
+                            logger.info(f"✅ Updated insights for document {doc['id']}")
+                        else:
+                            # Insert new entry
+                            self.supabase.from_('document_insights').insert(insights_data).execute()
+                            logger.info(f"✅ Created insights for document {doc['id']}")
+                    except Exception as insights_error:
+                        logger.warning(f"Could not create document_insights: {insights_error}")
                     
                     processed_documents.append({
                         'documentId': doc['id'],

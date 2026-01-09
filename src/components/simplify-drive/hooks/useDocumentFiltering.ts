@@ -149,37 +149,54 @@ export function useDocumentFiltering({
 
     // Sort documents
     filtered.sort((a, b) => {
-      let aValue: string | number;
-      let bValue: string | number;
-      
+      // Sort by the selected field
       switch (sortBy) {
-        case 'name':
-          aValue = a.file_name.toLowerCase();
-          bValue = b.file_name.toLowerCase();
-          break;
-        case 'size':
-          aValue = a.file_size;
-          bValue = b.file_size;
-          break;
-        case 'importance':
-          aValue = a.insights?.importance_score || 0;
-          bValue = b.insights?.importance_score || 0;
-          break;
+        case 'name': {
+          const aName = (a.file_name || '').toLowerCase();
+          const bName = (b.file_name || '').toLowerCase();
+          const comparison = aName.localeCompare(bName);
+          return sortOrder === 'asc' ? comparison : -comparison;
+        }
+        case 'size': {
+          const aSize = a.file_size || 0;
+          const bSize = b.file_size || 0;
+          return sortOrder === 'asc' ? aSize - bSize : bSize - aSize;
+        }
+        case 'importance': {
+          const aScore = a.insights?.importance_score || 0;
+          const bScore = b.insights?.importance_score || 0;
+          return sortOrder === 'asc' ? aScore - bScore : bScore - aScore;
+        }
         case 'created_at':
-        default:
-          aValue = new Date(a.created_at).getTime();
-          bValue = new Date(b.created_at).getTime();
-          break;
-      }
-
-      if (sortOrder === 'asc') {
-        return aValue > bValue ? 1 : -1;
-      } else {
-        return aValue < bValue ? 1 : -1;
+        default: {
+          // Parse dates and get timestamps (newer dates = larger timestamps)
+          const now = Date.now();
+          let aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+          let bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+          
+          // Treat future dates as very old (push them to bottom when sorting by newest first)
+          // This handles timezone issues where documents have incorrect future timestamps
+          if (aTime > now) aTime = 0;
+          if (bTime > now) bTime = 0;
+          
+          // For desc (newest first): larger timestamp should come first (return negative when a > b)
+          // For asc (oldest first): smaller timestamp should come first (return negative when a < b)
+          return sortOrder === 'asc' ? aTime - bTime : bTime - aTime;
+        }
       }
     });
 
-    console.log('🔍 useDocumentFiltering: Filtered documents:', filtered.length);
+    console.log('🔍 useDocumentFiltering: Filtered documents:', filtered.length, 'sortBy:', sortBy, 'sortOrder:', sortOrder);
+    
+    // Debug: Log first few documents with their timestamps
+    if (filtered.length > 0) {
+      console.log('📅 First 5 documents after sort:');
+      filtered.slice(0, 5).forEach((doc, i) => {
+        const timestamp = doc.created_at ? new Date(doc.created_at).getTime() : 0;
+        console.log(`  ${i + 1}. "${doc.file_name}" - created_at: ${doc.created_at} (${timestamp}) - status: ${doc.processing_status}`);
+      });
+    }
+    
     return filtered;
   }, [documents, searchQuery, selectedFolder, selectedTag, sortBy, sortOrder]);
 

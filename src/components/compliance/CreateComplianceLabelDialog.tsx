@@ -57,6 +57,7 @@ import { useComplianceLabels } from '@/hooks/useComplianceLabels';
 interface CreateComplianceLabelDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCreated?: () => void;
 }
 
 const LABEL_COLORS = [
@@ -66,7 +67,8 @@ const LABEL_COLORS = [
 
 export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogProps> = ({
   open,
-  onOpenChange
+  onOpenChange,
+  onCreated
 }) => {
   const { createLabel, isLoading } = useComplianceLabels();
   const [step, setStep] = useState(1);
@@ -112,6 +114,7 @@ export const CreateComplianceLabelDialog: React.FC<CreateComplianceLabelDialogPr
     });
     onOpenChange(false);
     resetForm();
+    onCreated?.();
   };
 
   const resetForm = () => {

@@ -49,7 +49,8 @@ import {
   FileVideo,
   FileAudio,
   FileArchive,
-  FileCode
+  FileCode,
+  Presentation
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -81,6 +82,7 @@ interface Document {
   storage_url?: string;
   storage_path?: string;
   insights?: DocumentInsight;
+  analysis_result?: any;
   tags?: DocumentTag[];
   folders?: SmartFolder[];
   has_restrictions?: boolean;
@@ -123,6 +125,13 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 }) => {
   const { toast } = useToast();
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();
+
+  // Helper function to check if document has been processed with AI
+  // Returns true if the document has AI insights in document_insights table
+  const hasAIAnalysis = (doc: Document): boolean => {
+    // Check if document has AI insights (from document_insights table)
+    return !!(doc.metadata as any)?.has_ai_insights;
+  };
 
   // Check Out and Transfer Dialog states
   const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
@@ -418,7 +427,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     
     // PowerPoint
     if (combined.includes('powerpoint') || combined.includes('presentation') || combined.includes('ppt') || type.includes('officedocument.presentation')) {
-      return <FileText className="w-5 h-5 text-orange-500" />;
+      return <Presentation className="w-5 h-5 text-orange-600" />;
     }
     
     // Images
@@ -632,7 +641,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                             )}
                           </h3>
 
-                          {document.file_name !== document.insights?.ai_generated_title && (
+                          {document.insights?.ai_generated_title && document.file_name !== document.insights?.ai_generated_title && (
                             <p className="text-sm text-muted-foreground truncate mb-1">
                               {document.file_name}
                             </p>
@@ -706,14 +715,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                               <Clock className="w-3 h-3" />
                               {formatDistanceToNow(new Date(document.created_at), { addSuffix: true })}
                             </div>
-                            <div className="flex items-center gap-2">
-                              <span>{formatFileSize(document.file_size)}</span>
-                              {document.insights?.estimated_reading_time && (
-                                <Badge variant="secondary" className="text-xs">
-                                  {document.insights.estimated_reading_time}m read
-                                </Badge>
-                              )}
-                            </div>
+                            <span>{formatFileSize(document.file_size)}</span>
                           </div>
 
                           {/* Actions */}
@@ -911,7 +913,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                             Queued for Upload
                           </Badge>
                         </div>
-                      ) : document.processing_status && document.processing_status !== 'completed' && (
+                      ) : document.processing_status && document.processing_status !== 'completed' ? (
                         <div className="mt-2">
                           <Badge
                             variant={
@@ -924,6 +926,15 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                             {document.processing_status === 'processing' ? 'AI Processing...' :
                               document.processing_status === 'pending' ? 'Pending Analysis' :
                                 'Processing Failed'}
+                          </Badge>
+                        </div>
+                      ) : document.processing_status !== 'failed' && !hasAIAnalysis(document) && (
+                        <div className="mt-2">
+                          <Badge
+                            variant="outline"
+                            className="text-xs"
+                          >
+                            Pending Analysis
                           </Badge>
                         </div>
                       )}

@@ -317,6 +317,14 @@ export const DocumentManager: React.FC = () => {
     });
 
     filtered.sort((a, b) => {
+      // PRIORITY 1: Always show processing documents at the top
+      const aIsProcessing = a.processing_status === 'processing' || a.processing_status === 'pending';
+      const bIsProcessing = b.processing_status === 'processing' || b.processing_status === 'pending';
+      
+      if (aIsProcessing && !bIsProcessing) return -1;
+      if (!aIsProcessing && bIsProcessing) return 1;
+      
+      // PRIORITY 2: If both are processing or both are not processing, sort by the selected field
       let aValue, bValue;
       
       switch (sortBy) {
@@ -342,7 +350,7 @@ export const DocumentManager: React.FC = () => {
       if (sortOrder === 'asc') {
         return aValue > bValue ? 1 : -1;
       } else {
-        return aValue < bValue ? 1 : -1;
+        return aValue > bValue ? -1 : 1;
       }
     });
 

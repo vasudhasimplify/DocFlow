@@ -300,13 +300,13 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
       }
 
       // Fetch restriction counts for all documents
-      const documentIds = documentsData?.map((doc: any) => doc.id) || [];
+      const allDocumentIds = documentsData?.map((doc: any) => doc.id) || [];
       let restrictionCounts: { [key: string]: number } = {};
-      if (documentIds.length > 0) {
+      if (allDocumentIds.length > 0) {
         const { data: applications } = await supabase
           .from('content_rule_applications')
           .select('document_id')
-          .in('document_id', documentIds);
+          .in('document_id', allDocumentIds);
 
         applications?.forEach((app: any) => {
           restrictionCounts[app.document_id] = (restrictionCounts[app.document_id] || 0) + 1;
@@ -361,22 +361,35 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         storageUrl: doc.original_url || urlMap[doc.id] || undefined
       }));
 
+      // Fetch document_insights to get AI analysis data for display
+      const insightDocumentIds = documentsData?.map((doc: any) => doc.id) || [];
+      let insightsMap: { [key: string]: any } = {};
+      if (insightDocumentIds.length > 0) {
+        const { data: insights } = await supabase
+          .from('document_insights')
+          .select('document_id, summary, key_topics, importance_score, estimated_reading_time, ai_generated_title, suggested_actions')
+          .in('document_id', insightDocumentIds);
+
+        insights?.forEach((insight: any) => {
+          insightsMap[insight.document_id] = {
+            summary: insight.summary || '',
+            key_topics: insight.key_topics || [],
+            importance_score: insight.importance_score || 0,
+            ai_generated_title: insight.ai_generated_title || '',
+            suggested_actions: insight.suggested_actions || []
+          };
+        });
+      }
+
       const processedDocuments: Document[] = documentsWithUrls.map((doc: any) => {
         const displayName = doc.file_name || doc.original_name || doc.name || doc.file_path?.split('/').pop() || 'Unknown';
 
-        // OPTIMIZATION: We no longer fetch extracted_text & analysis_result in list view
-        // They will be fetched on-demand when opening a document
-
-        // Transform analysis_result from database to insights format
-        const analysisResult = doc.analysis_result;
-        const insights = analysisResult && Object.keys(analysisResult).length > 0 ? {
-          summary: analysisResult.summary || '',
-          key_topics: analysisResult.key_topics || [],
-          importance_score: analysisResult.importance_score || 0,
-          estimated_reading_time: analysisResult.estimated_reading_time || 0,
-          ai_generated_title: analysisResult.ai_generated_title || displayName,
-          suggested_actions: analysisResult.suggested_actions || []
-        } : undefined;
+        // Get insights from document_insights table ONLY
+        // We don't use analysis_result from documents table anymore
+        const dbInsights = insightsMap[doc.id];
+        
+        // Only show insights if they exist in document_insights table (processed via "Process Now")
+        const insights = dbInsights ? dbInsights : undefined;
 
         return {
           id: doc.id,
@@ -387,11 +400,14 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
           updated_at: doc.updated_at,
           extracted_text: '', // Loaded on-demand
           processing_status: doc.processing_status || 'pending',
-          metadata: doc.metadata || {},
+          metadata: {
+            ...(doc.metadata || {}),
+            has_ai_insights: !!dbInsights // Track if document has insights in document_insights table
+          },
           analysis_result: {}, // Loaded on-demand
           storage_url: doc.storageUrl,
           storage_path: doc.storage_path,
-          insights: undefined, // Loaded on-demand
+          insights: insights, // Now populated from document_insights table
           tags: [],
           folders: foldersByDocument[doc.id] || [],
           has_restrictions: (restrictionCounts[doc.id] || 0) > 0,

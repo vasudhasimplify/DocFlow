@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -64,7 +64,32 @@ interface Recommendation {
 
 export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents, onRefresh }) => {
   const [processingAction, setProcessingAction] = useState<string | null>(null);
+  const [existingFolderNames, setExistingFolderNames] = useState<Set<string>>(new Set());
   const { toast } = useToast();
+
+  // Fetch existing folder names to avoid recommending folders that already exist
+  const fetchExistingFolders = async () => {
+    try {
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) return;
+
+      const { data: folders } = await supabase
+        .from('smart_folders')
+        .select('name')
+        .eq('user_id', user.user.id);
+
+      if (folders) {
+        const folderNames = new Set(folders.map(f => f.name.toLowerCase()));
+        setExistingFolderNames(folderNames);
+      }
+    } catch (error) {
+      console.error('Error fetching folders:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchExistingFolders();
+  }, [documents]);
 
   const handleProcessPending = async (documentIds: string[]) => {
     try {
@@ -167,6 +192,135 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
     }
   };
 
+  const handleCreateTopicFolder = async (topic: string, docs: Document[]) => {
+    try {
+      setProcessingAction(`Create Folder: ${topic}`);
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) {
+        toast({
+          title: "Error",
+          description: "Please log in to create folders",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Capitalize the topic name for folder name
+      const folderName = topic.charAt(0).toUpperCase() + topic.slice(1);
+
+      // Check if folder with this name already exists
+      const { data: existingFolder } = await supabase
+        .from('smart_folders')
+        .select('id')
+        .eq('user_id', user.user.id)
+        .eq('name', folderName)
+        .single();
+
+      let folderId: string;
+
+      if (existingFolder) {
+        // Use existing folder
+        folderId = existingFolder.id;
+        toast({
+          title: "Using Existing Folder",
+          description: `Adding documents to existing "${folderName}" folder`,
+        });
+      } else {
+        // Get the max order_index for new folder
+        const { data: maxOrderData } = await supabase
+          .from('smart_folders')
+          .select('order_index')
+          .eq('user_id', user.user.id)
+          .order('order_index', { ascending: false })
+          .limit(1);
+
+        const nextOrderIndex = (maxOrderData?.[0]?.order_index ?? 0) + 1;
+
+        // Create new folder
+        const { data: newFolder, error: folderError } = await supabase
+          .from('smart_folders')
+          .insert({
+            user_id: user.user.id,
+            name: folderName,
+            description: `Documents related to ${topic}`,
+            color: '#6366f1',
+            folder_color: '#6366f1',
+            icon: 'folder',
+            is_smart: false,
+            document_count: 0,
+            order_index: nextOrderIndex
+          })
+          .select()
+          .single();
+
+        if (folderError || !newFolder) {
+          throw new Error('Failed to create folder');
+        }
+
+        folderId = newFolder.id;
+      }
+
+      // Add documents to the folder via document_shortcuts
+      let addedCount = 0;
+      for (const doc of docs) {
+        // Check if document is already in folder
+        // @ts-ignore - document_shortcuts table exists but not in generated types
+        const { data: existing } = await supabase.from('document_shortcuts').select('id').eq('document_id', doc.id).eq('folder_id', folderId).single();
+
+        if (!existing) {
+          // @ts-ignore - document_shortcuts table exists but not in generated types
+          const { error: shortcutError } = await supabase.from('document_shortcuts').insert({
+              document_id: doc.id,
+              folder_id: folderId,
+              user_id: user.user.id
+            });
+
+          if (!shortcutError) {
+            addedCount++;
+          }
+        }
+      }
+
+      // Update folder document count
+      // @ts-ignore - document_shortcuts table exists but not in generated types
+      const { data: countData } = await supabase.from('document_shortcuts').select('id').eq('folder_id', folderId);
+
+      await supabase
+        .from('smart_folders')
+        .update({ document_count: countData?.length || 0 })
+        .eq('id', folderId);
+
+      toast({
+        title: "Folder Created",
+        description: `Added ${addedCount} documents to "${folderName}" folder`,
+      });
+
+      // Dispatch event to refresh folders sidebar
+      window.dispatchEvent(new CustomEvent('folder-updated'));
+
+      // Refresh existing folders list to update recommendations
+      await fetchExistingFolders();
+
+      // Wait a moment for database to update
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Refresh documents if callback provided
+      if (onRefresh) {
+        onRefresh();
+      }
+
+    } catch (error) {
+      console.error('Error creating topic folder:', error);
+      toast({
+        title: "Folder Creation Failed",
+        description: error instanceof Error ? error.message : "Failed to create folder",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
   const generateRecommendations = (): Recommendation[] => {
     const recommendations: Recommendation[] = [];
 
@@ -218,6 +372,12 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
 
     const duplicateTopics = Object.entries(documentsByTopic)
       .filter(([topic, docs]) => docs.length >= 3)
+      // Filter out topics that already have folders
+      .filter(([topic]) => {
+        const topicCapitalized = topic.charAt(0).toUpperCase() + topic.slice(1);
+        return !existingFolderNames.has(topic.toLowerCase()) && 
+               !existingFolderNames.has(topicCapitalized.toLowerCase());
+      })
       .slice(0, 2);
 
     duplicateTopics.forEach(([topic, docs]) => {
@@ -225,10 +385,11 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
         type: 'suggestion',
         title: `Group ${topic} Documents`,
         description: `${docs.length} documents share the topic "${topic}" - consider creating a smart folder`,
-        action: 'Create Folder',
+        action: `Create Folder: ${topic}`,
         priority: 'medium',
         icon: <TrendingUp className="w-4 h-4 text-green-500" />,
-        documents: docs
+        documents: docs,
+        actionHandler: () => handleCreateTopicFolder(topic, docs)
       });
     });
 
@@ -252,18 +413,27 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
     // Find recently uploaded documents without AI analysis
     const recentUnanalyzed = documents.filter(doc => {
       const daysSinceUpload = (Date.now() - new Date(doc.created_at).getTime()) / (1000 * 60 * 60 * 24);
-      // Check if document is pending (no insights or processing_status is not completed)
-      const isPending = !doc.insights || doc.processing_status === 'pending' || doc.processing_status === 'processing';
+      // Check if document is pending (no insights in document_insights table)
+      const hasAiInsights = (doc as any).metadata?.has_ai_insights === true;
+      const isPending = !hasAiInsights;
       return daysSinceUpload <= 30 && isPending && !doc.is_deleted;
     });
 
     if (recentUnanalyzed.length > 0) {
+      // Dynamic priority based on number of pending documents
+      let priority: 'high' | 'medium' | 'low' = 'low';
+      if (recentUnanalyzed.length >= 16) {
+        priority = 'high';
+      } else if (recentUnanalyzed.length >= 6) {
+        priority = 'medium';
+      }
+      
       recommendations.push({
         type: 'warning',
         title: 'Pending AI Analysis',
         description: `${recentUnanalyzed.length} recent documents haven't been processed by AI yet`,
         action: 'Process Now',
-        priority: 'high',
+        priority: priority,
         icon: <AlertTriangle className="w-4 h-4 text-red-500" />,
         documents: recentUnanalyzed,
         actionHandler: () => handleProcessPending(recentUnanalyzed.map(d => d.id))
@@ -387,7 +557,10 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
                   size="sm" 
                   variant="outline" 
                   className="w-full justify-between text-xs h-7"
-                  onClick={() => rec.actionHandler?.()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    rec.actionHandler?.();
+                  }}
                   disabled={processingAction !== null}
                 >
                   {processingAction === rec.action ? (
@@ -397,7 +570,7 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
                     </>
                   ) : (
                     <>
-                      {rec.action}
+                      {rec.action.startsWith('Create Folder:') ? 'Create Folder' : rec.action}
                       <ArrowRight className="w-3 h-3" />
                     </>
                   )}

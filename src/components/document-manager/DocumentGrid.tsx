@@ -58,7 +58,8 @@ import {
   Shield,
   CheckCircle2,
   Circle,
-  CloudUpload
+  CloudUpload,
+  Presentation
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -90,6 +91,7 @@ interface Document {
   storage_url?: string;
   storage_path?: string;
   insights?: DocumentInsight;
+  analysis_result?: any;
   tags?: DocumentTag[];
   folders?: SmartFolder[];
   has_restrictions?: boolean;
@@ -133,6 +135,13 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
   const { toast } = useToast();
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();
   const { makeDocumentAvailableOffline, isDocumentOffline, removeDocumentFromOffline } = useOfflineMode();
+
+  // Helper function to check if document has been processed with AI
+  // Returns true if the document has AI insights in document_insights table
+  const hasAIAnalysis = (doc: Document): boolean => {
+    // Check if document has AI insights (from document_insights table)
+    return !!(doc.metadata as any)?.has_ai_insights;
+  };
 
   // Check Out and Transfer Dialog states
   const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
@@ -441,7 +450,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
     
     // PowerPoint
     if (combined.includes('powerpoint') || combined.includes('presentation') || combined.includes('ppt') || type.includes('officedocument.presentation')) {
-      return <FileText className="w-8 h-8 text-orange-500" />;
+      return <Presentation className="w-8 h-8 text-orange-600" />;
     }
     
     // Images
@@ -829,7 +838,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                     <h3 className="font-medium text-sm truncate mb-1">
                       {document.insights?.ai_generated_title || document.file_name}
                     </h3>
-                    {document.file_name !== document.insights?.ai_generated_title && (
+                    {document.insights?.ai_generated_title && document.file_name !== document.insights?.ai_generated_title && (
                       <p className="text-xs text-muted-foreground truncate">
                         {document.file_name}
                       </p>
@@ -903,12 +912,6 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                       </div>
                       <span>{formatFileSize(document.file_size)}</span>
                     </div>
-
-                    {document.insights?.estimated_reading_time && (
-                      <Badge variant="secondary" className="text-xs">
-                        {document.insights.estimated_reading_time}m read
-                      </Badge>
-                    )}
                   </div>
 
                   {/* Processing Status */}
@@ -922,7 +925,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                         Queued for Upload
                       </Badge>
                     </div>
-                  ) : document.processing_status && document.processing_status !== 'completed' && (
+                  ) : document.processing_status && document.processing_status !== 'completed' ? (
                     <div className="mt-2">
                       <Badge
                         variant={
@@ -935,6 +938,15 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                         {document.processing_status === 'processing' ? 'AI Processing...' :
                           document.processing_status === 'pending' ? 'Pending Analysis' :
                             'Processing Failed'}
+                      </Badge>
+                    </div>
+                  ) : document.processing_status !== 'failed' && !hasAIAnalysis(document) && (
+                    <div className="mt-2">
+                      <Badge
+                        variant="outline"
+                        className="text-xs"
+                      >
+                        Pending Analysis
                       </Badge>
                     </div>
                   )}

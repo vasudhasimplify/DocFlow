@@ -61,6 +61,8 @@ interface EditComplianceLabelDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   label: ComplianceLabel | null;
+  onUpdated?: () => void;
+  onDeleted?: () => void;
 }
 
 const LABEL_COLORS = [
@@ -71,7 +73,9 @@ const LABEL_COLORS = [
 export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps> = ({
   open,
   onOpenChange,
-  label
+  label,
+  onUpdated,
+  onDeleted
 }) => {
   const { updateLabel, deleteLabel, isLoading } = useComplianceLabels();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -108,6 +112,7 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
     if (!label) return;
     await updateLabel(label.id, formData);
     onOpenChange(false);
+    onUpdated?.();
   };
 
   const handleDelete = async () => {
@@ -115,6 +120,7 @@ export const EditComplianceLabelDialog: React.FC<EditComplianceLabelDialogProps>
     await deleteLabel(label.id);
     setShowDeleteConfirm(false);
     onOpenChange(false);
+    onDeleted?.();
   };
 
   const toggleDataCategory = (category: DataCategory) => {
