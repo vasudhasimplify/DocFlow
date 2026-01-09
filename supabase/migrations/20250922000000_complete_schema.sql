@@ -435,21 +435,43 @@ ON CONFLICT (id) DO NOTHING;
 UPDATE storage.buckets 
 SET 
   allowed_mime_types = ARRAY[
+    -- PDF
     'application/pdf',
+    -- Word
     'application/msword', 
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    -- Excel
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    -- PowerPoint
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    -- Text/CSV
     'text/plain',
     'text/csv',
+    -- Images
     'image/jpeg',
     'image/png', 
     'image/webp',
     'image/gif',
     'image/bmp',
-    'image/tiff'
+    'image/tiff',
+    'image/svg+xml',
+    -- Archives
+    'application/zip',
+    'application/x-rar-compressed',
+    'application/x-7z-compressed',
+    -- Rich text & OpenDocument
+    'application/rtf',
+    'application/vnd.oasis.opendocument.text',
+    'application/vnd.oasis.opendocument.spreadsheet',
+    'application/vnd.oasis.opendocument.presentation',
+    -- Code/Data
+    'application/json',
+    'text/xml',
+    'application/xml'
   ],
-  file_size_limit = 52428800 -- 50MB limit
+  file_size_limit = 104857600 -- 100MB limit
 WHERE id = 'documents';
 
 -- Storage policies

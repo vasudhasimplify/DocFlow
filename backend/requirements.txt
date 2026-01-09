@@ -72,6 +72,10 @@ reportlab>=4.0.0
 croniter>=1.3.0
 pytz>=2024.1
 
+# Office Document Processing (PowerPoint, Excel)
+python-pptx>=0.6.21
+openpyxl>=3.1.0
+
 # Google Drive Migration
 google-api-python-client==2.108.0
 google-auth==2.25.2

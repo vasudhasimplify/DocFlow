@@ -48,10 +48,18 @@ import {
   CloudDownload,
   RotateCcw,
   Edit,
+  File,
+  FileSpreadsheet,
+  FileImage,
+  FileVideo,
+  FileAudio,
+  FileArchive,
+  FileCode,
   Shield,
   CheckCircle2,
   Circle,
-  CloudUpload
+  CloudUpload,
+  Presentation
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -85,6 +93,7 @@ interface Document {
   storage_url?: string;
   storage_path?: string;
   insights?: DocumentInsight;
+  analysis_result?: any;
   tags?: DocumentTag[];
   folders?: SmartFolder[];
   has_restrictions?: boolean;
@@ -129,6 +138,13 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();
   const { makeDocumentAvailableOffline, isDocumentOffline, removeDocumentFromOffline } = useOfflineMode();
   const { getDocumentRestrictions } = useDocumentRestrictions();
+
+  // Helper function to check if document has been processed with AI
+  // Returns true if the document has AI insights in document_insights table
+  const hasAIAnalysis = (doc: Document): boolean => {
+    // Check if document has AI insights (from document_insights table)
+    return !!(doc.metadata as any)?.has_ai_insights;
+  };
 
   // Check Out and Transfer Dialog states
   const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
@@ -443,8 +459,63 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
       });
     }
   };
-  const getFileIcon = (_fileType: string) => {
-    // You can expand this based on file types
+  const getFileIcon = (fileType: string, fileName?: string) => {
+    // Combine file type and file name for better detection
+    const type = fileType?.toLowerCase() || '';
+    const name = fileName?.toLowerCase() || '';
+    const combined = `${type} ${name}`;
+    
+    // PDF
+    if (combined.includes('pdf')) {
+      return <FileText className="w-8 h-8 text-red-500" />;
+    }
+    
+    // Word documents
+    if (combined.includes('word') || combined.includes('docx') || combined.includes('.doc') || type.includes('msword') || type.includes('officedocument.wordprocessing')) {
+      return <FileText className="w-8 h-8 text-blue-600" />;
+    }
+    
+    // Excel/Spreadsheets
+    if (combined.includes('excel') || combined.includes('spreadsheet') || combined.includes('xls') || combined.includes('csv') || type.includes('officedocument.spreadsheet')) {
+      return <FileSpreadsheet className="w-8 h-8 text-green-600" />;
+    }
+    
+    // PowerPoint
+    if (combined.includes('powerpoint') || combined.includes('presentation') || combined.includes('ppt') || type.includes('officedocument.presentation')) {
+      return <Presentation className="w-8 h-8 text-orange-600" />;
+    }
+    
+    // Images
+    if (type.includes('image') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.gif') || name.endsWith('.svg') || name.endsWith('.webp')) {
+      return <FileImage className="w-8 h-8 text-purple-500" />;
+    }
+    
+    // Videos
+    if (type.includes('video') || name.endsWith('.mp4') || name.endsWith('.avi') || name.endsWith('.mov') || name.endsWith('.mkv')) {
+      return <FileVideo className="w-8 h-8 text-pink-500" />;
+    }
+    
+    // Audio
+    if (type.includes('audio') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.m4a')) {
+      return <FileAudio className="w-8 h-8 text-indigo-500" />;
+    }
+    
+    // Archives
+    if (combined.includes('zip') || combined.includes('rar') || combined.includes('7z') || combined.includes('tar') || type.includes('compressed')) {
+      return <FileArchive className="w-8 h-8 text-yellow-600" />;
+    }
+    
+    // Code files
+    if (name.endsWith('.js') || name.endsWith('.ts') || name.endsWith('.json') || name.endsWith('.html') || name.endsWith('.css') || name.endsWith('.py') || type.includes('javascript') || type.includes('json')) {
+      return <FileCode className="w-8 h-8 text-cyan-600" />;
+    }
+    
+    // Text files
+    if (type.includes('text/plain') || name.endsWith('.txt')) {
+      return <File className="w-8 h-8 text-gray-500" />;
+    }
+    
+    // Default
     return <FileText className="w-8 h-8 text-blue-500" />;
   };
 
@@ -483,7 +554,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                     if (starred) {
                       unpinDocument(document.id);
                     } else {
-                      pinDocument(document);
+                      pinDocument(document.id);
                     }
                   }
                 });
@@ -596,7 +667,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                   {/* Header */}
                   <div className="flex items-start justify-between mb-3 pl-8\">
                     <div className="flex items-center gap-2">
-                      {getFileIcon(document.file_type)}
+                      {getFileIcon(document.file_type, document.file_name)}
                       {document.insights && (
                         <div className="flex items-center gap-1">
                           <Brain className="w-3 h-3 text-blue-500" />
@@ -799,7 +870,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                     <h3 className="font-medium text-sm truncate mb-1">
                       {document.insights?.ai_generated_title || document.file_name}
                     </h3>
-                    {document.file_name !== document.insights?.ai_generated_title && (
+                    {document.insights?.ai_generated_title && document.file_name !== document.insights?.ai_generated_title && (
                       <p className="text-xs text-muted-foreground truncate">
                         {document.file_name}
                       </p>
@@ -873,12 +944,6 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                       </div>
                       <span>{formatFileSize(document.file_size)}</span>
                     </div>
-
-                    {document.insights?.estimated_reading_time && (
-                      <Badge variant="secondary" className="text-xs">
-                        {document.insights.estimated_reading_time}m read
-                      </Badge>
-                    )}
                   </div>
 
                   {/* Processing Status */}
@@ -892,7 +957,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                         Queued for Upload
                       </Badge>
                     </div>
-                  ) : document.processing_status && document.processing_status !== 'completed' && (
+                  ) : document.processing_status && document.processing_status !== 'completed' ? (
                     <div className="mt-2">
                       <Badge
                         variant={
@@ -905,6 +970,15 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                         {document.processing_status === 'processing' ? 'AI Processing...' :
                           document.processing_status === 'pending' ? 'Pending Analysis' :
                             'Processing Failed'}
+                      </Badge>
+                    </div>
+                  ) : document.processing_status !== 'failed' && !hasAIAnalysis(document) && (
+                    <div className="mt-2">
+                      <Badge
+                        variant="outline"
+                        className="text-xs"
+                      >
+                        Pending Analysis
                       </Badge>
                     </div>
                   )}

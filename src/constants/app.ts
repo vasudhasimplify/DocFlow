@@ -15,9 +15,36 @@ export const APP_CONFIG = {
   
   // Supported file types
   SUPPORTED_FILE_TYPES: {
-    IMAGES: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-    DOCUMENTS: ['application/pdf'],
-    ALL: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']
+    IMAGES: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff', 'image/svg+xml'],
+    DOCUMENTS: [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain',
+      'text/csv',
+      'application/rtf'
+    ],
+    ARCHIVES: ['application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed'],
+    ALL: [
+      'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff', 'image/svg+xml',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain',
+      'text/csv',
+      'application/rtf',
+      'application/zip',
+      'application/x-rar-compressed',
+      'application/x-7z-compressed'
+    ]
   },
   
   // Processing limits

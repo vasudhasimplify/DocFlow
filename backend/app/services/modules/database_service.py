@@ -6,7 +6,7 @@ Handles all database operations for document analysis
 import logging
 from typing import Dict, Any, List, Optional
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import asyncio
 
@@ -355,7 +355,7 @@ class DatabaseService:
                 "processing_status": "processing",  # Start as processing, will update to completed after chunks saved
                 "analysis_result": safe_result,
                 "extracted_text": extracted_text,  # Store extracted text for chatbot embeddings
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat()
             }
             
             # All embeddings are stored in document_chunks table only
@@ -595,7 +595,8 @@ class DatabaseService:
             # Build update data
             update_data = {
                 "analysis_result": safe_result,
-                "updated_at": datetime.now().isoformat()
+                "processing_status": "completed",  # Mark as completed when we update with extracted data
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }
             
             # Update extracted_text if we have new text (keeps latest version for chatbot)
@@ -621,6 +622,19 @@ class DatabaseService:
                     logger.info(f"✅ Document chunks updated successfully")
                 else:
                     logger.warning(f"⚠️ Failed to update document chunks")
+            
+            # Update processing queue to completed
+            try:
+                from app.services.modules.processing_queue_service import ProcessingQueueService
+                queue_service = ProcessingQueueService()
+                queue_service.mark_completed(document_id, {
+                    'extracted_text_length': len(extracted_text) if extracted_text else 0,
+                    'chunks_count': len(chunks_data) if chunks_data else 0
+                })
+                queue_service.update_search_index_queue(document_id, 'completed')
+                logger.info(f"✅ Processing queue updated to completed for document {document_id}")
+            except Exception as queue_error:
+                logger.warning(f"⚠️ Could not update processing queue: {queue_error}")
             
             logger.info(f"✅ Document {document_id} updated successfully with edited data and extracted_text")
             return {"id": document_id, "updated": True}
@@ -706,10 +720,10 @@ class DatabaseService:
                 "processing_status": "failed",
                 "metadata": {
                     "error": error_message,
-                    "error_timestamp": datetime.now().isoformat()
+                    "error_timestamp": datetime.now(timezone.utc).isoformat()
                 },
                 "document_type": document_type or "unknown",
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat()
             }
             
             # Insert document

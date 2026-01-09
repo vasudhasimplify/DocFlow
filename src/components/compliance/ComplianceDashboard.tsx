@@ -54,7 +54,7 @@ const frameworkIcons: Record<ComplianceFramework, React.ReactNode> = {
 };
 
 export const ComplianceDashboard: React.FC = () => {
-  const { labels, stats, violations, deleteLabel } = useComplianceLabels();
+  const { labels, stats, violations, deleteLabel, fetchLabels, fetchStats } = useComplianceLabels();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFramework, setSelectedFramework] = useState<ComplianceFramework | 'all'>('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -326,12 +326,24 @@ export const ComplianceDashboard: React.FC = () => {
       <CreateComplianceLabelDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
+        onCreated={() => {
+          fetchLabels();
+          fetchStats();
+        }}
       />
 
       <EditComplianceLabelDialog
         open={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
         label={selectedLabel}
+        onUpdated={() => {
+          fetchLabels();
+          fetchStats();
+        }}
+        onDeleted={() => {
+          fetchLabels();
+          fetchStats();
+        }}
       />
     </div>
   );

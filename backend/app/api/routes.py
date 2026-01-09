@@ -511,6 +511,8 @@ async def process_document(request: ProcessDocumentRequest):
         
         # Get document content for processing
         extracted_text = document.get('extracted_text', '')
+        file_type = document.get('file_type', '').lower()
+        filename = document.get('file_name', '')
         
         # If no text, try to extract from storage
         if not extracted_text and document.get('storage_path'):
@@ -520,9 +522,23 @@ async def process_document(request: ProcessDocumentRequest):
                 file_response = supabase.storage.from_('documents').download(storage_path)
                 
                 if file_response:
-                    # Extract text from PDF
-                    pdf_processor = PDFProcessor()
-                    extracted_text = pdf_processor.extract_text_from_bytes(file_response)
+                    # Determine extraction method based on file type
+                    if 'pdf' in file_type:
+                        # Extract from PDF
+                        pdf_processor = PDFProcessor()
+                        extracted_text = pdf_processor.extract_text_from_bytes(file_response)
+                    elif any(t in file_type for t in ['presentation', 'powerpoint', 'spreadsheet', 'excel', 'word', 'msword', 'csv', 'text']):
+                        # Extract from Office documents
+                        from app.services.office_processor import office_processor
+                        extracted_text = office_processor.extract_text_from_bytes(file_response, file_type, filename)
+                    elif filename.lower().endswith(('.pptx', '.ppt', '.xlsx', '.xls', '.docx', '.doc', '.csv', '.txt')):
+                        # Fallback to extension-based detection
+                        from app.services.office_processor import office_processor
+                        extracted_text = office_processor.extract_text_from_bytes(file_response, file_type, filename)
+                    else:
+                        # Default to PDF processor for unknown types
+                        pdf_processor = PDFProcessor()
+                        extracted_text = pdf_processor.extract_text_from_bytes(file_response)
                     
                     # Update document with extracted text
                     if extracted_text:
