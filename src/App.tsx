@@ -35,6 +35,7 @@ import Settings from "./pages/Settings";
 import BulkTest from "./pages/BulkTest";
 import EditorWrapper from "@/components/modern-editor/EditorWrapper";
 import { SigningPage } from "./pages/SigningPage";
+import { CheckoutRequestsPage } from "./pages/CheckoutRequestsPage";
 import SharedDocumentsPage from "./pages/SharedDocumentsPage";
 
 // Configure React Query client
@@ -133,6 +134,10 @@ const protectedRoutes: RouteConfig[] = [
   {
     path: ROUTES.SETTINGS,
     element: <AppLayout><Settings /></AppLayout>
+  },
+  {
+    path: "/checkout-requests",
+    element: <AppLayout><CheckoutRequestsPage /></AppLayout>
   }
 ];
 

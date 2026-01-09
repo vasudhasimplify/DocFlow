@@ -642,10 +642,20 @@ ANSWER:"""
                 "executive": f"Provide an executive summary for decision makers. Focus on key insights, strategic implications, and actionable recommendations. Format it professionally.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
                 "bullet": f"Extract and present the key points from this document in bullet point format. Use clear, concise bullet points.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
                 "action-items": f"Identify all action items, tasks, deadlines, and responsibilities mentioned in this document. Present them in a structured format with due dates if available.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
+                "key-insights": f"Extract the key insights and main takeaways from this document. Focus on the most important findings and conclusions.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
+                "technical": f"Provide a technical summary focusing on technical details, specifications, methodologies, and technical aspects of this document.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}",
                 "key_points": f"Extract the key points from this document in bullet format.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}"
             }
             
-            prompt = summary_prompts.get(summary_type, f"Summarize this document:\n\n{context}")
+            # Check if it's a known type, otherwise treat it as custom
+            if summary_type in summary_prompts:
+                prompt = summary_prompts[summary_type]
+            else:
+                # For custom types, create a dynamic prompt based on the type name
+                # Convert "legal-review" -> "Legal Review", "financial-analysis" -> "Financial Analysis"
+                custom_type_name = summary_type.replace('-', ' ').replace('_', ' ').title()
+                prompt = f"Provide a '{custom_type_name}' style summary of this document. Focus on aspects relevant to {custom_type_name.lower()}.{language_instruction}\n\nDOCUMENT CONTENT:\n{context}"
+                logger.info(f"Using custom summary type: {custom_type_name}")
             
             # Generate summary
             summary_response = await self.llm_client.call_api(

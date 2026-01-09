@@ -20,12 +20,23 @@ import {
   ChevronDown,
   Globe,
   Settings,
+  Plus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -49,8 +60,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { generateDocumentSummary } from '@/services/documentSummary';
 import type { SummaryType } from '@/services/documentSummary';
-import { getEnabledSummaryTypes, getEnabledLanguages } from '@/config/summaryConfig';
-import { SummarySettingsDialog } from './SummarySettingsDialog';
+import { DEFAULT_SUMMARY_TYPES, DEFAULT_LANGUAGES } from '@/config/summaryConfig';
 
 interface SummaryTypeOption {
   id: string;
@@ -97,13 +107,18 @@ export function DocumentSummaryPanel({
   const [summaries, setSummaries] = useState<Record<string, DocumentSummary | null>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Custom type dialog state
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [newTypeId, setNewTypeId] = useState('');
+  const [newTypeLabel, setNewTypeLabel] = useState('');
+  const [newTypeDesc, setNewTypeDesc] = useState('');
 
   // Load configurations on mount
   useEffect(() => {
-    const loadedTypes = getEnabledSummaryTypes();
-    const loadedLanguages = getEnabledLanguages();
-    
-    setSummaryTypes(loadedTypes.map(type => ({
+    // Load all summary types (enabled ones)
+    const enabledTypes = DEFAULT_SUMMARY_TYPES.filter(t => t.enabled);
+    setSummaryTypes(enabledTypes.map(type => ({
       id: type.id,
       label: type.label,
       description: type.description,
@@ -111,7 +126,8 @@ export function DocumentSummaryPanel({
       color: type.color,
     })));
     
-    setLanguages(loadedLanguages.map(lang => ({
+    // Load all languages
+    setLanguages(DEFAULT_LANGUAGES.map(lang => ({
       code: lang.code,
       label: lang.label,
     })));
@@ -198,6 +214,38 @@ ${summary.summary}
     toast.success('Summary downloaded');
   }, [documentName]);
 
+  const handleAddCustomType = useCallback(() => {
+    if (!newTypeId || !newTypeLabel) {
+      toast.error('Please fill in ID and Label');
+      return;
+    }
+
+    // Check for duplicates
+    if (summaryTypes.some(t => t.id === newTypeId)) {
+      toast.error('This ID already exists');
+      return;
+    }
+
+    // Add the new type
+    const newType: SummaryTypeOption = {
+      id: newTypeId,
+      label: newTypeLabel,
+      description: newTypeDesc || `Custom summary: ${newTypeLabel}`,
+      icon: Sparkles,
+      color: 'bg-slate-500/10 text-slate-600 dark:text-slate-400',
+    };
+
+    setSummaryTypes(prev => [...prev, newType]);
+    
+    // Reset form and close dialog
+    setNewTypeId('');
+    setNewTypeLabel('');
+    setNewTypeDesc('');
+    setIsAddDialogOpen(false);
+
+    toast.success(`${newTypeLabel} added!`);
+  }, [newTypeId, newTypeLabel, newTypeDesc, summaryTypes]);
+
   const currentSummary = summaries[selectedType];
 
   return (
@@ -217,9 +265,6 @@ ${summary.summary}
           </div>
           
           <div className="flex items-center gap-2">
-            {/* Settings button */}
-            <SummarySettingsDialog />
-            
             {/* Language selector */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -285,6 +330,70 @@ ${summary.summary}
                 </TooltipProvider>
               );
             })}
+            
+            {/* Add Custom Type Button */}
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <button
+                  className="flex flex-col items-center justify-center gap-1 py-2 px-3 rounded-md border-2 border-dashed border-muted-foreground/25 hover:border-primary hover:bg-accent transition-colors"
+                  type="button"
+                >
+                  <Plus className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-[10px] text-muted-foreground font-medium">Add</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Add Custom Summary Type</DialogTitle>
+                  <DialogDescription>
+                    Create a custom summary type. The AI will generate summaries based on your type name.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="type-id">ID (unique)*</Label>
+                    <Input
+                      id="type-id"
+                      placeholder="e.g., legal-review"
+                      value={newTypeId}
+                      onChange={(e) => setNewTypeId(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="type-label">Label*</Label>
+                    <Input
+                      id="type-label"
+                      placeholder="e.g., Legal Review"
+                      value={newTypeLabel}
+                      onChange={(e) => setNewTypeLabel(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="type-desc">Description</Label>
+                    <Input
+                      id="type-desc"
+                      placeholder="What this summary type focuses on"
+                      value={newTypeDesc}
+                      onChange={(e) => setNewTypeDesc(e.target.value)}
+                    />
+                  </div>
+                  <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                    <p className="text-xs text-blue-600 dark:text-blue-400">
+                      💡 The AI will interpret your custom type name and generate appropriate summaries.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleAddCustomType}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Type
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </TabsList>
           </ScrollArea>
         </Tabs>

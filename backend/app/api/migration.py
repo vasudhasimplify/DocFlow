@@ -18,6 +18,67 @@ router = APIRouter(prefix="/api/migration", tags=["migration"])
 
 
 # ============================================================================
+# Helper Functions
+# ============================================================================
+
+def _make_error_friendly(technical_error: str) -> str:
+    """
+    Convert technical error messages to user-friendly descriptions.
+    
+    Args:
+        technical_error: Raw error message from migration logs
+        
+    Returns:
+        User-friendly error description
+    """
+    error_lower = technical_error.lower()
+    
+    # Network and timeout errors
+    if 'timeout' in error_lower or 'timed out' in error_lower:
+        return "Connection timeout - file transfer took too long"
+    if 'connection' in error_lower or 'network' in error_lower:
+        return "Network connection issue"
+    if 'rate limit' in error_lower or 'quota' in error_lower:
+        return "API rate limit exceeded - too many requests"
+    
+    # Permission errors
+    if 'permission' in error_lower or 'access denied' in error_lower or 'forbidden' in error_lower:
+        return "Access denied - insufficient permissions"
+    if 'not found' in error_lower or '404' in error_lower:
+        return "File or folder not found"
+    if 'unauthorized' in error_lower or '401' in error_lower:
+        return "Authentication failed - credentials may be expired"
+    
+    # File-specific errors
+    if 'too large' in error_lower or 'size limit' in error_lower or 'file size' in error_lower:
+        return "File too large to migrate"
+    if 'unsupported' in error_lower or 'format' in error_lower:
+        return "Unsupported file type or format"
+    if 'corrupt' in error_lower or 'invalid' in error_lower:
+        return "Corrupted or invalid file"
+    
+    # User mapping errors
+    if 'no simplifiedrive user found' in error_lower or 'user does not exist' in error_lower:
+        return "User not found in SimplifyDrive system"
+    if 'cannot share with self' in error_lower:
+        return "Cannot share file with yourself"
+    
+    # Storage errors
+    if 'storage' in error_lower or 'disk' in error_lower or 'space' in error_lower:
+        return "Insufficient storage space"
+    
+    # Generic fallback - clean up technical jargon
+    friendly = technical_error.replace('StatusCode:', '').replace('Error:', '').replace('Exception:', '').strip()
+    
+    # If it's still too technical (contains common code patterns), provide generic message
+    if any(pattern in friendly for pattern in ['[', '{', '\\n', '\\r', 'null', 'undefined']):
+        return "Migration error - see logs for details"
+    
+    # Return cleaned version, capitalize first letter
+    return friendly[0].upper() + friendly[1:] if friendly else "Unknown error"
+
+
+# ============================================================================
 # Request/Response Models
 # ============================================================================
 
@@ -504,12 +565,13 @@ async def generate_migration_summary(request: GenerateSummaryRequest, user_id: s
             end = datetime.fromisoformat(job['completed_at'])
             duration_minutes = round((end - start).total_seconds() / 60, 1)
         
-        # Count errors by type
+        # Count errors by type and convert to user-friendly messages
         error_counts = {}
         for log in audit_logs:
             if log.get('event_type') == 'item_failed' and log.get('error_message'):
-                error_msg = log['error_message'][:50]  # First 50 chars
-                error_counts[error_msg] = error_counts.get(error_msg, 0) + 1
+                technical_error = log['error_message'][:100]  # First 100 chars for context
+                friendly_error = _make_error_friendly(technical_error)
+                error_counts[friendly_error] = error_counts.get(friendly_error, 0) + 1
         
         # Prepare context for LLM
         context = {
@@ -527,18 +589,21 @@ async def generate_migration_summary(request: GenerateSummaryRequest, user_id: s
         }
         
         # Generate AI summary
-        prompt = f"""Analyze this migration job and create a professional, concise summary.
+        prompt = f"""Analyze this migration job and create a professional, concise summary for NON-TECHNICAL users.
 
 Migration Data:
 {json.dumps(context, indent=2)}
 
-Create a markdown summary with:
-1. **📊 Overview Table** - Key metrics in a table
-2. **🚀 Performance Analysis** - Brief analysis of speed and throughput
-3. **⚠️ Issues** - Only if there are failures (list top error types)
-4. **💡 Recommendations** - 2-3 actionable suggestions
+IMPORTANT: The error_summary contains USER-FRIENDLY error descriptions (not technical codes).
+Present these errors exactly as given - they're already translated for end users.
 
-Keep it concise and professional. Use emojis sparingly. Format tables properly."""
+Create a markdown summary with:
+1. **📊 Overview Table** - Key metrics in a clean table format
+2. **🚀 Performance Analysis** - Brief, simple analysis (avoid technical jargon)
+3. **⚠️ Issues** - Only if failures exist. List error types with counts. DO NOT add technical codes.
+4. **💡 Recommendations** - 2-3 simple, actionable steps users can take
+
+Keep it concise, friendly, and jargon-free. Use emojis sparingly."""
 
         llm_client = LLMClient()
         
@@ -570,12 +635,10 @@ Migration {'completed successfully' if context['status'] == 'completed' else 'is
             
             # Only add issues section if there are failures
             if context['failed_items'] > 0:
-                # Get top 3 error messages, cleaned up
+                # Get top 3 error messages (already user-friendly)
                 top_errors = []
-                for error_msg, count in list(error_counts.items())[:3]:
-                    # Clean up error message (remove technical codes)
-                    clean_msg = error_msg.replace('StatusCode:', '').replace('error', 'Error')
-                    top_errors.append(f"- {clean_msg} ({count} files)")
+                for friendly_msg, count in list(error_counts.items())[:3]:
+                    top_errors.append(f"- {friendly_msg} ({count} files)")
                 
                 summary += f"""## Issues Found
 
@@ -583,9 +646,9 @@ Migration {'completed successfully' if context['status'] == 'completed' else 'is
 
 ## Recommendations
 
-1. **Review failed items** - Most errors can be fixed by retrying
-2. **Check permissions** - Some files may need access rights
-3. **Verify file sizes** - Large files may have timed out
+1. **Review failed items** - Click on the job details to see which files failed
+2. **Retry the migration** - Many errors are temporary (network issues, timeouts)
+3. **Check file permissions** - Ensure you have access to all source files
 """
             else:
                 summary += "\n✓ **No issues detected** - All files migrated successfully!"
