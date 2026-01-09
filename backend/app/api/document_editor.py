@@ -1,13 +1,14 @@
 """
 Document Editor API - Handles document content extraction and conversion
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 import io
 import logging
 import httpx
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class DocumentContentRequest(BaseModel):
     file_name: Optional[str] = None  # Optional: original filename for extension-based detection
     document_id: Optional[str] = None  # Optional: if provided, extracted text will be saved
     version_id: Optional[str] = None  # Optional: if provided, saves to document_versions table
+    guest_email: Optional[str] = None  # For guest checkout validation
 
 
 class SaveDocumentRequest(BaseModel):
@@ -34,6 +36,63 @@ class DocumentContentResponse(BaseModel):
     success: bool
     error: Optional[str] = None
     extracted_text: Optional[str] = None  # Plain text for saving to DB
+
+
+class GuestAccessValidationResponse(BaseModel):
+    allowed: bool
+    message: str
+    checkout_expires_at: Optional[str] = None
+
+
+@router.get("/validate-guest-access", response_model=GuestAccessValidationResponse)
+async def validate_guest_access(
+    document_id: str = Query(..., description="Document ID to access"),
+    guest_email: str = Query(..., description="Guest email requesting access")
+):
+    """
+    Validate if a guest user has active checkout approval to edit a document.
+    Checks document_locks table for an active lock with matching guest_email.
+    """
+    try:
+        from app.core.supabase_client import supabase
+        
+        # Check for active checkout lock for this guest
+        result = supabase.table('document_locks').select('*').eq(
+            'document_id', document_id
+        ).eq(
+            'guest_email', guest_email
+        ).eq(
+            'is_active', True
+        ).execute()
+        
+        if not result.data or len(result.data) == 0:
+            return GuestAccessValidationResponse(
+                allowed=False,
+                message="No active checkout approval found. Please request edit access from the document owner."
+            )
+        
+        lock = result.data[0]
+        expires_at = lock.get('expires_at')
+        
+        # Check if lock has expired
+        if expires_at:
+            from datetime import datetime
+            expiry_time = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            if datetime.now(expiry_time.tzinfo) > expiry_time:
+                return GuestAccessValidationResponse(
+                    allowed=False,
+                    message="Your checkout approval has expired. Please request edit access again."
+                )
+        
+        return GuestAccessValidationResponse(
+            allowed=True,
+            message="Edit access granted",
+            checkout_expires_at=expires_at
+        )
+        
+    except Exception as e:
+        logger.error(f"Error validating guest access: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/extract-content", response_model=DocumentContentResponse)

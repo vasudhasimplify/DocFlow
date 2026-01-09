@@ -19,6 +19,7 @@ if env_file_path.exists():
 from .api.routes import analyze_router
 from .api.quick_access import router as quick_access_router
 from .api.checkinout import router as checkinout_router
+from .api.checkout_requests import router as checkout_requests_router
 from .api.ownership_transfers import router as ownership_transfers_router
 from .api.shares import router as shares_router
 from .api.rules import router as rules_router
@@ -164,6 +165,7 @@ app.add_middleware(
 app.include_router(analyze_router, prefix="/api/v1")
 app.include_router(quick_access_router, prefix="/api/v1")
 app.include_router(checkinout_router)
+app.include_router(checkout_requests_router)
 app.include_router(ownership_transfers_router)
 app.include_router(shares_router)
 app.include_router(rules_router)
@@ -237,9 +239,9 @@ async def run_workflow_scheduler():
             logger.error(f"❌ Scheduler error: {str(e)}")
             logger.error(traceback.format_exc())
         
-        # Wait 2 hours before next check
-        logger.info("⏳ Waiting 2 hours until next check...")
-        await asyncio.sleep(7200.0)  # 2 hours = 7200 seconds
+        # Wait 60 seconds before next check
+        logger.info("⏳ Waiting 2 hours seconds until next check...")
+        await asyncio.sleep(7200.0)  # 7200 seconds (2 hours)
     
     logger.info("🛑 Scheduler stopped")
 

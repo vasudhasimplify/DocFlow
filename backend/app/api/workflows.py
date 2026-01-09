@@ -30,6 +30,7 @@ from app.models.extraction_schemas import get_schema
 from app.services.modules.document_type_detector import DocumentTypeDetector
 from app.services.workflow_email_service import WorkflowEmailService
 from app.services.condition_evaluator import evaluate_condition
+from app.services.target_system_integration import TargetSystemIntegration
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +98,9 @@ class EscalationRuleCreate(BaseModel):
     conditions: List[Dict[str, Any]] = []
     actions: List[Dict[str, Any]] = []
     trigger_after_hours: int = 24
-    trigger_after_minutes: Optional[int] = None  # For testing - takes precedence over hours
+    trigger_after_minutes: Optional[float] = None  # For testing - supports decimals (e.g., 1.5)
     repeat_every_hours: Optional[int] = None
-    repeat_every_minutes: Optional[int] = None  # For testing - takes precedence over hours
+    repeat_every_minutes: Optional[float] = None  # For testing - supports decimals (e.g., 1.5)
     max_escalations: int = 3
 
 # ============================================================================
@@ -1310,6 +1311,9 @@ async def _advance_to_next_step(instance_id: str, supabase: Client, user_id: str
                 logger.error(f"⚠️ Failed to send next step assignment email: {str(email_error)}")
         else:
             # Workflow completed
+            logger.info(f"🎉 Workflow {instance_id} completed - triggering target system integration")
+            
+            # Update instance status
             supabase.table("workflow_instances").update({
                 "status": "completed",
                 "completed_at": datetime.now().isoformat(),
@@ -1324,6 +1328,95 @@ async def _advance_to_next_step(instance_id: str, supabase: Client, user_id: str
                 "details": {"completion_time": datetime.now().isoformat()}
             }
             supabase.table("workflow_audit_log").insert(audit_entry).execute()
+            
+            # Check for target system integration configuration
+            try:
+                # Get workflow definition to check for target system config
+                workflow_response = supabase.table("workflow_definitions")\
+                    .select("*")\
+                    .eq("id", instance.get("workflow_id"))\
+                    .execute()
+                
+                if workflow_response.data and len(workflow_response.data) > 0:
+                    workflow_def = workflow_response.data[0]
+                    target_config = workflow_def.get("target_system_config")
+                    
+                    if target_config and target_config.get("enabled"):
+                        logger.info(f"📤 Target system integration enabled for workflow {instance.get('workflow_id')}")
+                        
+                        # Initialize integration service
+                        integration_service = TargetSystemIntegration()
+                        
+                        # Prepare workflow data
+                        workflow_data = {
+                            "id": instance_id,
+                            "workflow_id": instance.get("workflow_id"),
+                            "document_id": instance.get("document_id"),
+                            "document_name": doc_name,
+                            "completed_at": datetime.now().isoformat(),
+                            "metadata": instance.get("metadata", {})
+                        }
+                        
+                        # Get extracted data if available
+                        extracted_data = instance.get("extracted_data")
+                        
+                        # Send to target system
+                        result = integration_service.send_to_target_system(
+                            config=target_config,
+                            workflow_data=workflow_data,
+                            extracted_data=extracted_data
+                        )
+                        
+                        # Log integration result
+                        integration_log = {
+                            "instance_id": instance_id,
+                            "action": "target_system_integration",
+                            "performed_by": "system",
+                            "details": {
+                                "system_type": target_config.get("system_type"),
+                                "success": result.get("success"),
+                                "message": result.get("message"),
+                                "timestamp": datetime.now().isoformat(),
+                                "response": result.get("response_data")
+                            }
+                        }
+                        
+                        if not result.get("success"):
+                            integration_log["details"]["error"] = result.get("error")
+                            logger.error(f"❌ Target system integration failed: {result.get('message')}")
+                        else:
+                            logger.info(f"✅ Target system integration successful: {result.get('message')}")
+                        
+                        supabase.table("workflow_audit_log").insert(integration_log).execute()
+                        
+                        # Update instance metadata with integration status
+                        supabase.table("workflow_instances").update({
+                            "metadata": {
+                                **instance.get("metadata", {}),
+                                "target_system_integration": {
+                                    "completed": True,
+                                    "success": result.get("success"),
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                            }
+                        }).eq("id", instance_id).execute()
+                    else:
+                        logger.info(f"ℹ️ No target system integration configured for this workflow")
+                        
+            except Exception as integration_error:
+                logger.error(f"⚠️ Error during target system integration: {str(integration_error)}")
+                # Don't fail the workflow completion if integration fails
+                # Log the error for review
+                error_log = {
+                    "instance_id": instance_id,
+                    "action": "target_system_integration_error",
+                    "performed_by": "system",
+                    "details": {
+                        "error": str(integration_error),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                }
+                supabase.table("workflow_audit_log").insert(error_log).execute()
     except Exception as e:
         logger.error(f"Error advancing to next step: {str(e)}")
         raise
