@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { logDocumentStarred } from '@/utils/auditLogger';
 
 export interface Favorite {
   id: string;
@@ -102,6 +103,9 @@ export const useFavorites = () => {
         description: "Document has been starred",
       });
 
+      // Log starred event to audit trail
+      logDocumentStarred(documentId, 'Document', true);
+
       return true;
     } catch (error) {
       console.error('Error adding favorite:', error);
@@ -138,6 +142,9 @@ export const useFavorites = () => {
         title: "Removed from favorites",
         description: "Document has been unstarred",
       });
+
+      // Log unstarred event to audit trail
+      logDocumentStarred(documentId, 'Document', false);
 
       return true;
     } catch (error) {
@@ -176,7 +183,7 @@ export const useFavorites = () => {
 
       if (error) throw error;
 
-      setFavorites(prev => 
+      setFavorites(prev =>
         prev.map(f => f.document_id === documentId ? { ...f, notes } : f)
       );
 
@@ -205,7 +212,7 @@ export const useFavorites = () => {
 
       if (error) throw error;
 
-      setFavorites(prev => 
+      setFavorites(prev =>
         prev.map(f => f.document_id === documentId ? { ...f, color } : f)
       );
 

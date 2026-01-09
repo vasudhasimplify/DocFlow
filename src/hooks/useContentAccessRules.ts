@@ -395,12 +395,19 @@ export function useContentAccessRules() {
 
       let isMatch = true;
 
-      // Check file types (AND logic - if rule has types, doc must match one)
-      if (rule.file_types?.length && rule.file_types.length > 0) {
-        const typeMatch = documentData.file_type && rule.file_types.some(t =>
+      // Check file types (OR logic for match sources: MIME type OR filename extension)
+      if (isMatch && rule.file_types?.length && rule.file_types.length > 0) {
+        const mimeMatch = documentData.file_type && rule.file_types.some(t =>
           documentData.file_type?.toLowerCase().includes(t.toLowerCase())
         );
-        if (!typeMatch) isMatch = false;
+
+        // Extract extension from filename (e.g. "doc.pdf" -> "pdf")
+        const ext = documentData.name ? documentData.name.split('.').pop()?.toLowerCase() : '';
+        const extMatch = ext && rule.file_types.some(t =>
+          t.toLowerCase().replace('.', '') === ext
+        );
+
+        if (!mimeMatch && !extMatch) isMatch = false;
       }
 
       // Check name patterns (AND logic)
@@ -410,7 +417,8 @@ export function useContentAccessRules() {
             const regex = new RegExp(pattern, 'i');
             return regex.test(documentData.name || '');
           } catch (e) {
-            return false;
+            // Fallback for simple string match if regex fails
+            return (documentData.name || '').toLowerCase().includes(pattern.toLowerCase());
           }
         });
         if (!nameMatch) isMatch = false;
@@ -418,16 +426,33 @@ export function useContentAccessRules() {
 
       // Check content keywords (AND logic)
       if (isMatch && rule.content_keywords?.length && rule.content_keywords.length > 0) {
-        const contentMatch = documentData.content && rule.content_keywords.some(keyword =>
-          documentData.content?.toLowerCase().includes(keyword.toLowerCase())
-        );
-        if (!contentMatch) isMatch = false;
+        // Only check if we have content to check against
+        if (documentData.content) {
+          const contentMatch = rule.content_keywords.some(keyword =>
+            documentData.content?.toLowerCase().includes(keyword.toLowerCase())
+          );
+          if (!contentMatch) isMatch = false;
+        } else {
+          // If rule requires content keywords but we have NO content, it's a fail? 
+          // Yes, because we can't verify the condition.
+          isMatch = false;
+        }
       }
 
       // Check folder (AND logic)
+      // Only check folder constraint if we KNOW the folder ID (documentData.folder_id is explicitly passed)
+      // If we don't know the folder (undefined), we shouldn't fail simply because we don't know.
+      // However, if the rule restricts to a folder, and we are uploading "somewhere", we should arguably fail if not in that folder.
+      // But for "Auto-Apply on Upload", documents usually go to root or a specific folder.
+      // Let's stick to strict checking: If rule has folder requirement, doc MUST include matched folder_id.
       if (isMatch && rule.folder_ids?.length && rule.folder_ids.length > 0) {
-        const folderMatch = documentData.folder_id && rule.folder_ids.includes(documentData.folder_id);
-        if (!folderMatch) isMatch = false;
+        if (documentData.folder_id) {
+          const folderMatch = rule.folder_ids.includes(documentData.folder_id);
+          if (!folderMatch) isMatch = false;
+        } else {
+          // Rule demands a folder, but doc has none/unknown -> Mismatch
+          isMatch = false;
+        }
       }
 
       // Check size range (AND logic)
@@ -456,14 +481,108 @@ export function useContentAccessRules() {
   }, [rules]);
 
   const applyRulesToDocument = useCallback(async (documentId: string, documentData: Parameters<typeof evaluateDocument>[1]) => {
-    const matchedRules = await evaluateDocument(documentId, documentData);
+    // Fetch rules fresh from API to ensure we have the latest
+    let activeRules: ContentAccessRule[] = [];
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const response = await fetch('/api/rules/', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          activeRules = (data || []).filter((r: ContentAccessRule) => r.is_active);
+          console.log('[Rules] Fetched fresh rules for evaluation:', activeRules.length);
+        }
+      }
+    } catch (fetchError) {
+      console.error('[Rules] Failed to fetch rules, falling back to cached:', fetchError);
+      activeRules = rules.filter(r => r.is_active);
+    }
 
-    // Always clean up old applications first to avoid duplicates or stale rules
+    // Evaluate document against fetched rules
+    const matchedRules: ContentAccessRule[] = [];
+    for (const rule of activeRules) {
+      let isMatch = true;
+
+      // Check file types
+      if (isMatch && rule.file_types?.length && rule.file_types.length > 0) {
+        const mimeMatch = documentData.file_type && rule.file_types.some(t =>
+          documentData.file_type?.toLowerCase().includes(t.toLowerCase())
+        );
+        const ext = documentData.name ? documentData.name.split('.').pop()?.toLowerCase() : '';
+        const extMatch = ext && rule.file_types.some(t =>
+          t.toLowerCase().replace('.', '') === ext
+        );
+        if (!mimeMatch && !extMatch) isMatch = false;
+      }
+
+      // Check name patterns
+      if (isMatch && rule.name_patterns?.length && rule.name_patterns.length > 0) {
+        const nameMatch = documentData.name && rule.name_patterns.some(pattern => {
+          try {
+            const regex = new RegExp(pattern, 'i');
+            return regex.test(documentData.name || '');
+          } catch {
+            return (documentData.name || '').toLowerCase().includes(pattern.toLowerCase());
+          }
+        });
+        if (!nameMatch) isMatch = false;
+      }
+
+      // Check content keywords
+      if (isMatch && rule.content_keywords?.length && rule.content_keywords.length > 0) {
+        if (documentData.content) {
+          const contentMatch = rule.content_keywords.some(keyword =>
+            documentData.content?.toLowerCase().includes(keyword.toLowerCase())
+          );
+          if (!contentMatch) isMatch = false;
+        } else {
+          isMatch = false;
+        }
+      }
+
+      // Check folder
+      if (isMatch && rule.folder_ids?.length && rule.folder_ids.length > 0) {
+        if (documentData.folder_id) {
+          const folderMatch = rule.folder_ids.includes(documentData.folder_id);
+          if (!folderMatch) isMatch = false;
+        } else {
+          isMatch = false;
+        }
+      }
+
+      // Check size range
+      if (isMatch && (rule.size_min_bytes || rule.size_max_bytes) && documentData.file_size !== undefined) {
+        const sizeMatch =
+          (!rule.size_min_bytes || documentData.file_size >= rule.size_min_bytes) &&
+          (!rule.size_max_bytes || documentData.file_size <= rule.size_max_bytes);
+        if (!sizeMatch) isMatch = false;
+      }
+
+      const hasCriteria =
+        (rule.file_types?.length || 0) > 0 ||
+        (rule.name_patterns?.length || 0) > 0 ||
+        (rule.content_keywords?.length || 0) > 0 ||
+        (rule.folder_ids?.length || 0) > 0 ||
+        (rule.size_min_bytes || rule.size_max_bytes);
+
+      if (isMatch && hasCriteria) {
+        matchedRules.push(rule);
+      }
+    }
+
+    const sortedRules = matchedRules.sort((a, b) => a.priority - b.priority);
+    console.log('[Rules] Matched rules:', sortedRules.map(r => r.name));
+
+    // Always clean up old applications first to avoid duplicates
     await supabase.from('content_rule_applications').delete().eq('document_id', documentId);
 
-    if (matchedRules.length === 0) return [];
+    if (sortedRules.length === 0) return [];
 
-    const applications = matchedRules.map(rule => ({
+    const applications = sortedRules.map(rule => ({
       rule_id: rule.id,
       document_id: documentId,
       matched_criteria: {
@@ -485,13 +604,11 @@ export function useContentAccessRules() {
       console.error("Failed to save rule applications", error);
       toast({ title: "Rule Application Failed", description: error.message, variant: "destructive" });
     } else {
-      // If there are matches and notify_on_match is true, we could trigger notifications here
-      // For now just console log
-      console.log(`Applied ${matchedRules.length} rules to document ${documentId}`);
+      console.log(`Applied ${sortedRules.length} rules to document ${documentId}`);
     }
 
-    return matchedRules;
-  }, [evaluateDocument, toast]);
+    return sortedRules;
+  }, [rules, toast]);
 
   // Use a ref or state for stats to be persistent/async
   const [stats, setStats] = useState({ total: 0, active: 0, withRestrictions: 0, withAutoActions: 0 });
@@ -543,5 +660,6 @@ export function useContentAccessRules() {
     applyRulesToDocument,
     getRuleStats,
     refetch: fetchRules,
+    refetchStats: fetchStats,
   };
 }

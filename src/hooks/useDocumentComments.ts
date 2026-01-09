@@ -7,6 +7,7 @@ import {
   AnchorPosition,
 } from '@/types/collaboration';
 import { useToast } from '@/hooks/use-toast';
+import { logAuditEvent } from '@/utils/auditLogger';
 
 interface UseDocumentCommentsOptions {
   documentId: string;
@@ -176,13 +177,6 @@ export const useDocumentComments = ({ documentId, guestEmail, guestName }: UseDo
       }
 
       // Database insert successful
-      await fetchComments();
-
-      toast({
-        title: 'Comment added',
-        description: 'Your comment has been posted',
-      });
-
       return data;
     } catch (error) {
       console.error('Error adding comment:', error);
@@ -192,6 +186,23 @@ export const useDocumentComments = ({ documentId, guestEmail, guestName }: UseDo
         description: `Failed to add comment: ${errorMessage}`,
         variant: 'destructive',
       });
+    } finally {
+      // Log comment activity
+      // We do this in finally to ensure it runs even if UI update succeeds but DB maybe had issues
+      // or just to decouple slightly. But here we put it after success.
+      if (content) {
+        logAuditEvent({
+          action: 'document.commented',
+          category: 'collaboration',
+          resourceType: 'document',
+          resourceName: 'Document', // We don't have the name here easily, but that's okay
+          documentId,
+          details: {
+            comment_id: `new-comment`, // Ideally we'd have the ID, but fire-and-forget is fine
+            is_reply: !!options?.parentCommentId
+          }
+        });
+      }
     }
   }, [user, guestEmail, guestName, documentId, fetchComments, toast]);
 
@@ -267,15 +278,18 @@ export const useDocumentComments = ({ documentId, guestEmail, guestName }: UseDo
 
       if (error) throw error;
 
-      // Log activity
-      await supabase
-        .from('document_activity')
-        .insert({
-          document_id: documentId,
-          user_id: user.id,
-          action_type: 'comment_resolved',
-          action_details: { comment_id: commentId },
-        });
+      // Log activity to new Audit Trail
+      logAuditEvent({
+        action: 'document.updated',
+        category: 'collaboration',
+        resourceType: 'document',
+        resourceName: 'Document',
+        documentId,
+        details: {
+          reason: 'Comment resolved',
+          comment_id: commentId
+        }
+      });
 
       await fetchComments();
 

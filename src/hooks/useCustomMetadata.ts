@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { logAuditEvent } from '@/utils/auditLogger';
 
 export type FieldType = 'text' | 'number' | 'date' | 'boolean' | 'select' | 'multi-select' | 'url' | 'email';
 
@@ -269,6 +270,18 @@ export function useCustomMetadata() {
       toast({
         title: 'Metadata saved',
         description: 'Document metadata has been updated',
+      });
+
+      // Log metadata update to audit trail
+      logAuditEvent({
+        action: 'document.updated',
+        category: 'document_management',
+        resourceType: 'document',
+        resourceName: 'Document',
+        documentId,
+        details: {
+          reason: 'Custom metadata updated',
+        },
       });
     } catch (error) {
       console.error('Error setting metadata:', error);

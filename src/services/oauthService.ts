@@ -94,7 +94,9 @@ class OAuthService {
             });
           } else if (event.data.type === 'oauth-error') {
             window.removeEventListener('message', handleMessage);
-            reject(new Error(event.data.error || 'Authentication failed'));
+            const errorMsg = event.data.error || 'Authentication failed';
+            const errorDesc = event.data.errorDescription || '';
+            reject(new Error(errorDesc ? `${errorMsg}: ${errorDesc}` : errorMsg));
           }
         };
 

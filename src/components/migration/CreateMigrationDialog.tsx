@@ -98,9 +98,25 @@ export function CreateMigrationDialog({
                 toast({ title: `Connected to ${sourceSystem === 'google_drive' ? 'Google Drive' : 'OneDrive'}!` });
             }
         } catch (error) {
+            let errorMessage = error instanceof Error ? error.message : 'Please try again';
+            let errorDescription = '';
+
+            // Provide more specific error messages
+            if (errorMessage.includes('popup') || errorMessage.includes('blocked')) {
+                errorDescription = 'Please allow popups for this site and try again.';
+            } else if (errorMessage.includes('cancelled')) {
+                errorDescription = 'Authentication was cancelled. Please try again.';
+            } else if (errorMessage.includes('access_denied') || errorMessage.includes('Access denied')) {
+                errorDescription = 'Access was denied. If this app is in testing mode, your email may need to be added as a test user.';
+            } else if (errorMessage.includes('invalid_client')) {
+                errorDescription = 'OAuth configuration error. Please contact the administrator.';
+            } else {
+                errorDescription = 'If the problem persists, please contact support.';
+            }
+
             toast({
                 title: 'Connection failed',
-                description: error instanceof Error ? error.message : 'Please try again',
+                description: `${errorMessage}. ${errorDescription}`,
                 variant: 'destructive'
             });
         } finally {

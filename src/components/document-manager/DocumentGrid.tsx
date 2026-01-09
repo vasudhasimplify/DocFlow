@@ -69,6 +69,8 @@ import { useOfflineMode } from '@/hooks/useOfflineMode';
 import { MoveToFolderDialog } from './MoveToFolderDialog';
 import { DocumentEditorModal } from './DocumentEditorModal';
 import { ApplyComplianceLabelDialog } from '@/components/compliance/ApplyComplianceLabelDialog';
+import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
+import { logDocumentDownloaded, logDocumentDeleted } from '@/utils/auditLogger';
 
 interface Document {
   id: string;
@@ -126,6 +128,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
   const { toast } = useToast();
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();
   const { makeDocumentAvailableOffline, isDocumentOffline, removeDocumentFromOffline } = useOfflineMode();
+  const { getDocumentRestrictions } = useDocumentRestrictions();
 
   // Check Out and Transfer Dialog states
   const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
@@ -360,6 +363,19 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
   const handleDownload = async (document: Document) => {
     try {
+      // Check for download restrictions
+      if (document.has_restrictions) {
+        const restrictions = await getDocumentRestrictions(document.id);
+        if (restrictions.restrictDownload) {
+          toast({
+            title: "Download Restricted",
+            description: `This document has download restrictions applied. Rules: ${restrictions.matchedRules.join(', ')}`,
+            variant: "destructive"
+          });
+          return;
+        }
+      }
+
       if (document.storage_url) {
         // Create download link directly from storage URL
         const response = await fetch(document.storage_url);
@@ -379,6 +395,9 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
           title: "Download started",
           description: `Downloading ${document.file_name}`,
         });
+
+        // Log document download to audit trail
+        logDocumentDownloaded(document.id, document.file_name);
       } else {
         throw new Error("Storage URL not found");
       }
@@ -394,6 +413,19 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
   const handleShare = async (document: Document) => {
     try {
+      // Check for share restrictions
+      if (document.has_restrictions) {
+        const restrictions = await getDocumentRestrictions(document.id);
+        if (restrictions.restrictShare || restrictions.restrictExternalShare) {
+          toast({
+            title: "Sharing Restricted",
+            description: `This document has sharing restrictions applied. Rules: ${restrictions.matchedRules.join(', ')}`,
+            variant: "destructive"
+          });
+          return;
+        }
+      }
+
       if (document.storage_url) {
         await navigator.clipboard.writeText(document.storage_url);
         toast({

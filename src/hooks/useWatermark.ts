@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { logAuditEvent } from '@/utils/auditLogger';
 
 export type WatermarkPosition = 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'tile';
 export type WatermarkType = 'text' | 'image' | 'pattern';
@@ -95,6 +96,20 @@ export function useWatermark() {
         title: 'Watermark created',
         description: `Watermark "${settings.name}" has been saved`,
       });
+
+      // Log watermark creation to audit trail
+      if (settings.document_id) {
+        logAuditEvent({
+          action: 'document.updated',
+          category: 'document_management',
+          resourceType: 'document',
+          resourceName: 'Document',
+          documentId: settings.document_id,
+          details: {
+            reason: `Watermark "${settings.name}" created`,
+          },
+        });
+      }
 
       fetchWatermarks();
       return data;

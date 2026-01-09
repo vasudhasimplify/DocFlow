@@ -1042,3 +1042,109 @@ async def save_signed_to_drive(request_id: str, body: SaveToDriveRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/verify-token/{token}")
+async def verify_signature_token(token: str):
+    """
+    Public endpoint to verify a signature token and get signer/request details.
+    This bypasses RLS to allow anonymous users (from email links) to verify tokens.
+    Returns signer and request data if valid, or error if invalid/expired.
+    """
+    try:
+        print(f"🔐 Verifying signature token: {token[:20] if len(token) > 20 else token}...")
+        
+        # Lookup signer by access_token using service role (bypasses RLS)
+        # Using execute() without single() to avoid exceptions on empty results
+        signer = None
+        try:
+            signer_response = get_supabase().table('signature_signers').select(
+                '*'
+            ).eq('access_token', token).execute()
+            
+            if signer_response.data and len(signer_response.data) > 0:
+                signer = signer_response.data[0]
+        except Exception as e:
+            print(f"Error querying signature_signers: {e}")
+        
+        if not signer:
+            print(f"❌ Token not found in signature_signers")
+            raise HTTPException(status_code=404, detail="Invalid or expired signing link")
+        
+        print(f"✅ Found signer: {signer.get('email')}")
+        
+        # Get the signature request details
+        request_data = None
+        try:
+            request_response = get_supabase().table('signature_requests').select(
+                '*'
+            ).eq('id', signer['request_id']).execute()
+            
+            if request_response.data and len(request_response.data) > 0:
+                request_data = request_response.data[0]
+        except Exception as e:
+            print(f"Error querying signature_requests: {e}")
+        
+        if not request_data:
+            print(f"❌ Signature request not found for request_id: {signer['request_id']}")
+            raise HTTPException(status_code=404, detail="Signature request not found")
+        
+        # Check if request has expired
+        if request_data.get('expires_at'):
+            try:
+                expires_at = datetime.fromisoformat(request_data['expires_at'].replace('Z', '+00:00'))
+                if expires_at < datetime.now(expires_at.tzinfo):
+                    raise HTTPException(status_code=410, detail="This signing link has expired")
+            except ValueError:
+                print(f"Warning: Could not parse expires_at: {request_data.get('expires_at')}")
+        
+        # Check if already signed
+        if signer.get('status') == 'signed':
+            return {
+                "valid": True,
+                "already_signed": True,
+                "signer": {
+                    "id": signer['id'],
+                    "email": signer['email'],
+                    "name": signer.get('name'),
+                    "role": signer.get('role'),
+                    "status": signer['status'],
+                    "signed_at": signer.get('signed_at')
+                },
+                "request": {
+                    "id": request_data['id'],
+                    "title": request_data.get('title'),
+                    "status": request_data.get('status')
+                }
+            }
+        
+        print(f"✅ Token verified successfully for: {signer['email']}")
+        
+        return {
+            "valid": True,
+            "already_signed": False,
+            "signer": {
+                "id": signer['id'],
+                "email": signer['email'],
+                "name": signer.get('name'),
+                "role": signer.get('role'),
+                "status": signer.get('status'),
+                "request_id": signer['request_id']
+            },
+            "request": {
+                "id": request_data['id'],
+                "title": request_data.get('title'),
+                "status": request_data.get('status'),
+                "document_name": request_data.get('document_name'),
+                "message": request_data.get('message')
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error verifying signature token: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to verify signing link")
+

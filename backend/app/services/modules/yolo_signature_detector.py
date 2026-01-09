@@ -38,7 +38,10 @@ class YOLOSignatureDetector:
             # Try to import ultralytics (YOLOv8)
             try:
                 from ultralytics import YOLO
+                self.enabled = False 
+                return # FORCE DISABLE TO FIX DLL CRASH
                 
+                # Check if model exists
                 if not os.path.exists(self.model_path):
                     logger.warning(f"⚠️ YOLO model not found at {self.model_path}. YOLO detection will be disabled.")
                     logger.info("💡 To enable YOLO detection, provide a trained signature detection model.")

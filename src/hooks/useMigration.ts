@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { logAuditEvent } from '@/utils/auditLogger';
 import type {
   MigrationJob,
   MigrationItem,
@@ -50,10 +51,9 @@ export function useMigration() {
 
       const { data, error } = await supabase
         .from('migration_items')
-        .select('id, job_id, source_path, destination_path, status, file_size, mime_type, error_message, created_at, processed_at')
+        .select('*')
         .eq('job_id', selectedJobId)
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
       return data as MigrationItem[];
@@ -160,9 +160,21 @@ export function useMigration() {
       }
       return await response.json();
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['migration-jobs'] });
       toast({ title: 'Migration job created successfully' });
+
+      // Log migration job creation to audit trail
+      logAuditEvent({
+        action: 'system.settings_changed',
+        category: 'system',
+        resourceType: 'system',
+        resourceName: variables.name,
+        details: {
+          reason: `Migration job created from ${variables.source_system}`,
+          source_system: variables.source_system,
+        },
+      });
     },
     onError: (error: Error) => {
       toast({ title: 'Failed to create job', description: error.message, variant: 'destructive' });
@@ -390,7 +402,7 @@ export function useMigration() {
     deleteIdentityMapping: deleteIdentityMappingMutation.mutate,
     refetchJobs,
     refetchItems,
-    
+
     // OPTIMIZATION: Polling control - call when entering/leaving migration page
     enablePolling: () => setIsPollingEnabled(true),
     disablePolling: () => setIsPollingEnabled(false),

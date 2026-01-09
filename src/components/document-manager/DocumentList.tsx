@@ -59,6 +59,7 @@ import { TransferOwnershipDialog } from '@/components/ownership/TransferOwnershi
 import { DocumentEditorModal } from './DocumentEditorModal';
 import { ApplyComplianceLabelDialog } from '@/components/compliance/ApplyComplianceLabelDialog';
 import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
+import { logDocumentDownloaded, logDocumentDeleted } from '@/utils/auditLogger';
 
 interface Document {
   id: string;
@@ -212,6 +213,9 @@ export const DocumentList: React.FC<DocumentListProps> = ({
         description: `${documentToDelete.file_name} has been moved to recycle bin`,
       });
 
+      // Log document deletion to audit trail
+      logDocumentDeleted(documentToDelete.id, documentToDelete.file_name);
+
       setShowDeleteDialog(false);
       setDocumentToDelete(null);
       setSelectedDocuments(new Set());
@@ -338,6 +342,9 @@ export const DocumentList: React.FC<DocumentListProps> = ({
           title: "Download started",
           description: `Downloading ${document.file_name}`,
         });
+
+        // Log document download to audit trail
+        logDocumentDownloaded(document.id, document.file_name);
       } else {
         throw new Error("Storage URL not found");
       }

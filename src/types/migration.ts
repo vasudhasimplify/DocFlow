@@ -67,6 +67,7 @@ export interface MigrationConfig {
   retry_attempts: number;
   delta_mode: boolean;
   delete_after_migration?: boolean;
+  access_token?: string; // OAuth access token for Quick Connect flow
 }
 
 export interface MigrationCheckpoint {

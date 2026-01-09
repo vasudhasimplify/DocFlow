@@ -67,7 +67,7 @@ export const useAuditTrail = (options: UseAuditTrailOptions = {}) => {
     if (!user) return null;
 
     const metadata = getMetadata();
-    
+
     const event = {
       user_id: user.id,
       action,
@@ -157,16 +157,16 @@ export const useAuditTrail = (options: UseAuditTrailOptions = {}) => {
       if (error) throw error;
 
       const fetchedEvents = (data || []) as AuditEvent[];
-      
+
       if (offset === 0) {
         setEvents(fetchedEvents);
       } else {
         setEvents(prev => [...prev, ...fetchedEvents]);
       }
-      
+
       setTotalCount(count || 0);
       setHasMore(fetchedEvents.length === limit);
-      
+
       return fetchedEvents;
     } catch (error) {
       console.error('Error fetching audit events:', error);
@@ -180,8 +180,9 @@ export const useAuditTrail = (options: UseAuditTrailOptions = {}) => {
   const fetchStats = useCallback(async (): Promise<AuditStats | null> => {
     try {
       const now = new Date();
-      const startOfDay = new Date(now.setHours(0, 0, 0, 0));
-      const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfWeek = new Date(startOfDay);
+      startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay());
 
       // @ts-ignore - audit_events table may not exist in types yet
       const { count: total } = await (supabase as any)
@@ -200,22 +201,64 @@ export const useAuditTrail = (options: UseAuditTrailOptions = {}) => {
         .select('*', { count: 'exact', head: true })
         .gte('created_at', startOfWeek.toISOString());
 
+      // Fetch all events for breakdown calculation
+      // @ts-ignore
+      const { data: allEvents } = await (supabase as any)
+        .from('audit_events')
+        .select('action_category, document_id, resource_name, user_id')
+        .limit(1000);
+
+      // Calculate action breakdown by category
+      const actionBreakdown: Record<string, number> = {
+        document_management: 0,
+        access_control: 0,
+        collaboration: 0,
+        security: 0,
+        system: 0,
+        ai_processing: 0,
+        export: 0,
+        user_activity: 0,
+      };
+
+      // Calculate most active documents
+      const documentCounts: Record<string, { id: string; name: string; count: number }> = {};
+
+      (allEvents || []).forEach((event: any) => {
+        // Count by category
+        if (event.action_category && actionBreakdown[event.action_category] !== undefined) {
+          actionBreakdown[event.action_category]++;
+        }
+
+        // Count by document
+        if (event.document_id) {
+          if (!documentCounts[event.document_id]) {
+            documentCounts[event.document_id] = {
+              id: event.document_id,
+              name: event.resource_name || 'Unknown Document',
+              count: 0,
+            };
+          }
+          documentCounts[event.document_id].count++;
+        }
+      });
+
+      // Get top 5 most active documents
+      const mostActiveDocuments = Object.values(documentCounts)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5)
+        .map(doc => ({
+          document_id: doc.id,
+          document_name: doc.name,
+          event_count: doc.count,
+        }));
+
       const stats: AuditStats = {
         total_events: total || 0,
         events_today: today || 0,
         events_this_week: thisWeek || 0,
-        most_active_documents: [],
+        most_active_documents: mostActiveDocuments,
         most_active_users: [],
-        action_breakdown: {
-          document_management: 0,
-          access_control: 0,
-          collaboration: 0,
-          security: 0,
-          system: 0,
-          ai_processing: 0,
-          export: 0,
-          user_activity: 0,
-        },
+        action_breakdown: actionBreakdown as any,
         hourly_activity: [],
       };
 
@@ -304,7 +347,7 @@ export const useAuditTrail = (options: UseAuditTrailOptions = {}) => {
           event: 'INSERT',
           schema: 'public',
           table: 'audit_events',
-          filter: options.documentId 
+          filter: options.documentId
             ? `document_id=eq.${options.documentId}`
             : `folder_id=eq.${options.folderId}`,
         },
