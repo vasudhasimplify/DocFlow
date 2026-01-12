@@ -352,7 +352,7 @@ export function CreateMigrationDialog({
                                         onSelectFolder={handleFolderSelect}
                                         selectedFolderId={config.source_folder_id}
                                         showFiles={true}
-                                        allowFileSelection={false}
+                                        allowFileSelection={true}
                                     />
                                     {selectedFolderName && (
                                         <p className="text-sm text-muted-foreground">

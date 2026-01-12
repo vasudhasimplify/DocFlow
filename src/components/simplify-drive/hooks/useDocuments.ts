@@ -186,26 +186,38 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         .eq('resource_type', 'document')
         .eq('status', 'accepted');
 
-      const sharedDocIds = sharedDocs?.map(s => s.resource_id) || [];
-      console.log('📤 Found', sharedDocIds.length, 'documents shared with user');
+      // Also get document IDs shared via document_shares (direct user-to-user sharing)
+      const { data: directSharedDocs } = await supabase
+        .from('document_shares')
+        .select('document_id')
+        .eq('shared_with', user.user.id);
 
-      // Build query for owned documents
+      // Combine both sources of shared documents
+      const sharedDocIdsSet = new Set<string>();
+      sharedDocs?.forEach(s => sharedDocIdsSet.add(s.resource_id));
+      directSharedDocs?.forEach(d => sharedDocIdsSet.add(d.document_id));
+      const sharedDocIds = Array.from(sharedDocIdsSet);
+
+      console.log('📤 Found', sharedDocIds.length, 'documents shared with user (external:', sharedDocs?.length || 0, '+ direct:', directSharedDocs?.length || 0, ')');
+
+      // Build query for owned AND shared documents with a single OR clause
+      // We need to include: uploaded_by = user OR user_id = user OR id IN (sharedDocIds)
+      let orFilter = `uploaded_by.eq.${user.user.id},user_id.eq.${user.user.id}`;
+      if (sharedDocIds.length > 0) {
+        orFilter += `,id.in.(${sharedDocIds.join(',')})`;
+      }
+
+      console.log('🔍 useDocuments: OR filter:', orFilter);
+
       let query = supabase
         .from('documents')
         .select(DOCUMENT_SELECT_COLUMNS, { count: 'exact' })
-        .or(`uploaded_by.eq.${user.user.id},user_id.eq.${user.user.id}`)
         .select('*')
-        .eq('is_deleted', false);
-
-      // Include both owned documents AND shared documents
-      if (sharedDocIds.length > 0) {
-        query = query.or(`uploaded_by.eq.${user.user.id},user_id.eq.${user.user.id},id.in.(${sharedDocIds.join(',')})`);
-      } else {
-        query = query.or(`uploaded_by.eq.${user.user.id},user_id.eq.${user.user.id}`);
-      }
+        .eq('is_deleted', false)
+        .or(orFilter);
 
       // If a specific folder is selected (not 'all' or special folders), filter by folder
-      if (selectedFolder && selectedFolder !== 'all' && selectedFolder !== 'media-browser' && selectedFolder !== 'recycle-bin') {
+      if (selectedFolder && selectedFolder !== 'all' && selectedFolder !== 'media-browser' && selectedFolder !== 'recycle-bin' && selectedFolder !== 'shared-docs') {
         console.log('📁 Fetching documents for specific folder:', selectedFolder);
 
         // OPTIMIZATION: Fetch both shortcuts and relationships in parallel
@@ -387,7 +399,7 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
         // Get insights from document_insights table ONLY
         // We don't use analysis_result from documents table anymore
         const dbInsights = insightsMap[doc.id];
-        
+
         // Only show insights if they exist in document_insights table (processed via "Process Now")
         const insights = dbInsights ? dbInsights : undefined;
 

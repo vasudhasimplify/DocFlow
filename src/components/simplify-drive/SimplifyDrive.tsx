@@ -6,7 +6,7 @@ import { useSearchParams, useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { logDocumentViewed, logDocumentDownloaded } from '@/utils/auditLogger';
 
-import { FeatureNavigation } from './components/FeatureNavigation';
+import { SimplifyDriveSidebar } from './components/SimplifyDriveSidebar';
 import { SimplifyDriveHeader } from './components/SimplifyDriveHeader';
 import { DocumentsView } from './components/DocumentsView';
 import { FeatureContent } from './components/FeatureContent';
@@ -476,134 +476,139 @@ export function SimplifyDrive() {
   const totalProcessingCount = processingDocs.length + activeUploadsCount;
 
   return (
-    <div className="h-screen flex flex-col bg-background overflow-hidden">
-      {/* Feature Navigation */}
-      <FeatureNavigation
+    <div className="h-screen flex bg-background overflow-hidden">
+      {/* Sidebar Navigation */}
+      <SimplifyDriveSidebar
         activeFeature={activeFeature}
         onFeatureChange={setActiveFeature}
       />
 
-      {/* Processing Indicator Banner */}
-      {isDocumentsView && totalProcessingCount > 0 && (
-        <div className="bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 px-4 py-2">
-          <div className="flex items-center justify-center gap-2 text-sm text-blue-700 dark:text-blue-300">
-            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <span>
-              Processing {totalProcessingCount} document{totalProcessingCount > 1 ? 's' : ''} in the background...
-            </span>
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+
+        {/* Processing Indicator Banner */}
+        {isDocumentsView && totalProcessingCount > 0 && (
+          <div className="bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 px-4 py-2">
+            <div className="flex items-center justify-center gap-2 text-sm text-blue-700 dark:text-blue-300">
+              <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>
+                Processing {totalProcessingCount} document{totalProcessingCount > 1 ? 's' : ''} in the background...
+              </span>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Header - Only show on documents view */}
-      {isDocumentsView && (
-        <SimplifyDriveHeader
-          stats={stats}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          sortBy={sortBy}
-          onSortByChange={setSortBy}
-          sortOrder={sortOrder}
-          onSortOrderChange={setSortOrder}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          aiInsightsEnabled={aiInsightsEnabled}
-          onAiInsightsToggle={() => setAiInsightsEnabled(!aiInsightsEnabled)}
-          onUpload={() => setShowUploadModal(true)}
-          onScan={() => setShowScannerModal(true)}
-          onChatbot={() => setShowChatbot(true)}
-          onOfflinePanel={() => setShowOfflinePanel(true)}
-          onSync={handleSyncAll}
-          isOnline={offlineStatus.isOnline}
-          offlineCount={offlineStatus.offlineDocumentCount}
-          pendingSyncCount={offlineStatus.pendingUploadCount}
-          isSyncing={offlineStatus.isSyncing}
-        />
-      )}
-
-      {/* Main Content */}
-      <div className="flex-1 overflow-auto">
-        {isDocumentsView ? (
-          <DocumentsView
-            documents={filteredDocuments}
+        {/* Header - Only show on documents view */}
+        {isDocumentsView && (
+          <SimplifyDriveHeader
+            stats={stats}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            sortBy={sortBy}
+            onSortByChange={setSortBy}
+            sortOrder={sortOrder}
+            onSortOrderChange={setSortOrder}
             viewMode={viewMode}
+            onViewModeChange={setViewMode}
             aiInsightsEnabled={aiInsightsEnabled}
-            selectedFolder={selectedFolder}
-            onFolderSelect={(folderId) => {
-              console.log('📁 SimplifyDrive: Folder selected:', folderId);
-              setSelectedFolder(folderId);
-            }}
-            onDocumentClick={handleViewDocument}
-            onRefresh={refetch}
-          />
-        ) : (
-          <FeatureContent
-            activeFeature={activeFeature}
-            documents={documents}
-            onViewDocument={handleViewDocument}
-            onDownloadDocument={handleDownloadDocument}
+            onAiInsightsToggle={() => setAiInsightsEnabled(!aiInsightsEnabled)}
+            onUpload={() => setShowUploadModal(true)}
+            onScan={() => setShowScannerModal(true)}
+            onChatbot={() => setShowChatbot(true)}
+            onOfflinePanel={() => setShowOfflinePanel(true)}
+            onSync={handleSyncAll}
+            isOnline={offlineStatus.isOnline}
+            offlineCount={offlineStatus.offlineDocumentCount}
+            pendingSyncCount={offlineStatus.pendingUploadCount}
+            isSyncing={offlineStatus.isSyncing}
           />
         )}
-      </div>
 
-      {/* Modals */}
-      <DocumentModals
-        showUploadModal={showUploadModal}
-        onCloseUploadModal={() => setShowUploadModal(false)}
-        onDocumentProcessed={handleDocumentProcessed}
-        showScannerModal={showScannerModal}
-        onCloseScannerModal={() => setShowScannerModal(false)}
-        onUploadScannedPages={handleUploadScannedPages}
-        showShortcutDialog={showShortcutDialog}
-        onCloseShortcutDialog={() => setShowShortcutDialog(false)}
-        shortcutDocument={shortcutDocument}
-        showSummaryDialog={showSummaryDialog}
-        onCloseSummaryDialog={() => setShowSummaryDialog(false)}
-        summaryDocument={summaryDocument}
-      />
+        {/* Main Content */}
+        <div className="flex-1 overflow-auto">
+          {isDocumentsView ? (
+            <DocumentsView
+              documents={filteredDocuments}
+              viewMode={viewMode}
+              aiInsightsEnabled={aiInsightsEnabled}
+              selectedFolder={selectedFolder}
+              onFolderSelect={(folderId) => {
+                console.log('📁 SimplifyDrive: Folder selected:', folderId);
+                setSelectedFolder(folderId);
+              }}
+              onDocumentClick={handleViewDocument}
+              onRefresh={refetch}
+              onNavigateToShare={() => setActiveFeature('sharing')}
+            />
+          ) : (
+            <FeatureContent
+              activeFeature={activeFeature}
+              documents={documents}
+              onViewDocument={handleViewDocument}
+              onDownloadDocument={handleDownloadDocument}
+            />
+          )}
+        </div>
 
-      {/* RAG AI Chatbot - Fixed position */}
-      {showChatbot && (
-        <DocumentChatbot
-          onClose={() => setShowChatbot(false)}
-          isMinimized={chatbotMinimized}
-          onToggleMinimize={() => setChatbotMinimized(!chatbotMinimized)}
+        {/* Modals */}
+        <DocumentModals
+          showUploadModal={showUploadModal}
+          onCloseUploadModal={() => setShowUploadModal(false)}
+          onDocumentProcessed={handleDocumentProcessed}
+          showScannerModal={showScannerModal}
+          onCloseScannerModal={() => setShowScannerModal(false)}
+          onUploadScannedPages={handleUploadScannedPages}
+          showShortcutDialog={showShortcutDialog}
+          onCloseShortcutDialog={() => setShowShortcutDialog(false)}
+          shortcutDocument={shortcutDocument}
+          showSummaryDialog={showSummaryDialog}
+          onCloseSummaryDialog={() => setShowSummaryDialog(false)}
+          summaryDocument={summaryDocument}
         />
-      )}
 
-      {/* Document Viewer Dialog */}
-      <DocumentViewer
-        document={selectedDocument}
-        isOpen={showDocumentViewer}
-        onClose={() => {
-          setShowDocumentViewer(false);
-          setSelectedDocument(null);
-        }}
-      />
+        {/* RAG AI Chatbot - Fixed position */}
+        {showChatbot && (
+          <DocumentChatbot
+            onClose={() => setShowChatbot(false)}
+            isMinimized={chatbotMinimized}
+            onToggleMinimize={() => setChatbotMinimized(!chatbotMinimized)}
+          />
+        )}
 
-      {/* Offline Documents Panel */}
-      <OfflineDocumentsPanel
-        isOpen={showOfflinePanel}
-        onClose={() => setShowOfflinePanel(false)}
-      />
+        {/* Document Viewer Dialog */}
+        <DocumentViewer
+          document={selectedDocument}
+          isOpen={showDocumentViewer}
+          onClose={() => {
+            setShowDocumentViewer(false);
+            setSelectedDocument(null);
+          }}
+        />
 
-      {/* Sync Status Dialog */}
-      <SyncStatusDialog
-        isOpen={showSyncDialog}
-        onClose={() => setShowSyncDialog(false)}
-      />
+        {/* Offline Documents Panel */}
+        <OfflineDocumentsPanel
+          isOpen={showOfflinePanel}
+          onClose={() => setShowOfflinePanel(false)}
+        />
 
-      {/* Sync Notification Dialog */}
-      <SyncNotificationDialog
-        open={offlineStatus.showSyncDialog}
-        onOpenChange={closeSyncDialog}
-        pendingUploads={pendingUploads}
-        onSync={syncSelectedUploads}
-        onDismiss={closeSyncDialog}
-      />
+        {/* Sync Status Dialog */}
+        <SyncStatusDialog
+          isOpen={showSyncDialog}
+          onClose={() => setShowSyncDialog(false)}
+        />
+
+        {/* Sync Notification Dialog */}
+        <SyncNotificationDialog
+          open={offlineStatus.showSyncDialog}
+          onOpenChange={closeSyncDialog}
+          pendingUploads={pendingUploads}
+          onSync={syncSelectedUploads}
+          onDismiss={closeSyncDialog}
+        />
+      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,32 +15,43 @@ const Auth = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Read query parameters
+  const modeParam = searchParams.get('mode'); // 'signup' or 'signin'
+  const emailParam = searchParams.get('email') || '';
+  const returnToParam = searchParams.get('returnTo') || '/';
+
+  // Set default tab based on mode parameter
+  const defaultTab = modeParam === 'signup' ? 'signup' : 'signin';
 
   // Check if user is already authenticated
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        navigate('/');
+        // If returnTo is specified, redirect there after auth
+        navigate(returnToParam);
       }
     };
     checkAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        navigate('/');
+        // If returnTo is specified, redirect there after auth
+        navigate(returnToParam);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [navigate]);
+  }, [navigate, returnToParam]);
 
   const handleSignUp = async (email: string, password: string) => {
     setLoading(true);
     setError(null);
 
     const redirectUrl = `${window.location.origin}/`;
-    
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -61,7 +72,7 @@ const Auth = () => {
         description: "We've sent you a confirmation link to complete your registration."
       });
     }
-    
+
     setLoading(false);
   };
 
@@ -81,7 +92,7 @@ const Auth = () => {
         setError(error.message);
       }
     }
-    
+
     setLoading(false);
   };
 
@@ -101,7 +112,7 @@ const Auth = () => {
         </div>
 
         <Card className="border-border bg-card">
-          <Tabs defaultValue="signin" className="w-full">
+          <Tabs defaultValue={defaultTab} className="w-full">
             <CardHeader>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="signin">Sign In</TabsTrigger>
@@ -120,9 +131,9 @@ const Auth = () => {
             <TabsContent value="signin">
               <SignInForm onSubmit={handleSignIn} loading={loading} />
             </TabsContent>
-            
+
             <TabsContent value="signup">
-              <SignUpForm onSubmit={handleSignUp} loading={loading} />
+              <SignUpForm onSubmit={handleSignUp} loading={loading} initialEmail={emailParam} />
             </TabsContent>
           </Tabs>
         </Card>
@@ -151,7 +162,7 @@ const SignInForm = ({ onSubmit, loading }: { onSubmit: (email: string, password:
         <CardDescription>
           Welcome back! Enter your credentials to access your account.
         </CardDescription>
-        
+
         <div className="space-y-2">
           <Label htmlFor="signin-email">Email</Label>
           <Input
@@ -164,7 +175,7 @@ const SignInForm = ({ onSubmit, loading }: { onSubmit: (email: string, password:
             disabled={loading}
           />
         </div>
-        
+
         <div className="space-y-2">
           <Label htmlFor="signin-password">Password</Label>
           <Input
@@ -178,7 +189,7 @@ const SignInForm = ({ onSubmit, loading }: { onSubmit: (email: string, password:
           />
         </div>
       </CardContent>
-      
+
       <CardFooter>
         <Button type="submit" className="w-full" disabled={loading}>
           {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -189,25 +200,25 @@ const SignInForm = ({ onSubmit, loading }: { onSubmit: (email: string, password:
   );
 };
 
-const SignUpForm = ({ onSubmit, loading }: { onSubmit: (email: string, password: string) => void; loading: boolean }) => {
-  const [email, setEmail] = useState('');
+const SignUpForm = ({ onSubmit, loading, initialEmail = '' }: { onSubmit: (email: string, password: string) => void; loading: boolean; initialEmail?: string }) => {
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (password !== confirmPassword) {
       setPasswordError('Passwords do not match');
       return;
     }
-    
+
     if (password.length < 6) {
       setPasswordError('Password must be at least 6 characters');
       return;
     }
-    
+
     setPasswordError('');
     onSubmit(email, password);
   };
@@ -219,7 +230,7 @@ const SignUpForm = ({ onSubmit, loading }: { onSubmit: (email: string, password:
         <CardDescription>
           Join SimplifyAI DocFlow to start transforming your documents with AI.
         </CardDescription>
-        
+
         <div className="space-y-2">
           <Label htmlFor="signup-email">Email</Label>
           <Input
@@ -232,7 +243,7 @@ const SignUpForm = ({ onSubmit, loading }: { onSubmit: (email: string, password:
             disabled={loading}
           />
         </div>
-        
+
         <div className="space-y-2">
           <Label htmlFor="signup-password">Password</Label>
           <Input
@@ -245,7 +256,7 @@ const SignUpForm = ({ onSubmit, loading }: { onSubmit: (email: string, password:
             disabled={loading}
           />
         </div>
-        
+
         <div className="space-y-2">
           <Label htmlFor="confirm-password">Confirm Password</Label>
           <Input
@@ -262,7 +273,7 @@ const SignUpForm = ({ onSubmit, loading }: { onSubmit: (email: string, password:
           )}
         </div>
       </CardContent>
-      
+
       <CardFooter>
         <Button type="submit" className="w-full" disabled={loading}>
           {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

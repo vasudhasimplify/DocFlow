@@ -52,14 +52,14 @@ class GoogleDriveConnector:
             # Use service account
             self.creds = service_account.Credentials.from_service_account_info(
                 credentials_dict,
-                scopes=['https://www.googleapis.com/auth/drive.readonly']
+                scopes=['https://www.googleapis.com/auth/drive']  # Full access for move/delete
             )
         elif credentials_dict.get('access_token'):
             # Simple OAuth flow - just access token (from implicit flow)
             logger.info("🔑 Using access token authentication (implicit OAuth)")
             self.creds = Credentials(
                 token=credentials_dict.get('access_token'),
-                scopes=credentials_dict.get('scopes', ['https://www.googleapis.com/auth/drive.readonly'])
+                scopes=credentials_dict.get('scopes', ['https://www.googleapis.com/auth/drive'])  # Full access for move/delete
             )
         else:
             logger.info("🔑 Using OAuth authentication (with refresh token)")
@@ -70,7 +70,7 @@ class GoogleDriveConnector:
                 token_uri=credentials_dict.get('token_uri', 'https://oauth2.googleapis.com/token'),
                 client_id=credentials_dict.get('client_id'),
                 client_secret=credentials_dict.get('client_secret'),
-                scopes=credentials_dict.get('scopes', ['https://www.googleapis.com/auth/drive.readonly'])
+                scopes=credentials_dict.get('scopes', ['https://www.googleapis.com/auth/drive'])  # Full access for move/delete
             )
             
             # Refresh token if expired

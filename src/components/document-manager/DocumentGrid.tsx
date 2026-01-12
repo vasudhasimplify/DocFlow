@@ -127,12 +127,14 @@ interface DocumentGridProps {
   documents: Document[];
   onDocumentClick: (document: Document) => void;
   onRefresh?: () => void;
+  onNavigateToShare?: () => void;
 }
 
 export const DocumentGrid: React.FC<DocumentGridProps> = ({
   documents,
   onDocumentClick,
-  onRefresh
+  onRefresh,
+  onNavigateToShare
 }) => {
   const { toast } = useToast();
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();
@@ -442,6 +444,11 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
         }
       }
 
+      if (onNavigateToShare) {
+        onNavigateToShare();
+        return;
+      }
+
       if (document.storage_url) {
         await navigator.clipboard.writeText(document.storage_url);
         toast({
@@ -464,59 +471,60 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
     const type = fileType?.toLowerCase() || '';
     const name = fileName?.toLowerCase() || '';
     const combined = `${type} ${name}`;
-    
+    const iconClass = "w-5 h-5"; // Reduced from w-8 h-8
+
     // PDF
     if (combined.includes('pdf')) {
-      return <FileText className="w-8 h-8 text-red-500" />;
+      return <FileText className={`${iconClass} text-red-500`} />;
     }
-    
+
     // Word documents
     if (combined.includes('word') || combined.includes('docx') || combined.includes('.doc') || type.includes('msword') || type.includes('officedocument.wordprocessing')) {
-      return <FileText className="w-8 h-8 text-blue-600" />;
+      return <FileText className={`${iconClass} text-blue-600`} />;
     }
-    
+
     // Excel/Spreadsheets
     if (combined.includes('excel') || combined.includes('spreadsheet') || combined.includes('xls') || combined.includes('csv') || type.includes('officedocument.spreadsheet')) {
-      return <FileSpreadsheet className="w-8 h-8 text-green-600" />;
+      return <FileSpreadsheet className={`${iconClass} text-green-600`} />;
     }
-    
+
     // PowerPoint
     if (combined.includes('powerpoint') || combined.includes('presentation') || combined.includes('ppt') || type.includes('officedocument.presentation')) {
-      return <Presentation className="w-8 h-8 text-orange-600" />;
+      return <Presentation className={`${iconClass} text-orange-600`} />;
     }
-    
+
     // Images
     if (type.includes('image') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.gif') || name.endsWith('.svg') || name.endsWith('.webp')) {
-      return <FileImage className="w-8 h-8 text-purple-500" />;
+      return <FileImage className={`${iconClass} text-purple-500`} />;
     }
-    
+
     // Videos
     if (type.includes('video') || name.endsWith('.mp4') || name.endsWith('.avi') || name.endsWith('.mov') || name.endsWith('.mkv')) {
-      return <FileVideo className="w-8 h-8 text-pink-500" />;
+      return <FileVideo className={`${iconClass} text-pink-500`} />;
     }
-    
+
     // Audio
     if (type.includes('audio') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.m4a')) {
-      return <FileAudio className="w-8 h-8 text-indigo-500" />;
+      return <FileAudio className={`${iconClass} text-indigo-500`} />;
     }
-    
+
     // Archives
     if (combined.includes('zip') || combined.includes('rar') || combined.includes('7z') || combined.includes('tar') || type.includes('compressed')) {
-      return <FileArchive className="w-8 h-8 text-yellow-600" />;
+      return <FileArchive className={`${iconClass} text-yellow-600`} />;
     }
-    
+
     // Code files
     if (name.endsWith('.js') || name.endsWith('.ts') || name.endsWith('.json') || name.endsWith('.html') || name.endsWith('.css') || name.endsWith('.py') || type.includes('javascript') || type.includes('json')) {
-      return <FileCode className="w-8 h-8 text-cyan-600" />;
+      return <FileCode className={`${iconClass} text-cyan-600`} />;
     }
-    
+
     // Text files
     if (type.includes('text/plain') || name.endsWith('.txt')) {
-      return <File className="w-8 h-8 text-gray-500" />;
+      return <File className={`${iconClass} text-gray-500`} />;
     }
-    
+
     // Default
-    return <FileText className="w-8 h-8 text-blue-500" />;
+    return <FileText className={`${iconClass} text-blue-500`} />;
   };
 
   const formatFileSize = (bytes: number) => {
@@ -615,7 +623,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
           <ContextMenu key={document.id}>
             <ContextMenuTrigger asChild>
               <Card
-                className={`group hover:shadow-lg transition-all duration-200 cursor-grab active:cursor-grabbing border hover:border-primary/50 ${selectedDocuments.has(document.id) ? 'border-primary border-2 bg-primary/5' : 'bg-white'
+                className={`group hover:shadow-md hover:-translate-y-1 transition-all duration-200 cursor-grab active:cursor-grabbing border-slate-200 ${selectedDocuments.has(document.id) ? 'border-primary ring-1 ring-primary bg-primary/5' : 'bg-white hover:border-slate-300'
                   } ${draggingDocument?.id === document.id ? 'opacity-50 scale-95' : ''}`}
                 draggable
                 onDragStart={(e) => handleDragStart(e, document)}
@@ -638,7 +646,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                 }}
                 tabIndex={0}
               >
-                <CardContent className="p-4">
+                <CardContent className="p-3">
                   {/* Checkbox */}
                   <div className="absolute top-3 left-3 z-10">
                     <button
@@ -665,7 +673,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                   </div>
 
                   {/* Header */}
-                  <div className="flex items-start justify-between mb-3 pl-8\">
+                  <div className="flex items-start justify-between mb-2 pl-7">
                     <div className="flex items-center gap-2">
                       {getFileIcon(document.file_type, document.file_name)}
                       {document.insights && (
@@ -683,7 +691,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                             <TooltipTrigger asChild>
                               <Badge variant="outline" className="text-[10px] py-0 h-4 bg-amber-50 text-amber-700 border-amber-200 px-1 font-bold">
                                 <Shield className="w-2.5 h-2.5 mr-0.5" />
-                                RESTRICTED
+                                R
                               </Badge>
                             </TooltipTrigger>
                             <TooltipContent>
@@ -707,7 +715,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 w-7 p-0 hover:bg-primary/10"
+                              className="h-6 w-6 p-0 hover:bg-primary/10"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (isPinned(document.id)) {
@@ -718,7 +726,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                               }}
                             >
                               <Pin
-                                className={`w-4 h-4 transition-all ${isPinned(document.id)
+                                className={`w-3.5 h-3.5 transition-all ${isPinned(document.id)
                                   ? 'text-primary fill-primary rotate-45'
                                   : 'text-muted-foreground hover:text-primary'
                                   }`}
@@ -736,7 +744,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="opacity-0 group-hover:opacity-100 h-7 w-7 p-0"
+                            className="opacity-0 group-hover:opacity-100 h-6 w-6 p-0"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <MoreHorizontal className="w-4 h-4" />
@@ -866,12 +874,12 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                   </div>
 
                   {/* Title */}
-                  <div className="mb-3">
-                    <h3 className="font-medium text-sm truncate mb-1">
+                  <div className="mb-2">
+                    <h3 className="font-semibold text-sm truncate leading-tight" title={document.file_name}>
                       {document.insights?.ai_generated_title || document.file_name}
                     </h3>
                     {document.insights?.ai_generated_title && document.file_name !== document.insights?.ai_generated_title && (
-                      <p className="text-xs text-muted-foreground truncate">
+                      <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                         {document.file_name}
                       </p>
                     )}
@@ -879,8 +887,8 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
                   {/* AI Summary */}
                   {document.insights?.summary && (
-                    <div className="mb-3">
-                      <p className="text-xs text-muted-foreground line-clamp-2">
+                    <div className="mb-2">
+                      <p className="text-[10px] text-muted-foreground line-clamp-2 leading-relaxed">
                         {document.insights.summary}
                       </p>
                     </div>
@@ -888,19 +896,19 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
                   {/* Tags */}
                   {document.tags && document.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-3">
+                    <div className="flex flex-wrap gap-1 mb-2">
                       {document.tags.slice(0, 3).map(tag => (
                         <Badge
                           key={tag.id}
                           variant="secondary"
-                          className="text-xs flex items-center gap-1"
+                          className="text-[10px] h-4 px-1 flex items-center gap-0.5"
                         >
                           {tag.is_ai_suggested && <Sparkles className="w-2 h-2" />}
                           {tag.name}
                         </Badge>
                       ))}
                       {document.tags.length > 3 && (
-                        <Badge variant="outline" className="text-xs">
+                        <Badge variant="outline" className="text-[10px] h-4 px-1">
                           +{document.tags.length - 3}
                         </Badge>
                       )}
@@ -909,9 +917,9 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
                   {/* Folders */}
                   {document.folders && document.folders.length > 0 && (
-                    <div className="flex items-center gap-1 mb-3">
+                    <div className="flex items-center gap-1 mb-2">
                       <Folder className="w-3 h-3 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground truncate">
+                      <span className="text-[10px] text-muted-foreground truncate">
                         {document.folders[0].name}
                         {document.folders.length > 1 && ` +${document.folders.length - 1}`}
                       </span>
@@ -920,14 +928,10 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
                   {/* Key Topics */}
                   {document.insights?.key_topics && document.insights.key_topics.length > 0 && (
-                    <div className="mb-3">
-                      <div className="flex items-center gap-1 mb-1">
-                        <Tag className="w-3 h-3 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">Topics:</span>
-                      </div>
+                    <div className="mb-2">
                       <div className="flex flex-wrap gap-1">
                         {document.insights.key_topics.slice(0, 2).map((topic, index) => (
-                          <Badge key={index} variant="outline" className="text-xs">
+                          <Badge key={index} variant="outline" className="text-[10px] h-4 px-1 text-muted-foreground border-slate-200">
                             {topic}
                           </Badge>
                         ))}
@@ -936,12 +940,13 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                   )}
 
                   {/* Footer */}
-                  <div className="flex items-center justify-between pt-3 border-t">
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                       <div className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
+                        <Clock className="w-3 h-3 text-slate-400" />
                         {formatDistanceToNow(new Date(document.created_at), { addSuffix: true })}
                       </div>
+                      <span className="text-slate-300">•</span>
                       <span>{formatFileSize(document.file_size)}</span>
                     </div>
                   </div>
@@ -951,10 +956,10 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                     <div className="mt-2">
                       <Badge
                         variant="outline"
-                        className="text-xs text-orange-600 border-orange-400 bg-orange-50"
+                        className="text-[10px] h-5 w-full justify-center text-orange-600 border-orange-200 bg-orange-50"
                       >
                         <CloudUpload className="w-3 h-3 mr-1" />
-                        Queued for Upload
+                        Queued
                       </Badge>
                     </div>
                   ) : document.processing_status && document.processing_status !== 'completed' ? (
@@ -965,21 +970,16 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                             document.processing_status === 'pending' ? 'outline' :
                               'destructive'
                         }
-                        className="text-xs"
+                        className="text-[10px] h-5 w-full justify-center"
                       >
-                        {document.processing_status === 'processing' ? 'AI Processing...' :
-                          document.processing_status === 'pending' ? 'Pending Analysis' :
-                            'Processing Failed'}
+                        {document.processing_status === 'processing' ? 'Processing...' :
+                          document.processing_status === 'pending' ? 'Pending' :
+                            'Failed'}
                       </Badge>
                     </div>
                   ) : document.processing_status !== 'failed' && !hasAIAnalysis(document) && (
-                    <div className="mt-2">
-                      <Badge
-                        variant="outline"
-                        className="text-xs"
-                      >
-                        Pending Analysis
-                      </Badge>
+                    <div className="mt-2 text-center">
+                      <span className="text-[10px] text-slate-400">Analysis Pending</span>
                     </div>
                   )}
                 </CardContent>

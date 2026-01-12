@@ -22,44 +22,50 @@ async def get_guest_document_url(share_token: str):
         Document information and signed URL
     """
     try:
-        # Get the share by token
+        # Get the share by token - use direct execute() without single/maybe_single (they have bugs)
         share_response = supabase.table('external_shares')\
             .select('*')\
             .eq('invitation_token', share_token)\
-            .single()\
+            .limit(1)\
             .execute()
         
-        if not share_response.data:
+        if not share_response.data or len(share_response.data) == 0:
             raise HTTPException(status_code=404, detail="Share not found")
         
-        share = share_response.data
+        share = share_response.data[0]  # Get first record manually
         
         # Check if share is valid
         if share['status'] not in ['pending', 'accepted']:
             raise HTTPException(status_code=403, detail="Share is no longer active")
         
-        # Get the document
+        # Get the document - use direct execute() without single/maybe_single
         doc_response = supabase.table('documents')\
             .select('*')\
             .eq('id', share['resource_id'])\
-            .single()\
+            .limit(1)\
             .execute()
         
-        if not doc_response.data:
+        if not doc_response.data or len(doc_response.data) == 0:
             raise HTTPException(status_code=404, detail="Document not found")
         
-        document = doc_response.data
+        document = doc_response.data[0]  # Get first record manually
         
         # Create signed URL using service role (bypasses RLS)
         if not document.get('storage_path'):
             raise HTTPException(status_code=404, detail="Document file not found in storage")
         
-        signed_url_response = supabase.storage\
-            .from_('documents')\
-            .create_signed_url(document['storage_path'], 3600)  # 1 hour expiry
-        
-        if not signed_url_response:
-            raise HTTPException(status_code=500, detail="Failed to generate document URL")
+        try:
+            signed_url_response = supabase.storage\
+                .from_('documents')\
+                .create_signed_url(document['storage_path'], 3600)  # 1 hour expiry
+            
+            if not signed_url_response or not signed_url_response.get('signedURL'):
+                raise HTTPException(status_code=500, detail="Failed to generate document URL")
+        except HTTPException:
+            raise
+        except Exception as storage_err:
+            print(f"❌ Storage error creating signed URL: {storage_err}")
+            raise HTTPException(status_code=500, detail="Failed to access document in storage")
         
         # Return document info with signed URL
         return {
@@ -78,8 +84,12 @@ async def get_guest_document_url(share_token: str):
     except HTTPException:
         raise
     except Exception as e:
+        error_msg = str(e)
+        # Clean up error message - don't expose raw JSON/dict data
+        if len(error_msg) > 100 or '{' in error_msg:
+            error_msg = "An unexpected error occurred"
         print(f"Error in get_guest_document_url: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get document: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to load document: {error_msg}")
 
 
 @router.get("/document-by-id/{resource_id}")
@@ -101,14 +111,14 @@ async def get_document_by_resource_id(resource_id: str):
         doc_response = supabase.table('documents')\
             .select('*')\
             .eq('id', resource_id)\
-            .single()\
+            .limit(1)\
             .execute()
         
-        if not doc_response.data:
+        if not doc_response.data or len(doc_response.data) == 0:
             print(f"❌ Document not found: {resource_id}")
             raise HTTPException(status_code=404, detail="Document not found")
         
-        document = doc_response.data
+        document = doc_response.data[0]  # Get first record manually
         print(f"✅ Document found: {document.get('file_name')}")
         
         # Create signed URL using service role (bypasses RLS)

@@ -62,6 +62,49 @@ export interface CreateExternalShareParams {
   notify_on_view?: boolean;
   notify_on_download?: boolean;
   message?: string;
+  // New: If email belongs to a registered user, store their user ID
+  registered_user_id?: string;
+}
+
+// Result type for user email check
+export interface UserCheckResult {
+  isUser: boolean;
+  userId?: string;
+  displayName?: string;
+  email?: string;
+}
+
+// Check if an email belongs to a registered SimplifyDrive user
+// Uses the same API endpoint as Identity Mapping (/api/migration/users)
+export async function checkUserByEmail(email: string): Promise<UserCheckResult> {
+  try {
+    // Fetch users from backend API (same as Identity Mapping uses)
+    const response = await fetch('http://localhost:8000/api/migration/users');
+    if (!response.ok) {
+      console.error('Failed to fetch users from API');
+      return { isUser: false };
+    }
+
+    const users = await response.json();
+    const normalizedEmail = email.toLowerCase();
+
+    // Find user by email
+    const foundUser = users.find((u: any) => u.email?.toLowerCase() === normalizedEmail);
+
+    if (foundUser) {
+      return {
+        isUser: true,
+        userId: foundUser.id,
+        displayName: foundUser.full_name || foundUser.email,
+        email: foundUser.email
+      };
+    }
+
+    return { isUser: false };
+  } catch (err) {
+    console.error('Error in checkUserByEmail:', err);
+    return { isUser: false };
+  }
 }
 
 export function useExternalSharing() {
@@ -145,6 +188,42 @@ export function useExternalSharing() {
       }
 
       const data = await response.json();
+
+      // If this is a registered SimplifyDrive user, also add to document_shares
+      // This makes the document appear in their "Shared with me" section
+      console.log('🔍 Checking registered_user_id:', params.registered_user_id, 'resource_type:', params.resource_type);
+
+      if (params.registered_user_id && params.resource_type === 'document') {
+        console.log('📝 Inserting into document_shares:', {
+          document_id: params.resource_id,
+          shared_by: user.id,
+          shared_with: params.registered_user_id,
+          permission: params.permission
+        });
+
+        try {
+          const { data: shareData, error: shareError } = await supabase
+            .from('document_shares')
+            .insert({
+              document_id: params.resource_id,
+              shared_by: user.id,
+              shared_with: params.registered_user_id,
+              permission: params.permission === 'edit' ? 'edit' : 'view',
+              // Don't set a share_token since this is user-to-user, not a link
+            })
+            .select();
+
+          if (shareError) {
+            console.error('❌ Error adding to document_shares:', shareError);
+          } else {
+            console.log('✅ Document added to user\'s Shared with me section:', shareData);
+          }
+        } catch (err) {
+          console.error('❌ Exception creating document_shares entry:', err);
+        }
+      } else {
+        console.log('⏭️ Skipping document_shares insert - registered_user_id:', params.registered_user_id);
+      }
 
       toast({
         title: "Share invitation sent",
@@ -252,11 +331,44 @@ export function useExternalSharing() {
   }, [toast, fetchShares]);
 
   const resendInvitation = useCallback(async (shareId: string) => {
-    // In a real implementation, this would trigger an email
-    toast({
-      title: "Invitation resent",
-      description: "A new invitation email has been sent.",
-    });
+    try {
+      const session = await supabase.auth.getSession();
+      const accessToken = session.data.session?.access_token;
+
+      if (!accessToken) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to resend invitations.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const response = await fetch(`/api/shares/${shareId}/resend-invitation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to resend invitation');
+      }
+
+      toast({
+        title: "✅ Invitation resent",
+        description: "A new invitation email has been sent to the guest.",
+      });
+    } catch (error) {
+      console.error('Error resending invitation:', error);
+      toast({
+        title: "Error resending invitation",
+        description: error instanceof Error ? error.message : 'Failed to resend invitation',
+        variant: "destructive",
+      });
+    }
   }, [toast]);
 
   const getShareUrl = useCallback((share: ExternalShare) => {

@@ -21,6 +21,9 @@ import { useToast } from '@/hooks/use-toast';
 import { useDocumentComments } from '@/hooks/useDocumentComments';
 import CommentsSidebar from '@/components/collaboration/CommentsSidebar';
 import { RequestCheckoutButton } from '@/components/checkout-requests/RequestCheckoutButton';
+import { OnlyOfficeEditor } from '@/components/modern-editor/components/onlyoffice-editor/OnlyOfficeEditor';
+import { PDFEditor } from '@/components/modern-editor/components/pdf-editor/PDFEditor';
+import { PenTool } from 'lucide-react';
 
 interface ShareData {
   id: string;
@@ -55,6 +58,7 @@ export default function GuestAccessPage() {
   const [downloading, setDownloading] = useState(false);
   const [viewRecorded, setViewRecorded] = useState(false);
   const [showViewer, setShowViewer] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
   const [viewCount, setViewCount] = useState(0);
 
   // Password protection state
@@ -72,6 +76,15 @@ export default function GuestAccessPage() {
 
   // Generate a stable anonymous guest ID for this session (used if no email verification)
   const [anonymousGuestId] = useState(() => `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}@anonymous.local`);
+
+  // Check if file type is editable with OnlyOffice
+  const isOnlyOfficeEditable = (fileName: string | undefined, fileType: string | undefined): boolean => {
+    if (!fileName && !fileType) return false;
+    const ext = (fileName || '').split('.').pop()?.toLowerCase() || '';
+    // Include PDF - OnlyOffice can edit/annotate PDFs
+    const editableExtensions = ['doc', 'docx', 'odt', 'rtf', 'txt', 'xls', 'xlsx', 'ods', 'csv', 'ppt', 'pptx', 'odp', 'pdf'];
+    return editableExtensions.includes(ext);
+  };
 
   const {
     comments,
@@ -188,135 +201,210 @@ export default function GuestAccessPage() {
       setLoading(true);
       setError(null);
 
-      // First, check localStorage for the share link
-      const localShare = getShareLinkByToken(token);
+      // NOTE: We intentionally skip local storage check here
+      // Local storage only has data on the browser where the link was created
+      // This causes permission inconsistency across browsers (Chrome shows "edit", Edge shows "view")
+      // Always fetch from backend API to ensure consistent permissions across all browsers
 
-      if (localShare) {
-        // Validate the share link - but skip limit check if we've already recorded a view in this session
-        // This prevents the bug where re-running the effect after recording a view
-        // would re-fetch the share with incremented use_count and immediately fail the limit check
-        const validation = isShareLinkValid(localShare);
-        if (!validation.valid) {
-          // If the only issue is max views and we've already recorded a view in this session, allow access
-          const isMaxViewsIssue = validation.reason?.includes('maximum views');
-          if (isMaxViewsIssue && viewRecorded) {
-            // Allow access - we've already recorded our view, don't re-validate
-            console.log('🔓 Skipping re-validation after view was recorded');
-          } else {
-            setError(validation.reason || 'Invalid share link');
-            setLoading(false);
-            return;
-          }
-        }
-
-        // Handle password protection
-        if (localShare.password_protected) {
-          setIsLocked(true);
-          setShare(localShare);
-          setLoading(false);
-          return;
-        }
-
-        // Handle email/domain restrictions
-        const hasEmailRestrictions = (localShare.blocked_emails && localShare.blocked_emails.length > 0) ||
-          (localShare.allowed_domains && localShare.allowed_domains.length > 0);
-        if (hasEmailRestrictions) {
-          setRequiresEmailVerification(true);
-          setShare(localShare);
-          setLoading(false);
-          return;
-        }
-
-        // Record the view and update count
-        if (!viewRecorded) {
-          incrementShareLinkViewCountByToken(token);
-          logAccess(localShare.id, undefined, 'view'); // Log the access locally
-          logAccessToBackend(localShare.id, undefined, 'view'); // Log to backend for device tracking
-          setViewRecorded(true);
-          // Update the local view count
-          setViewCount(localShare.use_count + 1);
-
-          // Send access notification if enabled
-          if (localShare.notify_on_access) {
-            sendAccessNotification(localShare);
-          }
-        } else {
-          setViewCount(localShare.use_count);
-        }
-
-        setShare(localShare);
-
-        // Fetch the actual document data from Supabase using direct method (for share links)
-        await fetchDocumentDirect(localShare.resource_id);
-
-        setLoading(false);
-        return;
-      }
-
-      // If not found locally, try fetching from Supabase directly (works from any browser)
+      // Fetch from Supabase/backend API (works consistently across all browsers)
       try {
-        // Query external_shares table directly using anon key
-        // The database column is 'invitation_token'
-        const { data: shareData, error: tokenError } = await supabase
+        // First, try external_shares table by invitation_token (for Guest Sharing)
+        let shareData = null;
+
+        const { data: shareByInvToken, error: tokenError } = await supabase
           .from('external_shares')
           .select('*')
           .eq('invitation_token', token)
           .maybeSingle();
 
         if (tokenError) {
-          console.error('Error fetching share:', tokenError);
-          setError('Failed to load share link');
-          setLoading(false);
-          return;
+          console.error('Error fetching share by invitation_token:', tokenError);
         }
 
-        if (!shareData) {
-          setError('Invalid or expired share link');
-          setLoading(false);
-          return;
-        }
+        if (shareByInvToken) {
+          shareData = shareByInvToken;
+          console.log('✅ Found share by invitation_token');
+        } else {
+          // If not found by invitation_token, try by token field (for Share Links)
+          console.log('🔍 Trying external_shares.token field...');
+          const { data: shareByToken, error: tokenError2 } = await supabase
+            .from('external_shares')
+            .select('*')
+            .eq('token', token)
+            .maybeSingle();
 
-        // Check if share is revoked
-        if (shareData.revoked || shareData.is_revoked) {
-          setError('This share has been revoked');
-          setLoading(false);
-          return;
-        }
+          if (tokenError2) {
+            console.error('Error fetching share by token:', tokenError2);
+          }
 
-        // Check if share is expired
-        if (shareData.expires_at) {
-          const expiresAt = new Date(shareData.expires_at);
-          if (expiresAt < new Date()) {
-            setError('This share link has expired');
-            setLoading(false);
-            return;
+          if (shareByToken) {
+            shareData = shareByToken;
+            console.log('✅ Found share by token field');
           }
         }
 
-        // Handle password protection for DB link
-        if (shareData.password_protected) {
-          setIsLocked(true);
+        // If found in external_shares, process it
+        if (shareData) {
+          // Check if share is revoked
+          if (shareData.revoked || shareData.is_revoked) {
+            setError('This share has been revoked');
+            setLoading(false);
+            return;
+          }
+
+          // Check if share is expired
+          if (shareData.expires_at) {
+            const expiresAt = new Date(shareData.expires_at);
+            if (expiresAt < new Date()) {
+              setError('This share link has expired');
+              setLoading(false);
+              return;
+            }
+          }
+
+          // Handle password protection for DB link
+          if (shareData.password_protected) {
+            setIsLocked(true);
+            setShare(shareData);
+            setLoading(false);
+            return;
+          }
+
           setShare(shareData);
+          setViewCount(shareData.view_count || 0);
+
+          // Fetch document using backend API (bypasses RLS for anonymous users)
+          await fetchDocumentFromBackend();
+
+          // Track view
+          try {
+            await supabase
+              .from('external_shares')
+              .update({ view_count: (shareData.view_count || 0) + 1 })
+              .eq('id', shareData.id);
+          } catch (e) {
+            // Ignore view tracking errors
+          }
+
           setLoading(false);
           return;
         }
 
-        setShare(shareData);
-        setViewCount(shareData.view_count || 0);
+        // If not found in external_shares, try share_links table (for Share Links from navbar)
+        console.log('🔍 Token not found in external_shares, trying share_links table...');
 
-        // Fetch document using backend API (bypasses RLS for anonymous users)
-        await fetchDocumentFromBackend();
+        // Try by token first
+        let linkData = null;
+        const { data: linkByToken, error: linkError } = await supabase
+          .from('share_links')
+          .select('*')
+          .eq('token', token)
+          .maybeSingle();
 
-        // Track view
-        try {
-          await supabase
-            .from('external_shares')
-            .update({ view_count: (shareData.view_count || 0) + 1 })
-            .eq('id', shareData.id);
-        } catch (e) {
-          // Ignore view tracking errors
+        if (linkError) {
+          console.error('Error fetching share link by token:', linkError);
         }
 
+        if (linkByToken) {
+          linkData = linkByToken;
+          console.log('✅ Found in share_links by token');
+        } else {
+          // If not found by token, try by short_code (for /s/ routes)
+          console.log('🔍 Trying share_links.short_code...');
+          const { data: linkByShortCode, error: scError } = await supabase
+            .from('share_links')
+            .select('*')
+            .eq('short_code', token)
+            .maybeSingle();
+
+          if (scError) {
+            console.error('Error fetching share link by short_code:', scError);
+          }
+
+          if (linkByShortCode) {
+            linkData = linkByShortCode;
+            console.log('✅ Found in share_links by short_code');
+          }
+        }
+
+        if (linkData) {
+          console.log('✅ Found in share_links table:', linkData);
+
+          // Check if share link is active
+          if (!linkData.is_active) {
+            setError('This share link has been revoked');
+            setLoading(false);
+            return;
+          }
+
+          // Check if share is expired
+          if (linkData.expires_at) {
+            const expiresAt = new Date(linkData.expires_at);
+            if (expiresAt < new Date()) {
+              setError('This share link has expired');
+              setLoading(false);
+              return;
+            }
+          }
+
+          // Check max uses
+          if (linkData.max_uses && linkData.use_count >= linkData.max_uses) {
+            setError('This share link has reached its maximum number of views');
+            setLoading(false);
+            return;
+          }
+
+          // Handle password protection
+          if (linkData.password_protected) {
+            setIsLocked(true);
+            setShare({
+              id: linkData.id,
+              resource_id: linkData.resource_id,
+              resource_name: linkData.name || linkData.resource_name || 'Document',
+              resource_type: linkData.resource_type || 'document',
+              status: 'active',
+              permission: linkData.permission || 'view',
+              allow_download: linkData.allow_download || false,
+              expires_at: linkData.expires_at,
+              password_protected: linkData.password_protected,
+              password_hash: linkData.password_hash
+            });
+            setLoading(false);
+            return;
+          }
+
+          // Convert to ShareData format and set
+          const convertedShare: ShareData = {
+            id: linkData.id,
+            resource_id: linkData.resource_id,
+            resource_name: linkData.name || linkData.resource_name || 'Document',
+            resource_type: linkData.resource_type || 'document',
+            status: 'active',
+            permission: linkData.permission || 'view',
+            allow_download: linkData.allow_download || false,
+            expires_at: linkData.expires_at,
+            use_count: linkData.use_count || 0
+          };
+
+          setShare(convertedShare);
+          setViewCount(linkData.use_count || 0);
+
+          // Fetch document via backend API (bypasses RLS for cross-browser access)
+          await fetchDocumentFromShareLinkBackend();
+
+          // Track view via backend API
+          try {
+            await fetch(`/api/share-link/document/${token}/view`, { method: 'POST' });
+          } catch (e) {
+            // Ignore view tracking errors
+          }
+
+          setLoading(false);
+          return;
+        }
+
+        // Not found anywhere
+        setError('Invalid or expired share link');
         setLoading(false);
       } catch (err) {
         console.error('Error fetching share:', err);
@@ -696,6 +784,93 @@ export default function GuestAccessPage() {
       }
     } catch (err) {
       console.error('❌ Error fetching document from backend:', err);
+      setError(`Failed to load document: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  };
+
+  const fetchDocumentFromShareLinkBackend = async () => {
+    // For share_links - use dedicated backend API that bypasses RLS
+    // This ensures share links work across all browsers (not just the creator's browser)
+    try {
+      console.log('🔍 Fetching document via share-link backend API with token:', token);
+
+      const response = await fetch(`/api/share-link/document/${token}`);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ Share link backend API error:', errorData);
+        setError(errorData.detail || 'Failed to load document');
+        return;
+      }
+
+      const data = await response.json();
+      console.log('✅ Document data received from share-link backend:', data);
+
+      setDocument({
+        id: data.document_id,
+        file_name: data.file_name,
+        storage_path: data.storage_path,
+        file_type: data.file_type,
+        extracted_text: null
+      });
+
+      // Update share with correct permissions from backend (bypasses RLS)
+      if (data.share_info) {
+        setShare(prevShare => ({
+          ...prevShare,
+          id: data.share_info.id || prevShare?.id || '',
+          resource_id: prevShare?.resource_id || data.document_id,
+          resource_name: data.share_info.resource_name || data.share_info.name || prevShare?.resource_name || 'Document',
+          resource_type: prevShare?.resource_type || 'document',
+          status: 'active',
+          permission: data.share_info.permission || 'view',
+          allow_download: data.share_info.allow_download || false,
+          allow_print: data.share_info.allow_print || false,
+          allow_copy: data.share_info.allow_copy || false,
+        } as ShareData));
+        console.log('✅ Share permissions updated from backend:', data.share_info.permission);
+      }
+
+      if (data.signed_url) {
+        console.log('✅ Signed URL received successfully');
+        setDocumentUrl(data.signed_url);
+
+        // Track view - call backend analytics API with device info
+        try {
+          // Detect device type
+          const userAgent = navigator.userAgent;
+          let deviceType = 'Desktop';
+          if (/Mobi|Android/i.test(userAgent)) {
+            deviceType = /Tablet|iPad/i.test(userAgent) ? 'Tablet' : 'Mobile';
+          }
+
+          // Get or create visitor ID
+          let visitorId = localStorage.getItem('share_links_visitor_id');
+          if (!visitorId) {
+            visitorId = `v-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            localStorage.setItem('share_links_visitor_id', visitorId);
+          }
+
+          await fetch(`http://localhost:8000/api/share-link/document/${token}/view`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              device_type: deviceType,
+              visitor_id: visitorId,
+              user_agent: userAgent,
+              accessor_email: visitorEmail || null
+            })
+          });
+          console.log('📊 View tracked successfully with device:', deviceType);
+        } catch (trackError) {
+          console.warn('⚠️ Failed to track view:', trackError);
+        }
+      } else {
+        console.error('❌ No signed URL in response');
+        setError('Failed to generate document URL');
+      }
+    } catch (err) {
+      console.error('❌ Error fetching document from share-link backend:', err);
       setError(`Failed to load document: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
@@ -1150,6 +1325,29 @@ export default function GuestAccessPage() {
     return `${url}#toolbar=0&navpanes=0&scrollbar=1`;
   };
 
+  // Show OnlyOffice editor for editing - open in new tab like Documents tab
+  if (showEditor && documentUrl && document) {
+    const fileExt = (document.file_name || '').split('.').pop()?.toLowerCase() || 'docx';
+
+    // Open OnlyOffice in new tab - this is how Documents tab does it and it works!
+    const editorUrl = `/editor?embedded=true&documentId=${document.id}&name=${encodeURIComponent(document.file_name || 'document')}&editorType=onlyoffice&url=${encodeURIComponent(documentUrl)}`;
+
+    // Open in new tab
+    window.open(editorUrl, '_blank');
+
+    // Go back to viewer mode after opening editor
+    setShowEditor(false);
+    setShowViewer(true);
+
+    toast({
+      title: "Editor Opened",
+      description: "OnlyOffice editor opened in a new tab. Save will download the edited file.",
+    });
+
+    // Return viewer while editor is open in new tab
+    return null;
+  }
+
   // Show document viewer
   if (showViewer && documentUrl) {
     return (
@@ -1201,6 +1399,20 @@ export default function GuestAccessPage() {
               >
                 <Printer className="h-4 w-4 mr-2" />
                 Print
+              </Button>
+            )}
+            {/* Edit button for edit permission with editable file types */}
+            {canEdit && document && isOnlyOfficeEditable(document.file_name, document.file_type) && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setShowViewer(false);
+                  setShowEditor(true);
+                }}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                <PenTool className="h-4 w-4 mr-2" />
+                Edit Document
               </Button>
             )}
             {/* Request Edit Access for view-only links */}
@@ -1350,7 +1562,7 @@ export default function GuestAccessPage() {
   // Main share info page
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
-      <Card className="max-w-lg w-full bg-gray-800/50 border-gray-700 backdrop-blur">
+      <Card className="max-w-xl w-full bg-gray-800/50 border-gray-700 backdrop-blur overflow-hidden">
         <CardHeader className="text-center border-b border-gray-700">
           <div className="mx-auto p-4 bg-blue-500/20 rounded-full w-fit mb-4">
             <FileText className="h-10 w-10 text-blue-400" />
@@ -1381,12 +1593,13 @@ export default function GuestAccessPage() {
           </div>
 
           {/* Actions */}
-          <div className="flex justify-center gap-4">
+          {/* Actions */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full px-4">
             {canDownload && (
               <Button
                 onClick={handleDownload}
                 disabled={downloading}
-                className="bg-blue-600 hover:bg-blue-700"
+                className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 whitespace-nowrap"
               >
                 {downloading ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1398,12 +1611,25 @@ export default function GuestAccessPage() {
             )}
             <Button
               variant="outline"
-              className="border-gray-600 text-gray-300 hover:bg-gray-700"
+              className="w-full sm:w-auto border-gray-600 text-gray-300 hover:bg-gray-700 whitespace-nowrap"
               onClick={handleViewDocument}
             >
               <Eye className="h-4 w-4 mr-2" />
               View Document
             </Button>
+            {/* Edit button for edit permission with editable file types */}
+            {canEdit && document && isOnlyOfficeEditable(document.file_name, document.file_type) && (
+              <Button
+                onClick={() => {
+                  setShowViewer(false);
+                  setShowEditor(true);
+                }}
+                className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white whitespace-nowrap"
+              >
+                <PenTool className="h-4 w-4 mr-2" />
+                Edit Document
+              </Button>
+            )}
           </div>
 
           {/* Request Edit Access for view-only shares */}

@@ -161,7 +161,7 @@ export function CredentialsPanel({ credentials }: CredentialsPanelProps) {
         ? {
           access_token: oauthToken,
           token_uri: 'https://oauth2.googleapis.com/token',
-          scopes: ['https://www.googleapis.com/auth/drive.readonly']
+          scopes: ['https://www.googleapis.com/auth/drive']  // Full access for move/delete
         }
         : {
           access_token: oauthToken,

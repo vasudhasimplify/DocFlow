@@ -508,20 +508,9 @@ export const CreateSignatureRequestDialog: React.FC<CreateSignatureRequestDialog
 
                   <div>
                     <Label className="text-xs">Role</Label>
-                    <Select
-                      value={signer.role}
-                      onValueChange={(v) => updateSigner(signer.id, 'role', v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="signer">Signer - Must sign the document</SelectItem>
-                        <SelectItem value="approver">Approver - Must approve before signing</SelectItem>
-                        <SelectItem value="viewer">Viewer - Can view but not sign</SelectItem>
-                        <SelectItem value="cc">CC - Receives a copy when completed</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="flex items-center gap-2 h-10 px-3 border rounded-md bg-muted/50">
+                      <span className="text-sm">Signer - Must sign the document</span>
+                    </div>
                   </div>
                 </div>
               ))}

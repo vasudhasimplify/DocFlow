@@ -2,18 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Lightbulb, 
-  Sparkles, 
-  AlertTriangle, 
-  TrendingUp, 
+import {
+  Lightbulb,
+  Sparkles,
+  AlertTriangle,
+  TrendingUp,
   Clock,
   FileText,
   Tag,
   ArrowRight,
   Star,
   Brain,
-  Loader2
+  Loader2,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -65,6 +67,7 @@ interface Recommendation {
 export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents, onRefresh }) => {
   const [processingAction, setProcessingAction] = useState<string | null>(null);
   const [existingFolderNames, setExistingFolderNames] = useState<Set<string>>(new Set());
+  const [isExpanded, setIsExpanded] = useState(false);
   const { toast } = useToast();
 
   // Fetch existing folder names to avoid recommending folders that already exist
@@ -270,10 +273,10 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
         if (!existing) {
           // @ts-ignore - document_shortcuts table exists but not in generated types
           const { error: shortcutError } = await supabase.from('document_shortcuts').insert({
-              document_id: doc.id,
-              folder_id: folderId,
-              user_id: user.user.id
-            });
+            document_id: doc.id,
+            folder_id: folderId,
+            user_id: user.user.id
+          });
 
           if (!shortcutError) {
             addedCount++;
@@ -325,8 +328,8 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
     const recommendations: Recommendation[] = [];
 
     // Find high importance documents without proper tags
-    const highImportanceUntagged = documents.filter(doc => 
-      (doc.insights?.importance_score || 0) >= 0.8 && 
+    const highImportanceUntagged = documents.filter(doc =>
+      (doc.insights?.importance_score || 0) >= 0.8 &&
       (!doc.tags || doc.tags.length === 0)
     );
 
@@ -343,7 +346,7 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
     }
 
     // Find documents with long reading times
-    const longReadingDocs = documents.filter(doc => 
+    const longReadingDocs = documents.filter(doc =>
       (doc.insights?.estimated_reading_time || 0) > 30
     );
 
@@ -375,8 +378,8 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
       // Filter out topics that already have folders
       .filter(([topic]) => {
         const topicCapitalized = topic.charAt(0).toUpperCase() + topic.slice(1);
-        return !existingFolderNames.has(topic.toLowerCase()) && 
-               !existingFolderNames.has(topicCapitalized.toLowerCase());
+        return !existingFolderNames.has(topic.toLowerCase()) &&
+          !existingFolderNames.has(topicCapitalized.toLowerCase());
       })
       .slice(0, 2);
 
@@ -394,7 +397,7 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
     });
 
     // Find documents with many suggested actions
-    const actionableDocs = documents.filter(doc => 
+    const actionableDocs = documents.filter(doc =>
       (doc.insights?.suggested_actions?.length || 0) > 2
     );
 
@@ -427,7 +430,7 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
       } else if (recentUnanalyzed.length >= 6) {
         priority = 'medium';
       }
-      
+
       recommendations.push({
         type: 'warning',
         title: 'Pending AI Analysis',
@@ -442,7 +445,7 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
 
     // General organization suggestion if many documents
     if (documents.length > 20) {
-      const unorganizedDocs = documents.filter(doc => 
+      const unorganizedDocs = documents.filter(doc =>
         (!doc.tags || doc.tags.length === 0) && !doc.insights
       );
 
@@ -484,114 +487,122 @@ export const AIRecommendations: React.FC<AIRecommendationsProps> = ({ documents,
     }
   };
 
-  if (recommendations.length === 0) {
-    return (
-      <Card>
-        <CardContent className="p-4 text-center">
-          <Sparkles className="w-8 h-8 text-green-500 mx-auto mb-2" />
-          <p className="text-sm font-medium text-green-700 dark:text-green-300">
-            All Set!
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Your documents are well organized
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 mb-4">
+      <div
+        className="flex items-center gap-2 mb-4 cursor-pointer hover:bg-accent/50 rounded p-1 transition-colors select-none"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         <Lightbulb className="w-4 h-4 text-primary" />
-        <h3 className="font-semibold">AI Recommendations</h3>
+        <h3 className="font-semibold text-sm">AI Recommendations</h3>
       </div>
 
-      <div className="space-y-3">
-        {recommendations.slice(0, 4).map((rec, index) => (
-          <Card 
-            key={index} 
-            className={`${getPriorityColor(rec.priority)} border transition-all hover:shadow-md`}
-          >
-            <CardContent className="p-3">
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  {rec.icon}
-                  <span className="font-medium text-sm">{rec.title}</span>
-                </div>
-                <Badge 
-                  variant={getPriorityBadgeColor(rec.priority)} 
-                  className="text-xs"
-                >
-                  {rec.priority}
-                </Badge>
-              </div>
-              
-              <p className="text-xs text-muted-foreground mb-3">
-                {rec.description}
-              </p>
-
-              {rec.documents && rec.documents.length > 0 && (
-                <div className="mb-3">
-                  <p className="text-xs font-medium mb-1">Affected Documents:</p>
-                  <div className="space-y-1">
-                    {rec.documents.slice(0, 2).map(doc => (
-                      <div key={doc.id} className="flex items-center gap-2">
-                        <FileText className="w-3 h-3 text-muted-foreground" />
-                        <span className="text-xs truncate">
-                          {doc.insights?.ai_generated_title || doc.file_name}
-                        </span>
+      {isExpanded && (
+        <>
+          {recommendations.length === 0 ? (
+            <Card>
+              <CardContent className="p-4 text-center">
+                <Sparkles className="w-8 h-8 text-green-500 mx-auto mb-2" />
+                <p className="text-sm font-medium text-green-700 dark:text-green-300">
+                  All Set!
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Your documents are well organized
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <div className="space-y-3">
+                {recommendations.slice(0, 4).map((rec, index) => (
+                  <Card
+                    key={index}
+                    className={`${getPriorityColor(rec.priority)} border transition-all hover:shadow-md`}
+                  >
+                    <CardContent className="p-3">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          {rec.icon}
+                          <span className="font-medium text-sm">{rec.title}</span>
+                        </div>
+                        <Badge
+                          variant={getPriorityBadgeColor(rec.priority)}
+                          className="text-xs"
+                        >
+                          {rec.priority}
+                        </Badge>
                       </div>
-                    ))}
-                    {rec.documents.length > 2 && (
-                      <p className="text-xs text-muted-foreground">
-                        +{rec.documents.length - 2} more documents
+
+                      <p className="text-xs text-muted-foreground mb-3">
+                        {rec.description}
                       </p>
-                    )}
-                  </div>
-                </div>
-              )}
 
-              {rec.action && (
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  className="w-full justify-between text-xs h-7"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    rec.actionHandler?.();
-                  }}
-                  disabled={processingAction !== null}
-                >
-                  {processingAction === rec.action ? (
-                    <>
-                      <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      {rec.action.startsWith('Create Folder:') ? 'Create Folder' : rec.action}
-                      <ArrowRight className="w-3 h-3" />
-                    </>
-                  )}
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                      {rec.documents && rec.documents.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-medium mb-1">Affected Documents:</p>
+                          <div className="space-y-1">
+                            {rec.documents.slice(0, 2).map(doc => (
+                              <div key={doc.id} className="flex items-center gap-2">
+                                <FileText className="w-3 h-3 text-muted-foreground" />
+                                <span className="text-xs truncate">
+                                  {doc.insights?.ai_generated_title || doc.file_name}
+                                </span>
+                              </div>
+                            ))}
+                            {rec.documents.length > 2 && (
+                              <p className="text-xs text-muted-foreground">
+                                +{rec.documents.length - 2} more documents
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
-      {recommendations.length > 4 && (
-        <Card className="border-dashed">
-          <CardContent className="p-3 text-center">
-            <p className="text-xs text-muted-foreground mb-2">
-              {recommendations.length - 4} more recommendations available
-            </p>
-            <Button variant="ghost" size="sm" className="text-xs">
-              View All Recommendations
-            </Button>
-          </CardContent>
-        </Card>
+                      {rec.action && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full justify-between text-xs h-7"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            rec.actionHandler?.();
+                          }}
+                          disabled={processingAction !== null}
+                        >
+                          {processingAction === rec.action ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              {rec.action.startsWith('Create Folder:') ? 'Create Folder' : rec.action}
+                              <ArrowRight className="w-3 h-3" />
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {recommendations.length > 4 && (
+                <Card className="border-dashed">
+                  <CardContent className="p-3 text-center">
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {recommendations.length - 4} more recommendations available
+                    </p>
+                    <Button variant="ghost" size="sm" className="text-xs">
+                      View All Recommendations
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          )}
+        </>
       )}
     </div>
   );

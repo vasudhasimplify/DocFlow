@@ -30,6 +30,13 @@ interface OnlyOfficeConfig {
       id: string;
       name: string;
     };
+    permissions?: {
+      edit?: boolean;
+      download?: boolean;
+      print?: boolean;
+      review?: boolean;
+      // Add other permission flags as needed
+    };
     customization?: {
       autosave?: boolean;
       chat?: boolean;
@@ -121,16 +128,16 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
         const response = await fetch(
           `/api/v1/editor/validate-guest-access?document_id=${documentId}&guest_email=${encodeURIComponent(guestEmail)}`
         );
-        
+
         const data = await response.json();
-        
+
         if (!data.allowed) {
           setError(data.message);
           setIsLoading(false);
           onError?.(data.message);
           return;
         }
-        
+
         setGuestAccessValidated(true);
       } catch (err) {
         const errorMsg = 'Failed to validate guest access';
@@ -146,7 +153,7 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
   // Load OnlyOffice script
   useEffect(() => {
     const scriptId = 'onlyoffice-api-script';
-    
+
     // Check if script already exists
     if (document.getElementById(scriptId)) {
       console.log('OnlyOffice script already loaded');
@@ -155,17 +162,17 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
     }
 
     console.log('Loading OnlyOffice API script from:', `${ONLYOFFICE_SERVER}/web-apps/apps/api/documents/api.js`);
-    
+
     const script = document.createElement('script');
     script.id = scriptId;
     script.src = `${ONLYOFFICE_SERVER}/web-apps/apps/api/documents/api.js`;
     script.async = true;
-    
+
     script.onload = () => {
       console.log('OnlyOffice API script loaded successfully');
       setScriptLoaded(true);
     };
-    
+
     script.onerror = (e) => {
       console.error('Failed to load OnlyOffice API script:', e);
       setError(`Failed to load OnlyOffice. Make sure OnlyOffice server is running at ${ONLYOFFICE_SERVER}`);
@@ -182,10 +189,10 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
   // Initialize editor when script is loaded and guest access validated
   useEffect(() => {
     if (!scriptLoaded || !window.DocsAPI || !guestAccessValidated) {
-      console.log('Waiting for script/API/validation...', { 
-        scriptLoaded, 
+      console.log('Waiting for script/API/validation...', {
+        scriptLoaded,
         hasDocsAPI: !!window.DocsAPI,
-        guestAccessValidated 
+        guestAccessValidated
       });
       return;
     }
@@ -205,7 +212,7 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
       const wordTypes = ['doc', 'docx', 'odt', 'rtf', 'txt', 'pdf'];
       const cellTypes = ['xls', 'xlsx', 'ods', 'csv'];
       const slideTypes = ['ppt', 'pptx', 'odp'];
-      
+
       const lowerExt = ext.toLowerCase();
       if (wordTypes.includes(lowerExt)) return 'word';
       if (cellTypes.includes(lowerExt)) return 'cell';
@@ -213,12 +220,16 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
       return 'word';
     };
 
+    // Use document URL directly - the working Documents tab doesn't use a proxy
+    // OnlyOffice can access Supabase cloud URLs directly
+    console.log('📄 OnlyOffice document URL:', documentUrl);
+
     const config: OnlyOfficeConfig = {
       document: {
         fileType: fileType.replace('.', ''),
         key: documentKey,
         title: documentName,
-        url: documentUrl,
+        url: documentUrl, // Use direct URL, no proxy
       },
       documentType: getDocumentType(fileType),
       editorConfig: {
@@ -230,6 +241,12 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
         user: {
           id: userId,
           name: userName,
+        },
+        permissions: {
+          edit: mode === 'edit',
+          download: true,
+          print: true,
+          review: mode === 'edit',
         },
         customization: {
           autosave: true,
@@ -267,8 +284,8 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
         },
         onError: (event) => {
           console.error('OnlyOffice error:', event.data);
-          const errorMessage = typeof event.data === 'string' 
-            ? event.data 
+          const errorMessage = typeof event.data === 'string'
+            ? event.data
             : event.data?.errorDescription || JSON.stringify(event.data);
           setError(errorMessage);
           onError?.(errorMessage);
@@ -319,7 +336,7 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
     if (!editorRef.current || isSaving) return;
 
     setIsSaving(true);
-    
+
     try {
       // Send message to parent window to trigger save
       const message = {
@@ -337,7 +354,7 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
 
       // Show instruction to user
       alert('To save your changes:\n\n1. Click "File" → "Download as..." → Choose format (PDF or DOCX)\n2. Save the file to your computer\n3. Close this editor\n4. Upload the saved file to replace the original document');
-      
+
     } catch (err) {
       console.error('Save error:', err);
       alert('Save failed. Please use File → Download to save your changes manually.');
@@ -377,7 +394,7 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
           </div>
         </div>
       )}
-      
+
       <div className="w-full h-full">
         <div id="onlyoffice-editor" className="w-full h-full" />
       </div>

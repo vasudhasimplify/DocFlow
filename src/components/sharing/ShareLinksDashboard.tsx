@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -187,7 +188,7 @@ export const ShareLinksDashboard: React.FC<ShareLinksDashboardProps> = ({
         </TabsList>
 
         <TabsContent value="by-me" className="space-y-6">
-          {/* Header Stats - Existing Logic */}
+          {/* Header Stats */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
               <CardContent className="p-4">
@@ -554,26 +555,249 @@ function SharedWithMeList() {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          {shares.map(share => (
-            <div key={share.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 rounded text-blue-600">
-                  {share.permission === 'view' ? <Eye className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
+          {shares.map(share => {
+            // Check if this is a direct share (shared with registered user) or a guest link share
+            const isDirectShare = share.invitation_token?.startsWith('direct-');
+            const shareType = isDirectShare ? 'Direct Share' : 'Guest Share';
+
+            const handleOpen = () => {
+              if (isDirectShare) {
+                // For direct shares, navigate to the document in SimplifyDrive
+                window.location.href = `/documents?doc=${share.resource_id}`;
+              } else {
+                // For guest shares, open the guest link
+                window.open(generateShareUrl(share.invitation_token), '_blank');
+              }
+            };
+
+            return (
+              <div key={share.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded ${isDirectShare ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'}`}>
+                    {share.permission === 'view' ? <Eye className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{share.resource_name || 'Untitled'}</p>
+                      <Badge variant="secondary" className={isDirectShare ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}>
+                        {shareType}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {share.owner_email ? `From: ${share.owner_email}` : (share.owner_id ? 'From: SimplifyDrive User' : 'Guest Link')} • {formatDistanceToNow(new Date(share.created_at), { addSuffix: true })}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-medium">{share.resource_name || 'Untitled'}</p>
-                  <p className="text-sm text-muted-foreground">
-                    From: {share.owner_id ? 'SimplifyDrive User' : 'Guest'} • {formatDistanceToNow(new Date(share.created_at), { addSuffix: true })}
-                  </p>
-                </div>
+                <Button variant="outline" size="sm" onClick={handleOpen}>
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  View
+                </Button>
               </div>
-              <Button variant="outline" size="sm" onClick={() => window.open(generateShareUrl(share.token), '_blank')}>
-                <ExternalLink className="w-4 h-4 mr-2" />
-                Open
-              </Button>
-            </div>
-          ))}
+            );
+          })}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Unified list showing all shares (Guest Sharing + E-Signatures)
+function SharedByMeList() {
+  const [shares, setShares] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  React.useEffect(() => {
+    const fetchAllShares = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setLoading(false);
+          return;
+        }
+
+        const allShares: any[] = [];
+
+        // 1. Fetch Share Links
+        const { data: shareLinks } = await supabase
+          .from('share_links')
+          .select('*')
+          .eq('owner_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (shareLinks) {
+          shareLinks.forEach(link => {
+            allShares.push({
+              id: link.id,
+              type: 'link',
+              documentName: link.name || link.resource_name || 'Document',
+              recipientEmail: 'Public Link',
+              permission: link.permission || 'view',
+              status: link.is_active ? (link.expires_at && new Date(link.expires_at) < new Date() ? 'expired' : 'active') : 'revoked',
+              viewCount: link.use_count || 0,
+              createdAt: link.created_at,
+              token: link.token
+            });
+          });
+        }
+
+        // 2. Fetch Guest Shares (external_shares)
+        const { data: guestShares } = await supabase
+          .from('external_shares')
+          .select('*')
+          .eq('owner_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (guestShares) {
+          guestShares.forEach(share => {
+            allShares.push({
+              id: share.id,
+              type: 'guest',
+              documentName: share.resource_name || 'Document',
+              recipientEmail: share.guest_email,
+              permission: share.permission,
+              status: share.status,
+              viewCount: share.view_count || 0,
+              createdAt: share.created_at,
+              token: share.invitation_token
+            });
+          });
+        }
+
+        // 2. Fetch E-Signature Requests
+        try {
+          const { data: signatureRequests } = await supabase
+            .from('signature_requests')
+            .select('*, signature_signers(*)')
+            .eq('requester_id', user.id)
+            .order('created_at', { ascending: false });
+
+          if (signatureRequests) {
+            signatureRequests.forEach((req: any) => {
+              const signers = req.signature_signers || [];
+              const signerEmails = signers.map((s: any) => s.email).join(', ');
+              allShares.push({
+                id: req.id,
+                type: 'signature',
+                documentName: req.title || req.document_name || 'Document',
+                recipientEmail: signerEmails || 'No signers',
+                permission: 'sign',
+                status: req.status,
+                viewCount: 0,
+                createdAt: req.created_at,
+                token: null
+              });
+            });
+          }
+        } catch (err) {
+          console.log('Signature requests table may not exist:', err);
+        }
+
+        // Sort by createdAt
+        allShares.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setShares(allShares);
+      } catch (err) {
+        console.error('Failed to fetch shares:', err);
+        setShares([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAllShares();
+  }, []);
+
+  const getTypeBadge = (type: string) => {
+    switch (type) {
+      case 'link':
+        return <Badge className="bg-green-500 text-white">Share Link</Badge>;
+      case 'guest':
+        return <Badge className="bg-blue-500 text-white">Guest Share</Badge>;
+      case 'signature':
+        return <Badge className="bg-purple-500 text-white">E-Signature</Badge>;
+      default:
+        return <Badge variant="secondary">Share</Badge>;
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return <Badge variant="outline" className="text-yellow-600 border-yellow-600">Pending</Badge>;
+      case 'active':
+        return <Badge variant="outline" className="text-green-600 border-green-600">Active</Badge>;
+      case 'accepted':
+      case 'completed':
+        return <Badge variant="outline" className="text-green-600 border-green-600">Completed</Badge>;
+      case 'expired':
+        return <Badge variant="outline" className="text-gray-600 border-gray-600">Expired</Badge>;
+      case 'revoked':
+        return <Badge variant="outline" className="text-red-600 border-red-600">Revoked</Badge>;
+      case 'cancelled':
+        return <Badge variant="outline" className="text-red-600 border-red-600">Cancelled</Badge>;
+      default:
+        return <Badge variant="secondary">{status}</Badge>;
+    }
+  };
+
+  if (loading) return <div className="text-center py-4">Loading...</div>;
+
+  if (shares.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="w-5 h-5" />
+            Documents Shared by Me
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-center text-muted-foreground py-8">
+          <Users className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
+          <p>You haven't shared any documents yet.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Users className="w-5 h-5" />
+          Documents Shared by Me
+        </CardTitle>
+        <CardDescription>All documents you've shared via links, guest sharing, or e-signatures</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ScrollArea className="h-[400px]">
+          <div className="space-y-3">
+            {shares.map(share => (
+              <div key={share.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded ${share.type === 'signature' ? 'bg-purple-100 text-purple-600' : share.type === 'link' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'}`}>
+                    {share.type === 'signature' ? <Edit className="w-4 h-4" /> : share.type === 'link' ? <Link className="w-4 h-4" /> : <Mail className="w-4 h-4" />}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{share.documentName}</p>
+                      {getTypeBadge(share.type)}
+                      {getStatusBadge(share.status)}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      To: {share.recipientEmail} • {formatDistanceToNow(new Date(share.createdAt), { addSuffix: true })}
+                      {share.viewCount > 0 && ` • ${share.viewCount} views`}
+                    </p>
+                  </div>
+                </div>
+                {share.token && (
+                  <Button variant="outline" size="sm" onClick={() => window.open(generateShareUrl(share.token), '_blank')}>
+                    <ExternalLink className="w-4 h-4 mr-2" />
+                    View
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
       </CardContent>
     </Card>
   );

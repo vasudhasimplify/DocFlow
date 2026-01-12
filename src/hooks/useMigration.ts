@@ -20,10 +20,10 @@ export function useMigration() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [isPollingEnabled, setIsPollingEnabled] = useState(false); // OPTIMIZATION: Only poll when actively viewing
+  const [isPollingEnabled, setIsPollingEnabled] = useState(true); // Enable polling by default for real-time updates
 
   // Fetch all migration jobs from backend API
-  // OPTIMIZATION: Only poll when user is on migration page and has active jobs
+  // Poll frequently when there are active jobs
   const { data: jobs = [], isLoading: jobsLoading, refetch: refetchJobs } = useQuery({
     queryKey: ['migration-jobs'],
     queryFn: async () => {
@@ -40,8 +40,12 @@ export function useMigration() {
       const data = await response.json();
       return data as MigrationJob[];
     },
-    refetchInterval: isPollingEnabled ? 5000 : false  // OPTIMIZATION: Only poll when enabled, increased to 5s
+    // Poll every 2 seconds when enabled - faster updates
+    refetchInterval: isPollingEnabled ? 2000 : false
   });
+
+  // Check if there are any active jobs (running or discovering)
+  const hasActiveJobs = jobs.some(job => ['running', 'discovering', 'pending'].includes(job.status));
 
   // Fetch items for selected job
   const { data: jobItems = [], isLoading: itemsLoading, refetch: refetchItems } = useQuery({
@@ -59,7 +63,8 @@ export function useMigration() {
       return data as MigrationItem[];
     },
     enabled: !!selectedJobId,
-    refetchInterval: isPollingEnabled && selectedJobId ? 5000 : false  // OPTIMIZATION: Conditional polling
+    // Poll every 2 seconds when there are active jobs
+    refetchInterval: (isPollingEnabled && selectedJobId && hasActiveJobs) ? 2000 : false
   });
 
   // Fetch metrics for selected job
@@ -79,7 +84,8 @@ export function useMigration() {
       return data as MigrationMetrics[];
     },
     enabled: !!selectedJobId,
-    refetchInterval: isPollingEnabled && selectedJobId ? 10000 : false  // OPTIMIZATION: Increased to 10s
+    // Poll every 3 seconds when there are active jobs
+    refetchInterval: (isPollingEnabled && selectedJobId && hasActiveJobs) ? 3000 : false
   });
 
   // Fetch audit logs

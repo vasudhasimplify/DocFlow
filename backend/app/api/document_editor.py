@@ -95,6 +95,59 @@ async def validate_guest_access(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/proxy-download")
+async def proxy_download_document(
+    url: str = Query(..., description="URL to download document from"),
+    filename: Optional[str] = Query(None, description="Filename to help with content disposition and type detection")
+):
+    """
+    Proxy endpoint for OnlyOffice to download documents.
+    Used when OnlyOffice (in Docker) cannot access localhost or specific URLs directly.
+    """
+    try:
+        # Validate URL to prevent arbitrary SSRF if needed, though signed URLs are generally safe
+        # Disable SSL verification to prevent issues with self-signed certs or Windows cert stores
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            logger.info(f"Proxying download for URL: {url[:50]}...")
+            
+            # Download entire file into memory instead of streaming to prevent ReadTimeout/ReadError
+            # with Supabase storage connections
+            r = await client.get(url, timeout=60.0)
+            
+            if r.status_code != 200:
+                logger.error(f"Proxy download failed: {r.status_code} for URL: {url}")
+                raise HTTPException(status_code=400, detail=f"Failed to fetch document: {r.status_code}")
+
+            # Return as standard response with content
+            from fastapi.responses import Response
+            import mimetypes
+            
+            # Determine content type: prefer explicit filename, then upstream header, then default
+            content_type = r.headers.get("content-type")
+            if filename:
+                guessed_type, _ = mimetypes.guess_type(filename)
+                if guessed_type:
+                    content_type = guessed_type
+            
+            # Ensure we have a valid content disposition
+            disposition = r.headers.get("content-disposition")
+            if not disposition and filename:
+                disposition = f'attachment; filename="{filename}"'
+
+            return Response(
+                content=r.content,
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": disposition or "attachment"
+                }
+            )
+    except Exception as e:
+        logger.error(f"Error in proxy download: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/extract-content", response_model=DocumentContentResponse)
 async def extract_document_content(request: DocumentContentRequest):
     """

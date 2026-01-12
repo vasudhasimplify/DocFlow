@@ -40,7 +40,7 @@ import {
   AlertCircle,
   Edit,
 } from 'lucide-react';
-import { useExternalSharing, ExternalShare, CreateExternalShareParams } from '@/hooks/useExternalSharing';
+import { useExternalSharing, ExternalShare, CreateExternalShareParams, checkUserByEmail, UserCheckResult } from '@/hooks/useExternalSharing';
 import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -71,6 +71,9 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
   const [guestEmails, setGuestEmails] = useState<string[]>([]);
   const [newEmailInput, setNewEmailInput] = useState('');
   const [openDocSelector, setOpenDocSelector] = useState(false);
+  // Track detected SimplifyDrive users (email -> user info)
+  const [detectedUsers, setDetectedUsers] = useState<Map<string, { userId: string; displayName: string }>>(new Map());
+  const [checkingEmail, setCheckingEmail] = useState(false);
   const [formData, setFormData] = useState<CreateExternalShareParams>({
     resource_type: 'document',
     resource_id: '',
@@ -91,18 +94,45 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
     setShowDetailDialog(true);
   };
 
-  // Add email to list
-  const addEmail = () => {
-    const email = newEmailInput.trim();
+  // Add email to list and check if it's a registered user
+  const addEmail = async () => {
+    const email = newEmailInput.trim().toLowerCase();
     if (email && /\S+@\S+\.\S+/.test(email) && !guestEmails.includes(email)) {
-      setGuestEmails(prev => [...prev, email]);
-      setNewEmailInput('');
+      setCheckingEmail(true);
+      try {
+        // Check if this email belongs to a registered SimplifyDrive user
+        const userCheck = await checkUserByEmail(email);
+        if (userCheck.isUser && userCheck.userId) {
+          setDetectedUsers(prev => {
+            const newMap = new Map(prev);
+            newMap.set(email, {
+              userId: userCheck.userId!,
+              displayName: userCheck.displayName || email
+            });
+            return newMap;
+          });
+          toast({
+            title: "SimplifyDrive user detected",
+            description: `${userCheck.displayName || email} is a registered user. Document will appear in their "Shared with me".`,
+          });
+        }
+        setGuestEmails(prev => [...prev, email]);
+        setNewEmailInput('');
+      } finally {
+        setCheckingEmail(false);
+      }
     }
   };
 
   // Remove email from list
   const removeEmail = (emailToRemove: string) => {
     setGuestEmails(prev => prev.filter(e => e !== emailToRemove));
+    // Also remove from detected users
+    setDetectedUsers(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(emailToRemove);
+      return newMap;
+    });
   };
 
   // Handle Enter key to add email
@@ -142,12 +172,17 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
 
     // Send invitations to all emails
     for (const email of guestEmails) {
+      // Check if this is a registered SimplifyDrive user
+      const detectedUser = detectedUsers.get(email.toLowerCase());
+
       const shareParams = {
         ...formData,
         guest_email: email,
         // Override permissions based on document restrictions
         allow_download: restrictions.restrictDownload ? false : formData.allow_download,
         allow_print: restrictions.restrictPrint ? false : formData.allow_print,
+        // Pass the registered user ID if this is a SimplifyDrive user
+        registered_user_id: detectedUser?.userId,
       };
       const share = await createShare(shareParams);
       if (share) {
@@ -168,6 +203,7 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
     // Reset form
     setShowInviteDialog(false);
     setGuestEmails([]);
+    setDetectedUsers(new Map()); // Reset detected users
     setNewEmailInput('');
     setFormData({
       resource_type: 'document',
@@ -425,18 +461,30 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
                 {/* Added emails as badges */}
                 {guestEmails.length > 0 && (
                   <div className="flex flex-wrap gap-2 p-2 border rounded-md bg-muted/30">
-                    {guestEmails.map(email => (
-                      <Badge key={email} variant="secondary" className="gap-1 pr-1">
-                        {email}
-                        <button
-                          type="button"
-                          onClick={() => removeEmail(email)}
-                          className="ml-1 rounded-full hover:bg-muted p-0.5"
+                    {guestEmails.map(email => {
+                      const isRegisteredUser = detectedUsers.has(email.toLowerCase());
+                      const userInfo = detectedUsers.get(email.toLowerCase());
+                      return (
+                        <Badge
+                          key={email}
+                          variant={isRegisteredUser ? "default" : "secondary"}
+                          className={`gap-1 pr-1 ${isRegisteredUser ? 'bg-primary text-primary-foreground' : ''}`}
                         >
-                          <XCircle className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    ))}
+                          {isRegisteredUser && <Users className="h-3 w-3" />}
+                          {email}
+                          {isRegisteredUser && (
+                            <span className="text-xs opacity-80 ml-1">(SimplifyDrive)</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeEmail(email)}
+                            className="ml-1 rounded-full hover:bg-white/20 p-0.5"
+                          >
+                            <XCircle className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      );
+                    })}
                   </div>
                 )}
                 {/* Input for adding new emails */}
@@ -448,18 +496,21 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
                     onKeyDown={handleEmailKeyDown}
                     placeholder="guest@example.com (press Enter to add)"
                     className="flex-1"
+                    disabled={checkingEmail}
                   />
                   <Button
                     variant="outline"
                     type="button"
                     onClick={addEmail}
-                    disabled={!newEmailInput.trim() || !/\S+@\S+\.\S+/.test(newEmailInput)}
+                    disabled={!newEmailInput.trim() || !/\S+@\S+\.\S+/.test(newEmailInput) || checkingEmail}
                   >
-                    Add
+                    {checkingEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {guestEmails.length} recipient{guestEmails.length !== 1 ? 's' : ''} added • Press Enter or comma to add
+                  {guestEmails.length} recipient{guestEmails.length !== 1 ? 's' : ''} added
+                  {detectedUsers.size > 0 && ` • ${detectedUsers.size} SimplifyDrive user${detectedUsers.size !== 1 ? 's' : ''}`}
+                  {' '}• Press Enter or comma to add
                 </p>
               </div>
             </div>

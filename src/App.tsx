@@ -37,6 +37,7 @@ import EditorWrapper from "@/components/modern-editor/EditorWrapper";
 import { SigningPage } from "./pages/SigningPage";
 import { CheckoutRequestsPage } from "./pages/CheckoutRequestsPage";
 import SharedDocumentsPage from "./pages/SharedDocumentsPage";
+import FeedbackManagement from "./pages/FeedbackManagement";
 
 // Configure React Query client
 const queryClient = new QueryClient({
@@ -138,6 +139,10 @@ const protectedRoutes: RouteConfig[] = [
   {
     path: "/checkout-requests",
     element: <AppLayout><CheckoutRequestsPage /></AppLayout>
+  },
+  {
+    path: "/feedback-management",
+    element: <AppLayout><FeedbackManagement /></AppLayout>
   }
 ];
 

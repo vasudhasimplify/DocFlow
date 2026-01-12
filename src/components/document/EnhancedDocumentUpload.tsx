@@ -340,403 +340,341 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
         console.warn('Error adding to queue:', queueAddError);
       }
 
+      // Dispatch upload-completed event immediately so UI updates
+      console.log('✅ Dispatching upload-completed event (optimistic) for document:', documentData.id);
+
       // Determine if we need backend processing (RAG or Classification)
       const needsBackendProcessing = enableRAG || enableClassification;
-      let extractedData: any = null;
 
-      if (needsBackendProcessing) {
-        // Backend will process and update the document
+      // START BACKGROUND PROCESSING (Fire and Forget)
+      // We do NOT await this promise, allowing the function to return immediately
+      const runBackgroundProcessing = async () => {
+        let extractedText = '';
+        let classificationResult = null;
+
         try {
-          updateFileStatus(uploadFile.id, { status: 'processing', progress: 55 });
-
-          // NOTE: Don't dispatch upload-started here - the document with processing_status='processing'
-          // will already be counted in SimplifyDrive's processingDocs array
-          console.log('📤 Backend processing started (will be counted via processing_status)');
-
-          // Update queue stage to text_extraction
-          await supabase
-            .from('document_processing_queue')
-            .update({ stage: 'text_extraction', progress_percent: 33 })
-            .eq('document_id', documentData.id);
-
-          // Convert file to base64
-          const reader = new FileReader();
-          const fileBase64 = await new Promise<string>((resolve) => {
-            reader.onload = () => resolve(reader.result as string);
-            reader.readAsDataURL(uploadFile.file);
-          });
-
-          // Call backend with document_id for queue updates
-          const analysisPromise = fetch(`${API_BASE_URL}/api/v1/analyze-document`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              documentData: fileBase64,
-              documentName: uploadFile.file.name,
-              task: 'without_template_extraction',
-              userId: user.user.id,
-              saveToDatabase: true,
-              documentId: documentData.id, // Pass document_id for backend to update
-              yoloSignatureEnabled: false,
-              yoloFaceEnabled: false,
-              skipWorkflowTrigger: !enableWorkflowSuggestion // Pass the user's workflow preference
-            }),
-          });
-
-          // Trigger documents-changed event immediately
-          setTimeout(() => {
-            window.dispatchEvent(new Event('documents-changed'));
-          }, 500);
-
-          const analysisResponse = await analysisPromise;
-
-          if (analysisResponse.ok) {
-            const analysisResult = await analysisResponse.json();
-            extractedData = analysisResult.extractedData || {};
-            extractedText = analysisResult.extractedText || '';
-
-            // If backend didn't return extracted text, fetch it from database
-            // The backend saves extracted_text to the database during processing
-            if (!extractedText || extractedText.length === 0) {
-              console.log('📝 Fetching extracted text from database for rule matching...');
-              try {
-                const { data: docData } = await supabase
-                  .from('documents')
-                  .select('extracted_text')
-                  .eq('id', documentData.id)
-                  .single();
-
-                if (docData?.extracted_text) {
-                  extractedText = docData.extracted_text;
-                  console.log('📝 Got extracted text from database:', extractedText.length, 'chars');
-                }
-              } catch (fetchErr) {
-                console.warn('Could not fetch extracted text from database:', fetchErr);
-              }
-            }
-
-            // Document already exists, backend updated it
-            console.log('Document processed by backend:', {
-              documentId: documentData.id,
-              textLength: extractedText.length,
-              hasData: !!extractedData
-            });
-
-            // Log AI processing audit event
+          if (needsBackendProcessing) {
+            // Backend will process and update the document
             try {
-              await logAuditEvent({
-                action: 'document.processed',
-                category: 'ai_processing',
-                resourceType: 'document',
-                resourceName: uploadFile.file.name,
-                documentId: documentData.id,
-                details: {
-                  ai_model: 'document-analyzer',
-                  processing_time_ms: Date.now() - new Date(documentData.created_at).getTime(),
-                  notes: 'AI text extraction and analysis completed',
-                },
+              updateFileStatus(uploadFile.id, { status: 'processing', progress: 55 });
+
+              // NOTE: Don't dispatch upload-started here - the document with processing_status='processing'
+              // will already be counted in SimplifyDrive's processingDocs array
+              console.log('📤 Backend processing started (will be counted via processing_status)');
+
+              // Update queue stage to text_extraction
+              await supabase
+                .from('document_processing_queue')
+                .update({ stage: 'text_extraction', progress_percent: 33 })
+                .eq('document_id', documentData.id);
+
+              // Convert file to base64
+              const reader = new FileReader();
+              const fileBase64 = await new Promise<string>((resolve) => {
+                reader.onload = () => resolve(reader.result as string);
+                reader.readAsDataURL(uploadFile.file);
               });
-              console.log('📝 Audit event logged: document.processed (AI)');
-            } catch (auditErr) {
-              console.warn('Failed to log AI processing audit:', auditErr);
+
+              // Call backend with document_id for queue updates
+              const analysisPromise = fetch(`${API_BASE_URL}/api/v1/analyze-document`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  documentData: fileBase64,
+                  documentName: uploadFile.file.name,
+                  task: 'without_template_extraction',
+                  userId: user.user.id,
+                  saveToDatabase: true,
+                  documentId: documentData.id, // Pass document_id for backend to update
+                  yoloSignatureEnabled: false,
+                  yoloFaceEnabled: false,
+                  skipWorkflowTrigger: !enableWorkflowSuggestion // Pass the user's workflow preference
+                }),
+              });
+
+              // Trigger documents-changed event immediately
+              setTimeout(() => {
+                window.dispatchEvent(new Event('documents-changed'));
+              }, 500);
+
+              const analysisResponse = await analysisPromise;
+
+              if (analysisResponse.ok) {
+                const analysisResult = await analysisResponse.json();
+                extractedText = analysisResult.extractedText || '';
+
+                // If backend didn't return extracted text, fetch it from database
+                if (!extractedText || extractedText.length === 0) {
+                  try {
+                    const { data: docData } = await supabase
+                      .from('documents')
+                      .select('extracted_text')
+                      .eq('id', documentData.id)
+                      .single();
+
+                    if (docData?.extracted_text) {
+                      extractedText = docData.extracted_text;
+                    }
+                  } catch (fetchErr) {
+                    console.warn('Could not fetch extracted text from database:', fetchErr);
+                  }
+                }
+
+                // Log AI processing audit event
+                try {
+                  await logAuditEvent({
+                    action: 'document.processed',
+                    category: 'ai_processing',
+                    resourceType: 'document',
+                    resourceName: uploadFile.file.name,
+                    documentId: documentData.id,
+                    details: {
+                      ai_model: 'document-analyzer',
+                      processing_time_ms: Date.now() - new Date(documentData.created_at).getTime(),
+                      notes: 'AI text extraction and analysis completed',
+                    },
+                  });
+                } catch (auditErr) {
+                  console.warn('Failed to log AI processing audit:', auditErr);
+                }
+
+                // Apply access rules if enabled - ALWAYS runs after AI processing
+                if (enableAccessRules) {
+                  try {
+                    const appliedRules = await applyRulesToDocument(documentData.id, {
+                      name: uploadFile.file.name,
+                      file_type: uploadFile.file.type,
+                      file_size: uploadFile.file.size,
+                      content: extractedText,
+                    });
+
+                    if (appliedRules && appliedRules.length > 0) {
+                      const ruleNames = appliedRules.map(r => r.name).join(', ');
+                      toast({
+                        title: "✅ Access Rules Applied",
+                        description: `Applied ${appliedRules.length} rule(s): ${ruleNames}`,
+                      });
+
+                      // Force refresh of document list
+                      setTimeout(() => {
+                        window.dispatchEvent(new Event('documents-changed'));
+                      }, 500);
+
+                      // Log access rules application
+                      try {
+                        await logAuditEvent({
+                          action: 'document.processed',
+                          category: 'security',
+                          resourceType: 'document',
+                          resourceName: uploadFile.file.name,
+                          documentId: documentData.id,
+                          details: {
+                            action: 'auto_apply_rules',
+                            rule_count: appliedRules.length,
+                            rule_names: appliedRules.map(r => r.name)
+                          }
+                        });
+                      } catch (e) {
+                        console.warn('Failed to log rule application audit:', e);
+                      }
+                    } else {
+                      // Silent fail or minimal log
+                    }
+                  } catch (ruleError) {
+                    console.error('❌ Failed to auto-apply rules:', ruleError);
+                  }
+                }
+              } else {
+                console.error('Backend processing failed');
+              }
+            } catch (analysisError) {
+              console.error('Error during backend processing:', analysisError);
+            }
+          } else {
+            // Simple upload: No backend processing, just update document status
+            // Try to extract text locally
+            try {
+              extractedText = await extractTextFromFile(uploadFile.file);
+            } catch (e) {
+              console.warn('Local text extraction failed:', e);
             }
 
-            // Apply access rules if enabled - ALWAYS runs after AI processing
-            console.log('🔍 Access Rules toggle state:', enableAccessRules);
-            if (enableAccessRules) {
-              console.log('🛡️ Auto-applying access rules for document:', documentData.id, 'filename:', uploadFile.file.name);
-              try {
-                const appliedRules = await applyRulesToDocument(documentData.id, {
-                  name: uploadFile.file.name,
-                  file_type: uploadFile.file.type,
-                  file_size: uploadFile.file.size,
-                  content: extractedText,
+            // Update document with extracted text
+            await supabase
+              .from('documents')
+              .update({
+                extracted_text: extractedText || '',
+                processing_status: 'pending',
+                metadata: {
+                  ...(documentData.metadata || {}),
+                  ragEnabled: false,
+                  classificationEnabled: false
+                }
+              })
+              .eq('id', documentData.id);
+
+            // Create Version 1 record
+            try {
+              await supabase
+                .from('document_versions')
+                .insert({
+                  document_id: documentData.id,
+                  version_number: 1,
+                  content: uploadData.path,
+                  change_summary: 'Initial upload',
+                  created_by: user.user.id,
+                  major_version: 1,
+                  minor_version: 0,
                 });
+            } catch (versionCreationError) {
+              console.warn('Error creating version record:', versionCreationError);
+            }
+          }
 
-                console.log('📋 Applied rules result:', appliedRules?.length || 0, 'rules');
+          // AI Classification - only if explicitly enabled by user in UI
+          if (enableClassification) {
+            try {
+              updateFileStatus(uploadFile.id, { status: 'classifying', progress: 90 });
 
-                if (appliedRules && appliedRules.length > 0) {
-                  const ruleNames = appliedRules.map(r => r.name).join(', ');
-                  toast({
-                    title: "✅ Access Rules Applied",
-                    description: `Applied ${appliedRules.length} rule(s): ${ruleNames}`,
-                  });
+              // Convert file to base64 for image classification if it's an image or PDF
+              let imageBase64 = '';
+              if (uploadFile.file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                imageBase64 = await new Promise((resolve) => {
+                  reader.onload = () => resolve(reader.result as string);
+                  reader.readAsDataURL(uploadFile.file);
+                });
+              }
 
-                  // Force refresh of document list
-                  setTimeout(() => {
-                    window.dispatchEvent(new Event('documents-changed'));
-                  }, 500);
+              const { data: classifyData, error: classifyError } = await supabase.functions.invoke('classify-document', {
+                body: {
+                  documentId: documentData.id,
+                  text: extractedText,
+                  fileName: uploadFile.file.name,
+                  mimeType: uploadFile.file.type,
+                  imageBase64: imageBase64 || undefined
+                }
+              });
 
-                  // Log access rules application
+              if (!classifyError && classifyData?.success && classifyData?.classification) {
+                classificationResult = classifyData.classification;
+
+                // Update document with classification
+                await supabase
+                  .from('documents')
+                  .update({
+                    metadata: {
+                      ...((documentData?.metadata as object) || {}),
+                      classification: classificationResult,
+                      classifiedAt: new Date().toISOString()
+                    }
+                  })
+                  .eq('id', documentData.id);
+
+                // Auto-route to external system if configured
+                if (classificationResult?.externalSystem) {
                   try {
-                    await logAuditEvent({
-                      action: 'document.processed',
-                      category: 'security',
-                      resourceType: 'document',
-                      resourceName: uploadFile.file.name,
-                      documentId: documentData.id,
-                      details: {
-                        action: 'auto_apply_rules',
-                        rule_count: appliedRules.length,
-                        rule_names: appliedRules.map(r => r.name)
+                    await supabase.functions.invoke('process-external-system', {
+                      body: {
+                        documentId: documentData.id,
+                        externalSystem: classificationResult.externalSystem,
+                        extractedData: classificationResult.extracted_data,
+                        classification: classificationResult
                       }
                     });
-                  } catch (e) {
-                    console.warn('Failed to log rule application audit:', e);
+                  } catch (routeError) {
+                    console.error('Error routing to external system:', routeError);
                   }
-                } else {
-                  console.log('⚠️ No rules matched for document:', uploadFile.file.name);
-                  toast({
-                    title: "No Matching Rules",
-                    description: `No access rules matched "${uploadFile.file.name}"`,
-                    variant: "default"
-                  });
                 }
-              } catch (ruleError) {
-                console.error('❌ Failed to auto-apply rules:', ruleError);
-                toast({
-                  title: "Rule Application Failed",
-                  description: `Failed to apply rules: ${ruleError.message}`,
-                  variant: "destructive"
-                });
               }
-            } else {
-              console.log('ℹ️ Access Rules toggle is OFF - skipping rule application');
+            } catch (classifyError) {
+              console.error('Error classifying document:', classifyError);
             }
-          } else {
-            throw new Error('Backend processing failed');
-          }
-        } catch (analysisError) {
-          console.error('Error during backend processing:', analysisError);
-          throw new Error(`Backend processing failed: ${analysisError.message}`);
-        }
-      } else {
-        // Simple upload: No backend processing, just update document status
-        console.log('📤 Dispatching upload-started event (simple upload)');
-        window.dispatchEvent(new CustomEvent('upload-started', { detail: { count: 1 } }));
-
-        // Try to extract text locally
-        try {
-          extractedText = await extractTextFromFile(uploadFile.file);
-        } catch (e) {
-          console.warn('Local text extraction failed:', e);
-        }
-
-        updateFileStatus(uploadFile.id, { progress: 70 });
-
-        // Update document with extracted text
-        await supabase
-          .from('documents')
-          .update({
-            extracted_text: extractedText || '',
-            processing_status: 'pending',
-            metadata: {
-              ...(documentData.metadata || {}),
-              ragEnabled: false,
-              classificationEnabled: false
-            }
-          })
-          .eq('id', documentData.id);
-
-        console.log('Document updated (simple upload):', documentData.id);
-
-        // Create Version 1 record
-        try {
-          const { error: versionError } = await supabase
-            .from('document_versions')
-            .insert({
-              document_id: documentData.id,
-              version_number: 1,
-              content: uploadData.path,
-              change_summary: 'Initial upload',
-              created_by: user.user.id,
-              major_version: 1,
-              minor_version: 0,
-            });
-
-          if (versionError) {
-            console.warn('Could not create initial version record:', versionError);
-          } else {
-            console.log('Created version 1 record for document:', documentData.id);
-          }
-        } catch (versionCreationError) {
-          console.warn('Error creating version record:', versionCreationError);
-        }
-
-      }
-
-      updateFileStatus(uploadFile.id, { progress: 75 });
-
-      // Note: RAG embeddings are now handled by backend when enableRAG is true
-      // Classification is also handled below if enabled
-
-      updateFileStatus(uploadFile.id, { progress: 90 });
-
-      // AI Classification - only if explicitly enabled by user in UI
-      let classificationResult = null;
-      if (enableClassification) {
-        try {
-          updateFileStatus(uploadFile.id, { status: 'classifying', progress: 90 });
-          console.log('Classifying document:', documentData.id);
-
-          // Convert file to base64 for image classification if it's an image or PDF
-          let imageBase64 = '';
-          if (uploadFile.file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            imageBase64 = await new Promise((resolve) => {
-              reader.onload = () => resolve(reader.result as string);
-              reader.readAsDataURL(uploadFile.file);
-            });
           }
 
-          const { data: classifyData, error: classifyError } = await supabase.functions.invoke('classify-document', {
-            body: {
-              documentId: documentData.id,
-              text: extractedText,
-              fileName: uploadFile.file.name,
-              mimeType: uploadFile.file.type,
-              imageBase64: imageBase64 || undefined
-            }
-          });
-
-          if (classifyError) {
-            console.error('Classification failed:', classifyError);
-          } else if (classifyData?.success && classifyData?.classification) {
-            classificationResult = classifyData.classification;
-            console.log('Classification result:', classificationResult);
-
-            // Update document with classification
+          // Update metadata with RAG status
+          if (enableRAG && extractedText) {
             await supabase
               .from('documents')
               .update({
                 metadata: {
                   ...((documentData?.metadata as object) || {}),
-                  classification: classificationResult,
-                  classifiedAt: new Date().toISOString()
+                  ragProcessed: true,
+                  ...(classificationResult ? { classification: classificationResult } : {})
                 }
               })
               .eq('id', documentData.id);
+          }
 
-            // Auto-route to external system if configured
-            if (classificationResult.externalSystem) {
-              try {
-                const { error: routeError } = await supabase.functions.invoke('process-external-system', {
-                  body: {
-                    documentId: documentData.id,
-                    externalSystem: classificationResult.externalSystem,
-                    extractedData: classificationResult.extracted_data,
-                    classification: classificationResult
-                  }
-                });
+          // Auto-classify document based on filename matching to metadata fields
+          try {
+            await autoClassifyDocument(documentData.id, uploadFile.file.name, extractedText);
+          } catch (classifyErr) {
+            console.error('Auto-classification failed (non-blocking):', classifyErr);
+          }
 
-                if (routeError) {
-                  console.error('External system routing failed:', routeError);
-                }
-              } catch (routeError) {
-                console.error('Error routing to external system:', routeError);
+          // Apply Access Rules (final check - runs for all upload paths)
+          if (enableAccessRules) {
+            try {
+              const appliedRules = await applyRulesToDocument(documentData.id, {
+                name: uploadFile.file.name,
+                file_type: uploadFile.file.type,
+                file_size: uploadFile.file.size,
+                content: extractedText
+              });
+
+              if (appliedRules && appliedRules.length > 0) {
+                // Notification if needed
               }
+            } catch (ruleErr) {
+              console.error('Failed to apply access rules:', ruleErr);
             }
           }
-        } catch (classifyError) {
-          console.error('Error classifying document:', classifyError);
-        }
-      }
 
-      updateFileStatus(uploadFile.id, { progress: 95 });
+          // Mark processing queue as completed
+          try {
+            await supabase
+              .from('document_processing_queue')
+              .update({
+                stage: 'completed',
+                progress_percent: 100,
+                completed_at: new Date().toISOString()
+              })
+              .eq('document_id', documentData.id);
 
-      // Update metadata with RAG status
-      if (enableRAG && extractedText) {
-        await supabase
-          .from('documents')
-          .update({
-            metadata: {
-              ...((documentData?.metadata as object) || {}),
-              ragProcessed: true,
-              ...(classificationResult ? { classification: classificationResult } : {})
-            }
-          })
-          .eq('id', documentData.id);
-      }
+            // Also update search index queue
+            await supabase
+              .from('search_index_queue')
+              .update({
+                status: 'completed',
+                processed_at: new Date().toISOString()
+              })
+              .eq('document_id', documentData.id);
 
-      // Auto-classify document based on filename matching to metadata fields
-      try {
-        await autoClassifyDocument(documentData.id, uploadFile.file.name, extractedText);
-      } catch (classifyErr) {
-        console.error('Auto-classification failed (non-blocking):', classifyErr);
-      }
+          } catch (queueUpdateError) {
+            console.warn('Could not update processing queue:', queueUpdateError);
+          }
 
-      // Apply Access Rules (final check - runs for all upload paths)
-      if (enableAccessRules) {
-        console.log('🛡️ Final Access Rules check for document:', documentData.id);
-        try {
-          const appliedRules = await applyRulesToDocument(documentData.id, {
-            name: uploadFile.file.name,
-            file_type: uploadFile.file.type,
-            file_size: uploadFile.file.size,
-            content: extractedText
+          // Final success update for file status (though user might not see it if modal closed)
+          updateFileStatus(uploadFile.id, {
+            status: 'complete',
+            progress: 100,
+            documentId: documentData.id
           });
 
-          console.log('📋 Final applied rules result:', appliedRules?.length || 0, 'rules');
-
-          if (appliedRules && appliedRules.length > 0) {
-            const ruleNames = appliedRules.map(r => r.name).join(', ');
-            toast({
-              title: "✅ Access Rules Applied",
-              description: `Applied ${appliedRules.length} rule(s): ${ruleNames}`,
-            });
-
-            // Force refresh
-            setTimeout(() => {
-              window.dispatchEvent(new Event('documents-changed'));
-            }, 500);
-          }
-        } catch (ruleErr) {
-          console.error('Failed to apply access rules:', ruleErr);
+        } catch (backgroundError) {
+          console.error('Background processing error:', backgroundError);
+          // We don't fail the upload from user perspective, but we log it
         }
-      }
+      };
 
-      // Mark processing queue as completed
-      try {
-        await supabase
-          .from('document_processing_queue')
-          .update({
-            stage: 'completed',
-            progress_percent: 100,
-            completed_at: new Date().toISOString()
-          })
-          .eq('document_id', documentData.id);
+      // Trigger background processing without awaiting
+      runBackgroundProcessing();
 
-        // Also update search index queue
-        await supabase
-          .from('search_index_queue')
-          .update({
-            status: 'completed',
-            processed_at: new Date().toISOString()
-          })
-          .eq('document_id', documentData.id);
-
-        console.log('✅ Processing queue marked as completed for:', documentData.id);
-      } catch (queueUpdateError) {
-        console.warn('Could not update processing queue:', queueUpdateError);
-      }
-
-      updateFileStatus(uploadFile.id, {
-        status: 'complete',
-        progress: 100,
-        documentId: documentData.id,
-        classification: classificationResult ? {
-          category: classificationResult.category,
-          categoryName: classificationResult.categoryName,
-          confidence: classificationResult.confidence
-        } : undefined
-      });
-
-      // Dispatch upload-completed event to update processing banner and trigger document refresh
-      console.log('✅ Dispatching upload-completed event for document:', documentData.id);
+      // Return immediately to close UI
       window.dispatchEvent(new CustomEvent('upload-completed', { detail: { count: 1, documentId: documentData.id } }));
-
       return documentData.id;
 
     } catch (error) {
@@ -785,6 +723,7 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
 
       // Workflow auto-start is controlled by backend based on skip_workflow_trigger flag
       onAllComplete?.(documentIds);
+      onComplete?.();
 
       if (failCount === 0) {
         setUploadComplete(true);

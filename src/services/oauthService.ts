@@ -52,9 +52,9 @@ class OAuthService {
           return;
         }
 
-        // Build OAuth URL - use drive.readonly for listing files
+        // Build OAuth URL - use full drive scope for read, write, and delete
         const redirectUri = `${window.location.origin}/oauth-callback.html`;
-        const scope = 'https://www.googleapis.com/auth/drive.readonly';
+        const scope = 'https://www.googleapis.com/auth/drive';  // Full access for move/delete
 
         const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
         authUrl.searchParams.set('client_id', GOOGLE_CLIENT_ID);
