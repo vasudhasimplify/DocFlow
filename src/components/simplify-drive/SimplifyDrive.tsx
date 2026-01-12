@@ -100,7 +100,7 @@ export function SimplifyDrive() {
       const fetchLegalHoldDocuments = async () => {
         try {
           console.log('Fetching documents for legal hold:', state.legalHoldId);
-          
+
           // First, get the legal hold details to find document IDs
           const { data: holdData, error: holdError } = await supabase
             .from('legal_holds')
@@ -128,10 +128,10 @@ export function SimplifyDrive() {
           }
           // Then check scope_details
           else if (holdData?.scope_details) {
-            const scopeDetails = typeof holdData.scope_details === 'string' 
-              ? JSON.parse(holdData.scope_details) 
+            const scopeDetails = typeof holdData.scope_details === 'string'
+              ? JSON.parse(holdData.scope_details)
               : holdData.scope_details;
-            
+
             if (scopeDetails?.document_ids?.length > 0) {
               documentIds = scopeDetails.document_ids;
             }
@@ -150,7 +150,7 @@ export function SimplifyDrive() {
                 return Array.isArray(holdIds) && holdIds.includes(state.legalHoldId);
               })
               .map(s => s.document_id);
-            
+
             // Merge without duplicates
             documentIds = [...new Set([...documentIds, ...additionalDocIds])];
           }
@@ -662,7 +662,6 @@ export function SimplifyDrive() {
           onClose={() => setShowOfflinePanel(false)}
         />
 
-<<<<<<< HEAD
         {/* Sync Status Dialog */}
         <SyncStatusDialog
           isOpen={showSyncDialog}
@@ -677,33 +676,23 @@ export function SimplifyDrive() {
           onSync={syncSelectedUploads}
           onDismiss={closeSyncDialog}
         />
-      </div>
-=======
-      {/* Sync Notification Dialog */}
-      <SyncNotificationDialog
-        open={offlineStatus.showSyncDialog}
-        onOpenChange={closeSyncDialog}
-        pendingUploads={pendingUploads}
-        onSync={syncSelectedUploads}
-        onDismiss={closeSyncDialog}
-      />
 
-      {/* Policy Document Detector - lifted from EnhancedDocumentUpload to persist after upload modal closes */}
-      <PolicyDocumentDetector
-        documentId={policyDocumentId}
-        documentName={policyDocumentName}
-        onClose={() => {
-          setPolicyDocumentId(null);
-          setPolicyDocumentName(null);
-        }}
-        onPoliciesCreated={(policyIds) => {
-          toast({
-            title: 'Retention Policies Created',
-            description: `${policyIds.length} policy(s) created from the document.`,
-          });
-        }}
-      />
->>>>>>> vasudha/main
+        {/* Policy Document Detector - lifted from EnhancedDocumentUpload to persist after upload modal closes */}
+        <PolicyDocumentDetector
+          documentId={policyDocumentId}
+          documentName={policyDocumentName}
+          onClose={() => {
+            setPolicyDocumentId(null);
+            setPolicyDocumentName(null);
+          }}
+          onPoliciesCreated={(policyIds) => {
+            toast({
+              title: 'Retention Policies Created',
+              description: `${policyIds.length} policy(s) created from the document.`,
+            });
+          }}
+        />
+      </div>
     </div>
   );
 }
