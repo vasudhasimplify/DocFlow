@@ -23,6 +23,8 @@ import { useDocumentComments } from '@/hooks/useDocumentComments';
 import CommentsSidebar from '@/components/collaboration/CommentsSidebar';
 import { RequestCheckoutButton } from '@/components/checkout-requests/RequestCheckoutButton';
 import { OnlyOfficeEditor } from '@/components/modern-editor/components/onlyoffice-editor/OnlyOfficeEditor';
+import { PDFEditor } from '@/components/modern-editor/components/pdf-editor/PDFEditor';
+import { PenTool } from 'lucide-react';
 
 interface ShareData {
   id: string;
@@ -59,8 +61,9 @@ export default function GuestAccessPage() {
   const [downloading, setDownloading] = useState(false);
   const [viewRecorded, setViewRecorded] = useState(false);
   const [showViewer, setShowViewer] = useState(false);
-  const [viewCount, setViewCount] = useState(0);
   const [showEditor, setShowEditor] = useState(false);
+  const [viewCount, setViewCount] = useState(0);
+
 
   // Password protection state
   const [isLocked, setIsLocked] = useState(false);
@@ -77,6 +80,15 @@ export default function GuestAccessPage() {
 
   // Generate a stable anonymous guest ID for this session (used if no email verification)
   const [anonymousGuestId] = useState(() => `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}@anonymous.local`);
+
+  // Check if file type is editable with OnlyOffice
+  const isOnlyOfficeEditable = (fileName: string | undefined, fileType: string | undefined): boolean => {
+    if (!fileName && !fileType) return false;
+    const ext = (fileName || '').split('.').pop()?.toLowerCase() || '';
+    // Include PDF - OnlyOffice can edit/annotate PDFs
+    const editableExtensions = ['doc', 'docx', 'odt', 'rtf', 'txt', 'xls', 'xlsx', 'ods', 'csv', 'ppt', 'pptx', 'odp', 'pdf'];
+    return editableExtensions.includes(ext);
+  };
 
   // Checkout request state - check if guest has approved edit access
   const [hasApprovedCheckout, setHasApprovedCheckout] = useState(false);
@@ -199,146 +211,49 @@ export default function GuestAccessPage() {
       setLoading(true);
       setError(null);
 
-      // First, check localStorage for the share link
-      const localShare = getShareLinkByToken(token);
-      console.log('📦 LocalStorage share:', localShare ? 'Found' : 'Not found');
+      // NOTE: We intentionally skip local storage check here to ensure consistency across browsers
+      // Always fetch from backend API to ensure consistent permissions
 
-      if (localShare) {
-        console.log('📄 Local share data:', {
-          id: localShare.id,
-          resource_id: localShare.resource_id,
-          resource_name: localShare.resource_name,
-          expires_at: localShare.expires_at
-        });
-
-        // IMPORTANT: Check for approved checkout FIRST before validating share restrictions
-        // If user has approved checkout access, bypass share validation
-        const guestEmail = visitorEmail || anonymousGuestId;
-        console.log('🔍 Checking checkout access for guest:', guestEmail);
-        let hasBypassAccess = false;
-        
-        try {
-          const { data: lockData, error: lockError } = await supabase
-            .from('document_locks')
-            .select('*')
-            .eq('document_id', localShare.resource_id)
-            .eq('guest_email', guestEmail)
-            .eq('is_active', true)
-            .gte('expires_at', new Date().toISOString())
-            .maybeSingle();
-
-          console.log('🔐 Document lock check:', { lockData, lockError, documentId: localShare.resource_id, guestEmail });
-
-          if (lockData) {
-            console.log('✅ Found approved checkout - bypassing share validation');
-            hasBypassAccess = true;
-            setHasApprovedCheckout(true);
-            setCheckoutExpiresAt(lockData.expires_at);
-          } else {
-            console.log('⚠️ No approved checkout found for this guest');
-          }
-        } catch (err) {
-          console.error('❌ Error checking checkout status:', err);
-        }
-
-        // Validate the share link ONLY if no approved checkout access exists
-        if (!hasBypassAccess) {
-          console.log('🔍 Validating share link (no bypass access)...');
-          const validation = isShareLinkValid(localShare);
-          console.log('📋 Share validation result:', validation);
-          if (!validation.valid) {
-            // If the only issue is max views and we've already recorded a view in this session, allow access
-            const isMaxViewsIssue = validation.reason?.includes('maximum views');
-            if (isMaxViewsIssue && viewRecorded) {
-              // Allow access - we've already recorded our view, don't re-validate
-              console.log('🔓 Skipping re-validation after view was recorded');
-            } else {
-              console.log('❌ Share validation failed:', validation.reason);
-              setError(validation.reason || 'Invalid share link');
-              setLoading(false);
-              return;
-            }
-          }
-        } else {
-          console.log('✅ Bypassing share validation due to approved checkout');
-        }
-
-        // Handle password protection
-        if (localShare.password_protected) {
-          setIsLocked(true);
-          setShare(localShare);
-          setLoading(false);
-          return;
-        }
-
-        // Handle email/domain restrictions
-        const hasEmailRestrictions = (localShare.blocked_emails && localShare.blocked_emails.length > 0) ||
-          (localShare.allowed_domains && localShare.allowed_domains.length > 0);
-        if (hasEmailRestrictions) {
-          setRequiresEmailVerification(true);
-          setShare(localShare);
-          setLoading(false);
-          return;
-        }
-
-        // Record the view and update count
-        if (!viewRecorded) {
-          incrementShareLinkViewCountByToken(token);
-          logAccess(localShare.id, undefined, 'view'); // Log the access locally
-          logAccessToBackend(localShare.id, undefined, 'view'); // Log to backend for device tracking
-          setViewRecorded(true);
-          // Update the local view count
-          setViewCount(localShare.use_count + 1);
-
-          // Send access notification if enabled
-          if (localShare.notify_on_access) {
-            sendAccessNotification(localShare);
-          }
-        } else {
-          setViewCount(localShare.use_count);
-        }
-
-        setShare(localShare);
-
-        // Fetch the actual document data from Supabase using direct method (for share links)
-        // Note: localShare doesn't have guest_email, so we pass visitorEmail if available
-        await fetchDocumentDirect(localShare.resource_id, visitorEmail || undefined);
-
-        setLoading(false);
-        return;
-      }
-
-      // If not found locally, try fetching from Supabase directly (works from any browser)
-      console.log('📡 Not found in localStorage, checking Supabase external_shares...');
+      // Fetch from Supabase/backend API
       try {
-        // Query external_shares table directly using anon key
-        // The database column is 'invitation_token'
-        let { data: shareData, error: tokenError } = await supabase
+        // First, try external_shares table by invitation_token (for Guest Sharing)
+        let shareData = null;
+
+        const { data: shareByInvToken, error: tokenError } = await supabase
           .from('external_shares')
           .select('*')
           .eq('invitation_token', token)
           .maybeSingle();
 
-        console.log('📡 Supabase external_shares result:', { shareData, tokenError });
+        if (tokenError) console.error('Error fetching share by invitation_token:', tokenError);
 
-        // If not found in external_shares, also check share_links table
-        if (!shareData && !tokenError) {
-          console.log('📡 Not found in external_shares, checking share_links table...');
-          const { data: shareLinkData, error: shareLinkError } = await supabase
+        if (shareByInvToken) {
+          shareData = shareByInvToken;
+        } else {
+          // If not found by invitation_token, try by token field (for Share Links)
+          const { data: shareByToken, error: tokenError2 } = await supabase
+            .from('external_shares')
+            .select('*')
+            .eq('token', token)
+            .maybeSingle();
+
+          if (shareByToken) shareData = shareByToken;
+        }
+
+        // Check for share_links (fallback) if not found in external_shares
+        if (!shareData) {
+          const { data: shareLinkData } = await supabase
             .from('share_links')
             .select('*')
             .eq('token', token)
             .maybeSingle();
 
-          console.log('📡 Supabase share_links result:', { shareLinkData, shareLinkError });
-
-          if (shareLinkData && !shareLinkError) {
-            // Convert share_links format to match external_shares format
+          if (shareLinkData) {
             shareData = {
               id: shareLinkData.id,
               resource_id: shareLinkData.document_id,
               resource_name: shareLinkData.document_name || 'Shared Document',
-              guest_email: null, // share_links don't have a guest email
+              guest_email: null,
               permission: shareLinkData.permission || 'view',
               allow_download: shareLinkData.allow_download ?? true,
               allow_print: shareLinkData.allow_print ?? true,
@@ -354,119 +269,83 @@ export default function GuestAccessPage() {
               invitation_token: token,
               created_at: shareLinkData.created_at,
             };
-            console.log('📄 Converted share_links data:', shareData);
-          } else if (shareLinkError) {
-            tokenError = shareLinkError;
           }
         }
 
-        if (tokenError) {
-          console.error('❌ Error fetching share from Supabase:', tokenError);
-          setError('Failed to load share link');
-          setLoading(false);
-          return;
-        }
+        if (shareData) {
+          // Check for approved checkout FIRST
+          const guestEmailForCheck = shareData.guest_email || visitorEmail || anonymousGuestId;
+          let hasBypassAccess = false;
 
-        if (!shareData) {
-          console.log('❌ No share data found for token:', token);
-          setError('Invalid or expired share link');
-          setLoading(false);
-          return;
-        }
+          try {
+            const { data: lockData } = await supabase
+              .from('document_locks')
+              .select('*')
+              .eq('document_id', shareData.resource_id)
+              .eq('guest_email', guestEmailForCheck)
+              .eq('is_active', true)
+              .gte('expires_at', new Date().toISOString())
+              .maybeSingle();
 
-        console.log('📄 Share data from Supabase:', {
-          id: shareData.id,
-          resource_id: shareData.resource_id,
-          guest_email: shareData.guest_email,
-          revoked: shareData.revoked,
-          is_revoked: shareData.is_revoked,
-          expires_at: shareData.expires_at
-        });
-
-        // IMPORTANT: Check for approved checkout FIRST before validating share restrictions
-        // Use the guest_email from share data - this is the actual guest email
-        const guestEmailForCheck = shareData.guest_email || visitorEmail || anonymousGuestId;
-        console.log('🔍 Checking checkout access for guest (Supabase path):', guestEmailForCheck);
-        let hasBypassAccess = false;
-        
-        try {
-          const { data: lockData, error: lockError } = await supabase
-            .from('document_locks')
-            .select('*')
-            .eq('document_id', shareData.resource_id)
-            .eq('guest_email', guestEmailForCheck)
-            .eq('is_active', true)
-            .gte('expires_at', new Date().toISOString())
-            .maybeSingle();
-
-          console.log('🔐 Document lock check (Supabase path):', { lockData, lockError, checkedEmail: guestEmailForCheck });
-
-          if (lockData) {
-            console.log('✅ Found approved checkout - bypassing share validation');
-            hasBypassAccess = true;
-            setHasApprovedCheckout(true);
-            setCheckoutExpiresAt(lockData.expires_at);
-            // Also set the visitor email if we found the lock with share data email
-            if (shareData.guest_email && !visitorEmail) {
-              setVisitorEmail(shareData.guest_email);
+            if (lockData) {
+              hasBypassAccess = true;
+              setHasApprovedCheckout(true);
+              setCheckoutExpiresAt(lockData.expires_at);
+              if (shareData.guest_email && !visitorEmail) setVisitorEmail(shareData.guest_email);
             }
-          } else {
-            console.log('⚠️ No approved checkout found for this guest (Supabase path)');
-          }
-        } catch (err) {
-          console.error('❌ Error checking checkout status:', err);
-        }
+          } catch (err) { }
 
-        // Only validate share restrictions if no approved checkout access
-        if (!hasBypassAccess) {
-          console.log('🔍 Validating share restrictions (no bypass access)...');
-          // Check if share is revoked
-          if (shareData.revoked || shareData.is_revoked) {
-            console.log('❌ Share is revoked');
-            setError('This share has been revoked');
-            setLoading(false);
-            return;
-          }
-
-          // Check if share is expired
-          if (shareData.expires_at) {
-            const expiresAt = new Date(shareData.expires_at);
-            if (expiresAt < new Date()) {
-              console.log('❌ Share is expired');
+          // Validate permissions if no bypass
+          if (!hasBypassAccess) {
+            if (shareData.revoked || shareData.is_revoked) {
+              setError('This share has been revoked');
+              setLoading(false);
+              return;
+            }
+            if (shareData.expires_at && new Date(shareData.expires_at) < new Date()) {
               setError('This share link has expired');
               setLoading(false);
               return;
             }
           }
-          console.log('✅ Share validation passed');
-        } else {
-          console.log('✅ Bypassing share validation due to approved checkout');
-        }
 
-        // Handle password protection for DB link
-        if (shareData.password_protected) {
-          setIsLocked(true);
+          // Handle password
+          if (shareData.password_protected) {
+            setIsLocked(true);
+            setShare(shareData);
+            setLoading(false);
+            return;
+          }
+
+          // Handle email restrictions
+          const hasEmailRestrictions = (shareData.blocked_emails && shareData.blocked_emails.length > 0) ||
+            (shareData.allowed_domains && shareData.allowed_domains.length > 0);
+          if (hasEmailRestrictions) {
+            setRequiresEmailVerification(true);
+            setShare(shareData);
+            setLoading(false);
+            return;
+          }
+
           setShare(shareData);
+          setViewCount(shareData.use_count || shareData.view_count || 0);
+
+          // Fetch document
+          await fetchDocumentFromShareLinkBackend();
+
+          // Track View
+          try {
+            if (shareData.id && !shareData.id.startsWith('link-')) {
+              await supabase.from('external_shares').update({ view_count: (shareData.view_count || 0) + 1 }).eq('id', shareData.id);
+            }
+          } catch (e) { }
+
           setLoading(false);
           return;
         }
 
-        setShare(shareData);
-        setViewCount(shareData.view_count || 0);
-
-        // Fetch document using backend API (bypasses RLS for anonymous users)
-        await fetchDocumentFromBackend();
-
-        // Track view
-        try {
-          await supabase
-            .from('external_shares')
-            .update({ view_count: (shareData.view_count || 0) + 1 })
-            .eq('id', shareData.id);
-        } catch (e) {
-          // Ignore view tracking errors
-        }
-
+        // Not found anywhere
+        setError('Invalid or expired share link');
         setLoading(false);
       } catch (err) {
         console.error('Error fetching share:', err);
@@ -853,15 +732,72 @@ export default function GuestAccessPage() {
     }
   };
 
+  const fetchDocumentFromShareLinkBackend = async () => {
+    // For share_links - use dedicated backend API that bypasses RLS
+    // This ensures share links work across all browsers (not just the creator's browser)
+    try {
+      console.log('🔍 Fetching document via share-link backend API with token:', token);
+      const response = await fetch(`/api/share-link/document/${token}`);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('❌ Share link backend API error:', errorData);
+        setError(errorData.detail || 'Failed to load document');
+        // Fallback: If 403/404, try direct fetch if we have an ID
+        if (share?.resource_id) {
+          fetchDocumentDirect(share.resource_id);
+        }
+        return;
+      }
+
+      const data = await response.json();
+      console.log('✅ Document data received from share-link backend:', data);
+
+      setDocument({
+        id: data.document_id,
+        file_name: data.file_name,
+        storage_path: data.storage_path,
+        file_type: data.file_type,
+        extracted_text: null
+      });
+
+      // Update share with correct permissions from backend (bypasses RLS)
+      if (data.share_info) {
+        setShare(prevShare => ({
+          ...prevShare,
+          id: data.share_info.id || prevShare?.id || '',
+          resource_id: prevShare?.resource_id || data.document_id,
+          resource_name: data.share_info.resource_name || data.share_info.name || prevShare?.resource_name || 'Document',
+          resource_type: prevShare?.resource_type || 'document',
+          status: 'active',
+          permission: data.share_info.permission || 'view',
+          allow_download: data.share_info.allow_download || false,
+          allow_print: data.share_info.allow_print || false,
+          allow_copy: data.share_info.allow_copy || false,
+        } as ShareData));
+        console.log('✅ Share permissions updated from backend:', data.share_info.permission);
+      }
+
+      if (data.signed_url) {
+        setDocumentUrl(data.signed_url);
+        // Track view logic (simplified for merge)
+        try {
+          await fetch(`/api/share-link/document/${token}/view`, { method: 'POST' });
+        } catch (e) { }
+      } else {
+        setError('Failed to generate document URL');
+      }
+    } catch (err) {
+      console.error('❌ Error fetching document from share-link backend:', err);
+      setError(`Failed to load document: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
+  };
+
   // Check if guest has approved checkout access
   const checkApprovedCheckout = async (documentId: string, shareGuestEmail?: string) => {
     try {
-      // Use the share's guest email if provided, otherwise fall back to visitorEmail or anonymousGuestId
       const guestEmail = shareGuestEmail || visitorEmail || anonymousGuestId;
-      console.log('🔍 checkApprovedCheckout: Checking for documentId:', documentId, 'guestEmail:', guestEmail);
-      
-      // Check document_locks table for active approved checkout
-      const { data: lockData, error: lockError } = await supabase
+      const { data: lockData } = await supabase
         .from('document_locks')
         .select('*')
         .eq('document_id', documentId)
@@ -870,19 +806,15 @@ export default function GuestAccessPage() {
         .gte('expires_at', new Date().toISOString())
         .maybeSingle();
 
-      console.log('🔐 checkApprovedCheckout result:', { lockData, lockError });
-
-      if (!lockError && lockData) {
-        console.log('✅ Found approved checkout - granting edit access', lockData);
+      if (lockData) {
+        console.log('✅ Found approved checkout - granting edit access');
         setHasApprovedCheckout(true);
         setCheckoutExpiresAt(lockData.expires_at);
-        
         toast({
           title: "✅ Edit Access Granted",
           description: `You have edit access until ${new Date(lockData.expires_at).toLocaleString()}`,
         });
       } else {
-        console.log('⚠️ No approved checkout found');
         setHasApprovedCheckout(false);
         setCheckoutExpiresAt(null);
       }
@@ -892,11 +824,8 @@ export default function GuestAccessPage() {
   };
 
   const fetchDocumentDirect = async (resourceId: string, shareGuestEmail?: string) => {
-    // Fetch document directly from Supabase (works from any browser)
     try {
       console.log('🔍 Fetching document directly from Supabase with resourceId:', resourceId);
-
-      // Query document from Supabase
       const { data: docData, error: docError } = await supabase
         .from('documents')
         .select('id, file_name, storage_path, file_type, mime_type')
@@ -943,7 +872,7 @@ export default function GuestAccessPage() {
           }
 
           const signedUrlData = await signedUrlResponse.json();
-          
+
           if (signedUrlData.signed_url) {
             console.log('✅ Signed URL generated successfully via backend');
             setDocumentUrl(signedUrlData.signed_url);
@@ -952,7 +881,7 @@ export default function GuestAccessPage() {
           }
         } catch (backendError) {
           console.warn('⚠️ Backend signed URL failed, trying direct Supabase:', backendError);
-          
+
           // Fallback to direct Supabase call
           const { data: signedUrlData, error: signedUrlError } = await supabase
             .storage
@@ -1348,10 +1277,10 @@ export default function GuestAccessPage() {
   const canPrint = canEdit || allowPrint;
   const canCopy = canEdit || allowCopy;
 
-  console.log('🔐 Permission Check:', { 
-    originalPermission, 
-    hasApprovedCheckout, 
-    finalPermission: permission, 
+  console.log('🔐 Permission Check:', {
+    originalPermission,
+    hasApprovedCheckout,
+    finalPermission: permission,
     canEdit,
     shareType: 'guest_email' in share ? 'direct_share' : 'link_share'
   });
@@ -1384,6 +1313,29 @@ export default function GuestAccessPage() {
     return `${url}#toolbar=0&navpanes=0&scrollbar=1`;
   };
 
+  // Show OnlyOffice editor for editing - open in new tab like Documents tab
+  if (showEditor && documentUrl && document) {
+    const fileExt = (document.file_name || '').split('.').pop()?.toLowerCase() || 'docx';
+
+    // Open OnlyOffice in new tab - this is how Documents tab does it and it works!
+    const editorUrl = `/editor?embedded=true&documentId=${document.id}&name=${encodeURIComponent(document.file_name || 'document')}&editorType=onlyoffice&url=${encodeURIComponent(documentUrl)}`;
+
+    // Open in new tab
+    window.open(editorUrl, '_blank');
+
+    // Go back to viewer mode after opening editor
+    setShowEditor(false);
+    setShowViewer(true);
+
+    toast({
+      title: "Editor Opened",
+      description: "OnlyOffice editor opened in a new tab. Save will download the edited file.",
+    });
+
+    // Return viewer while editor is open in new tab
+    return null;
+  }
+
   // Show document viewer
   if (showViewer && documentUrl) {
     return (
@@ -1410,16 +1362,16 @@ export default function GuestAccessPage() {
               });
               return showEditor;
             })() && (
-              <Button
-                size="sm"
-                variant="default"
-                onClick={() => setShowEditor(true)}
-                className="bg-green-600 hover:bg-green-700 text-white"
-              >
-                <Edit className="h-4 w-4 mr-2" />
-                Open in Editor
-              </Button>
-            )}
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => setShowEditor(true)}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  Open in Editor
+                </Button>
+              )}
             {canDownload && (
               <Button
                 size="sm"
@@ -1457,6 +1409,20 @@ export default function GuestAccessPage() {
               >
                 <Printer className="h-4 w-4 mr-2" />
                 Print
+              </Button>
+            )}
+            {/* Edit button for edit permission with editable file types */}
+            {canEdit && document && isOnlyOfficeEditable(document.file_name, document.file_type) && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setShowViewer(false);
+                  setShowEditor(true);
+                }}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                <PenTool className="h-4 w-4 mr-2" />
+                Edit Document
               </Button>
             )}
             {/* Request Edit Access for view-only links */}
@@ -1607,7 +1573,7 @@ export default function GuestAccessPage() {
   // Main share info page
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
-      <Card className="max-w-lg w-full bg-gray-800/50 border-gray-700 backdrop-blur">
+      <Card className="max-w-xl w-full bg-gray-800/50 border-gray-700 backdrop-blur overflow-hidden">
         <CardHeader className="text-center border-b border-gray-700">
           <div className="mx-auto p-4 bg-blue-500/20 rounded-full w-fit mb-4">
             <FileText className="h-10 w-10 text-blue-400" />
@@ -1638,38 +1604,32 @@ export default function GuestAccessPage() {
           </div>
 
           {/* Actions */}
-          <div className="flex justify-center gap-4">
-            {/* Only show editor button if original permission is edit OR has approved checkout */}
+          {/* Actions */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full px-4">
+            {/* Editor Button (if allowed) */}
             {(() => {
               const showEditor = originalPermission === 'edit' || hasApprovedCheckout;
-              console.log('🔍 Editor Button Check (Landing Page):', {
-                originalPermission,
-                hasApprovedCheckout,
-                showEditor,
-                sharePermission: 'permission' in share ? share.permission : 'N/A'
-              });
               return showEditor;
             })() && (
-              <Button
-                onClick={() => {
-                  setShowEditor(true);
-                  // Also record view when opening editor
-                  if (!viewRecorded && token && document) {
-                    incrementShareLinkViewCountByToken(token);
-                    setViewRecorded(true);
-                  }
-                }}
-                className="bg-green-600 hover:bg-green-700"
-              >
-                <Edit className="h-4 w-4 mr-2" />
-                Open in Editor
-              </Button>
-            )}
+                <Button
+                  onClick={() => {
+                    setShowEditor(true);
+                    if (!viewRecorded && token && document) {
+                      incrementShareLinkViewCountByToken(token);
+                      setViewRecorded(true);
+                    }
+                  }}
+                  className="w-full sm:w-auto bg-green-600 hover:bg-green-700 whitespace-nowrap"
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  Open in Editor
+                </Button>
+              )}
             {canDownload && (
               <Button
                 onClick={handleDownload}
                 disabled={downloading}
-                className="bg-blue-600 hover:bg-blue-700"
+                className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 whitespace-nowrap"
               >
                 {downloading ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1681,12 +1641,25 @@ export default function GuestAccessPage() {
             )}
             <Button
               variant="outline"
-              className="border-gray-600 text-gray-300 hover:bg-gray-700"
+              className="w-full sm:w-auto border-gray-600 text-gray-300 hover:bg-gray-700 whitespace-nowrap"
               onClick={handleViewDocument}
             >
               <Eye className="h-4 w-4 mr-2" />
               View Document
             </Button>
+            {/* Edit button for edit permission with editable file types */}
+            {canEdit && document && isOnlyOfficeEditable(document.file_name, document.file_type) && (
+              <Button
+                onClick={() => {
+                  setShowViewer(false);
+                  setShowEditor(true);
+                }}
+                className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white whitespace-nowrap"
+              >
+                <PenTool className="h-4 w-4 mr-2" />
+                Edit Document
+              </Button>
+            )}
           </div>
 
           {/* Request Edit Access for view-only shares */}
@@ -1708,10 +1681,10 @@ export default function GuestAccessPage() {
             Shared via DocFlow • Secure document sharing
           </p>
         </CardContent>
-      </Card>
+      </Card >
 
       {/* OnlyOffice Editor Dialog */}
-      <Dialog open={showEditor} onOpenChange={setShowEditor}>
+      < Dialog open={showEditor} onOpenChange={setShowEditor} >
         <DialogContent className="max-w-7xl h-[90vh] p-0">
           <DialogHeader className="px-6 pt-4 pb-2 border-b">
             <DialogTitle className="flex items-center gap-2">
@@ -1730,14 +1703,14 @@ export default function GuestAccessPage() {
               (() => {
                 const fileExt = (document.file_type || document.file_name || '').toLowerCase();
                 const isImage = /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(fileExt) || fileExt.includes('image');
-                
+
                 // For images only, show inline viewer (OnlyOffice supports PDFs!)
                 if (isImage) {
                   return (
                     <div className="w-full h-full p-4">
                       <div className="text-center mb-4 text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg">
                         <p className="text-sm">
-                          🖼️ Image files cannot be edited with the online editor. 
+                          🖼️ Image files cannot be edited with the online editor.
                           You can download, modify, and re-upload the file.
                         </p>
                       </div>
@@ -1749,7 +1722,7 @@ export default function GuestAccessPage() {
                     </div>
                   );
                 }
-                
+
                 // For Office documents AND PDFs, use OnlyOffice
                 return (
                   <OnlyOfficeEditor
@@ -1775,7 +1748,7 @@ export default function GuestAccessPage() {
             )}
           </div>
         </DialogContent>
-      </Dialog>
-    </div>
+      </Dialog >
+    </div >
   );
 }

@@ -37,6 +37,7 @@ import {
   File,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
   Loader2,
   Edit2,
   X,
@@ -88,6 +89,8 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
   const [editingFolder, setEditingFolder] = useState<SmartFolder | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [recycleBinCount, setRecycleBinCount] = useState(0);
+  const [isFoldersExpanded, setFoldersExpanded] = useState(false);
+  const [isAIOrgExpanded, setAIOrgExpanded] = useState(false);
   const { toast } = useToast();
 
   // Handle drop on folder
@@ -530,159 +533,6 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
         </div>
       </Button>
 
-      {/* Divider */}
-      <div className="border-t border-border my-2"></div>
-
-      {/* Smart Folders Section Header */}
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold flex items-center gap-2 text-sm text-muted-foreground">
-          <Brain className="w-4 h-4 text-primary" />
-          Smart Folders
-        </h3>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowCreateModal(true)}
-        >
-          <Plus className="w-4 h-4" />
-        </Button>
-      </div>
-
-      {folders.length === 0 ? (
-        <Card className="p-4 text-center border-dashed">
-          <div className="space-y-3">
-            <Sparkles className="w-8 h-8 text-muted-foreground mx-auto" />
-            <div>
-              <p className="font-medium">No Smart Folders Yet</p>
-              <p className="text-sm text-muted-foreground">
-                Let AI organize your documents automatically
-              </p>
-            </div>
-            <Button onClick={createSmartFoldersFromDocuments} size="sm" disabled={isOrganizing}>
-              {isOrganizing ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Organizing...
-                </>
-              ) : (
-                'Create Smart Folders'
-              )}
-            </Button>
-          </div>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {folders.map((folder, index) => (
-            <div
-              key={folder.id}
-              className={`flex items-center gap-2 w-full transition-all duration-200 ${dragOverFolderId === folder.id
-                ? 'bg-primary/20 rounded-lg ring-2 ring-primary ring-offset-2 scale-[1.02]'
-                : ''
-                }`}
-              onDrop={(e) => handleDrop(e, folder.id)}
-              onDragOver={(e) => handleDragOver(e, folder.id)}
-              onDragLeave={handleDragLeave}
-            >
-              <div className="flex flex-col gap-1 flex-shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 w-8 p-0 hover:bg-primary/10"
-                  onClick={() => moveFolderUp(folder.id)}
-                  disabled={index === 0}
-                  title="Move up"
-                >
-                  <ChevronUp className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 w-8 p-0 hover:bg-primary/10"
-                  onClick={() => moveFolderDown(folder.id)}
-                  disabled={index === folders.length - 1}
-                  title="Move down"
-                >
-                  <ChevronDown className="w-4 h-4" />
-                </Button>
-              </div>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={selectedFolder === folder.id ? 'default' : 'ghost'}
-                      className="justify-start h-auto p-3 flex-1 min-w-0"
-                      onClick={() => onFolderSelect(folder.id)}
-                    >
-                      <div className="flex items-center gap-2 w-full min-w-0">
-                        <div
-                          className="p-1 rounded flex-shrink-0"
-                          style={{
-                            backgroundColor: `${folder.color}20`,
-                            color: folder.color
-                          }}
-                        >
-                          {iconMap[folder.icon] || <Folder className="w-4 h-4" />}
-                        </div>
-                        <div className="text-left flex-1 min-w-0">
-                          <div className="font-medium truncate flex items-center gap-1">
-                            <span className="truncate">{folder.name}</span>
-                            {folder.is_smart && (
-                              <Brain className="w-3 h-3 text-primary flex-shrink-0" />
-                            )}
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate">
-                            {folder.document_count} documents
-                          </div>
-                        </div>
-                      </div>
-                    </Button>
-                  </TooltipTrigger>
-                  {folder.description && (
-                    <TooltipContent side="right" className="max-w-xs">
-                      <p className="text-sm">{folder.description}</p>
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              </TooltipProvider>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 flex-shrink-0"
-                    onClick={(e: any) => e.stopPropagation()}
-                  >
-                    <MoreHorizontal className="w-4 h-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" onClick={(e: any) => e.stopPropagation()}>
-                  <DropdownMenuItem
-                    onClick={(e: any) => {
-                      e.stopPropagation();
-                      setEditingFolder(folder);
-                    }}
-                  >
-                    <Edit2 className="w-4 h-4 mr-2" />
-                    Edit Folder
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={(e: any) => {
-                      e.stopPropagation();
-                      setDeleteConfirmId(folder.id);
-                    }}
-                    className="text-red-600"
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete Folder
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Divider before Recycle Bin */}
       <div className="border-t border-border my-2"></div>
 
@@ -713,43 +563,216 @@ export const SmartFolders: React.FC<SmartFoldersProps> = ({
         </div>
       </Button>
 
-      {/* AI Organization Status */}
-      <Card className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950">
-        <CardContent className="p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="w-4 h-4 text-blue-600" />
-            <span className="text-sm font-medium">AI Organization</span>
-          </div>
-          <p className="text-xs text-muted-foreground mb-3">
-            Documents are automatically organized based on content, type, and importance.
-          </p>
+      {/* Divider */}
+      <div className="border-t border-border my-2"></div>
+
+      {/* Smart Folders Section Header - Collapsible */}
+      <div
+        className="flex items-center justify-between cursor-pointer hover:bg-accent/50 rounded p-1 transition-colors select-none"
+        onClick={() => setFoldersExpanded(!isFoldersExpanded)}
+      >
+        <h3 className="font-semibold flex items-center gap-2 text-sm">
+          {isFoldersExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          <Brain className="w-4 h-4 text-primary" />
+          Smart Folders
+        </h3>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowCreateModal(true);
+          }}
+        >
+          <Plus className="w-4 h-4" />
+        </Button>
+      </div>
+
+      {isFoldersExpanded && (
+        folders.length === 0 ? (
+          <Card className="p-4 text-center border-dashed">
+            <div className="space-y-3">
+              <Sparkles className="w-8 h-8 text-muted-foreground mx-auto" />
+              <div>
+                <p className="font-medium">No Smart Folders Yet</p>
+                <p className="text-sm text-muted-foreground">
+                  Let AI organize your documents automatically
+                </p>
+              </div>
+              <Button onClick={(e) => { e.stopPropagation(); createSmartFoldersFromDocuments(); }} size="sm" disabled={isOrganizing}>
+                {isOrganizing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Organizing...
+                  </>
+                ) : (
+                  'Create Smart Folders'
+                )}
+              </Button>
+            </div>
+          </Card>
+        ) : (
           <div className="space-y-2">
-            <Button
-              variant="default"
-              size="sm"
-              className="w-full"
-              onClick={createSmartFoldersFromDocuments}
-              disabled={isOrganizing}
-            >
-              {isOrganizing ? (
-                <>
-                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                  Organizing...
-                </>
-              ) : (
-                <>
-                  <Brain className="w-3 h-3 mr-1" />
-                  Auto-Organize Documents
-                </>
-              )}
-            </Button>
-            <Button variant="outline" size="sm" className="w-full" onClick={() => setShowCustomizeModal(true)}>
-              <Settings className="w-3 h-3 mr-1" />
-              Customize Rules
-            </Button>
+            {folders.map((folder, index) => (
+              <div
+                key={folder.id}
+                className={`flex items-center gap-2 w-full transition-all duration-200 ${dragOverFolderId === folder.id
+                  ? 'bg-primary/20 rounded-lg ring-2 ring-primary ring-offset-2 scale-[1.02]'
+                  : ''
+                  }`}
+                onDrop={(e) => handleDrop(e, folder.id)}
+                onDragOver={(e) => handleDragOver(e, folder.id)}
+                onDragLeave={handleDragLeave}
+              >
+                <div className="flex flex-col gap-1 flex-shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0 hover:bg-primary/10"
+                    onClick={() => moveFolderUp(folder.id)}
+                    disabled={index === 0}
+                    title="Move up"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0 hover:bg-primary/10"
+                    onClick={() => moveFolderDown(folder.id)}
+                    disabled={index === folders.length - 1}
+                    title="Move down"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
+                </div>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant={selectedFolder === folder.id ? 'default' : 'ghost'}
+                        className="justify-start h-auto p-3 flex-1 min-w-0"
+                        onClick={() => onFolderSelect(folder.id)}
+                      >
+                        <div className="flex items-center gap-2 w-full min-w-0">
+                          <div
+                            className="p-1 rounded flex-shrink-0"
+                            style={{
+                              backgroundColor: `${folder.color}20`,
+                              color: folder.color
+                            }}
+                          >
+                            {iconMap[folder.icon] || <Folder className="w-4 h-4" />}
+                          </div>
+                          <div className="text-left flex-1 min-w-0">
+                            <div className="font-medium truncate flex items-center gap-1">
+                              <span className="truncate">{folder.name}</span>
+                              {folder.is_smart && (
+                                <Brain className="w-3 h-3 text-primary flex-shrink-0" />
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground truncate">
+                              {folder.document_count} documents
+                            </div>
+                          </div>
+                        </div>
+                      </Button>
+                    </TooltipTrigger>
+                    {folder.description && (
+                      <TooltipContent side="right" className="max-w-xs">
+                        <p className="text-sm">{folder.description}</p>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 flex-shrink-0"
+                      onClick={(e: any) => e.stopPropagation()}
+                    >
+                      <MoreHorizontal className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" onClick={(e: any) => e.stopPropagation()}>
+                    <DropdownMenuItem
+                      onClick={(e: any) => {
+                        e.stopPropagation();
+                        setEditingFolder(folder);
+                      }}
+                    >
+                      <Edit2 className="w-4 h-4 mr-2" />
+                      Edit Folder
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={(e: any) => {
+                        e.stopPropagation();
+                        setDeleteConfirmId(folder.id);
+                      }}
+                      className="text-red-600"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Folder
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ))}
           </div>
-        </CardContent>
-      </Card>
+        )
+      )}
+
+
+
+      {/* AI Organization Status */}
+      <div
+        className="flex items-center justify-between cursor-pointer hover:bg-accent/50 rounded p-1 transition-colors select-none mt-4"
+        onClick={() => setAIOrgExpanded(!isAIOrgExpanded)}
+      >
+        <h3 className="font-semibold flex items-center gap-2 text-sm">
+          {isAIOrgExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          <Sparkles className="w-4 h-4 text-primary" />
+          AI Organization
+        </h3>
+      </div>
+
+      {isAIOrgExpanded && (
+        <Card className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950 mt-2">
+          <CardContent className="p-3">
+            <p className="text-xs text-muted-foreground mb-3">
+              Documents are automatically organized based on content, type, and importance.
+            </p>
+            <div className="space-y-2">
+              <Button
+                variant="default"
+                size="sm"
+                className="w-full"
+                onClick={createSmartFoldersFromDocuments}
+                disabled={isOrganizing}
+              >
+                {isOrganizing ? (
+                  <>
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    Organizing...
+                  </>
+                ) : (
+                  <>
+                    <Brain className="w-3 h-3 mr-1" />
+                    Auto-Organize Documents
+                  </>
+                )}
+              </Button>
+              <Button variant="outline" size="sm" className="w-full" onClick={() => setShowCustomizeModal(true)}>
+                <Settings className="w-3 h-3 mr-1" />
+                Customize Rules
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Create Folder Modal */}
       <CreateFolderModal

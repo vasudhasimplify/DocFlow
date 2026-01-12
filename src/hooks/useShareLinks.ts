@@ -70,20 +70,43 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
       const currentLocalLinks = loadShareLinksFromStorage();
       setLinks(currentLocalLinks);
 
-      let query = supabase.from('external_shares').select('*');
-      if (resourceId) query = query.eq('resource_id', resourceId);
-      if (resourceType) query = query.eq('resource_type', resourceType);
-      const { data, error } = await query;
+      // Query both tables: external_shares (legacy) and share_links (new)
+      let allDbLinks: any[] = [];
 
-      if (!error && data && data.length > 0) {
-        // Merge database links with local links (prefer database)
+      // Query external_shares (legacy table)
+      let query1 = supabase.from('external_shares').select('*');
+      if (resourceId) query1 = query1.eq('resource_id', resourceId);
+      if (resourceType) query1 = query1.eq('resource_type', resourceType);
+      const { data: data1 } = await query1;
+      if (data1) allDbLinks.push(...data1);
+
+      // Query share_links (new table with use_count)
+      let query2 = supabase.from('share_links').select('*');
+      if (resourceId) query2 = query2.eq('resource_id', resourceId);
+      if (resourceType) query2 = query2.eq('resource_type', resourceType);
+      const { data: data2 } = await query2;
+      if (data2) {
+        console.log('📊 share_links from DB:', data2.map(l => ({ id: l.id, name: l.resource_name, use_count: l.use_count })));
+        allDbLinks.push(...data2);
+      }
+
+      if (allDbLinks.length > 0) {
+        // Merge database links with local links (prefer database for use_count)
         setLinks(prevLinks => {
-          const dbIds = new Set(data.map((d: any) => d.id));
+          const dbIds = new Set(allDbLinks.map((d: any) => d.id));
           const localOnly = prevLinks.filter(l => !dbIds.has(l.id));
-          return [...data, ...localOnly];
+
+          // For database links, ensure use_count is preserved
+          const mergedDbLinks = allDbLinks.map(dbLink => ({
+            ...dbLink,
+            use_count: dbLink.use_count || 0,
+            download_count: dbLink.download_count || 0
+          }));
+
+          return [...mergedDbLinks, ...localOnly];
         });
       }
-      // If error or no data, keep existing local links
+      // If no data, keep existing local links
     } catch (err) {
       console.warn('Failed to fetch from database, using local data:', err);
     } finally {
@@ -168,17 +191,57 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
         signed_url: signedUrl, // Direct signed URL that works anywhere
       };
 
-      // Try to save to database
+      // Save to database (share_links table - designed for public share links)
       try {
+        // Generate proper UUID for database
+        const dbId = crypto.randomUUID();
+
+        // Use share_links table - matches schema from 20251212_simplifydrive_migration.sql
+        // Columns: id, resource_type, resource_id, resource_name, token, short_code, permission, 
+        //          allow_download, allow_print, password_protected, password_hash, max_uses, 
+        //          use_count, expires_at, created_by, is_active, name, notify_on_access, require_email, signed_url
+        const dbRecord = {
+          id: dbId,
+          resource_type: newLink.resource_type,
+          resource_id: newLink.resource_id,
+          resource_name: newLink.resource_name,
+          token: newLink.token,                    // Main lookup field
+          short_code: newLink.token,               // Also use as short_code for /s/ routes
+          permission: newLink.permission,
+          allow_download: newLink.allow_download,
+          allow_print: newLink.allow_print,
+          password_protected: newLink.password_protected,
+          password_hash: newLink.password_hash,
+          max_uses: newLink.max_uses,
+          use_count: 0,
+          expires_at: newLink.expires_at,
+          created_by: user?.id,                    // Required field
+          is_active: true,
+          name: newLink.name,
+          notify_on_access: newLink.notify_on_access,
+          require_email: newLink.require_email,
+          signed_url: signedUrl,                   // Direct signed URL
+        };
+
+        console.log('📤 Saving share link to share_links table:', { token: newLink.token, resource_name: newLink.resource_name });
+
         const { error } = await supabase
-          .from('external_shares')
-          .insert(newLink);
+          .from('share_links')
+          .insert(dbRecord);
 
         if (error) {
-          console.warn('Database insert failed, saving locally only:', error);
+          console.error('❌ Database insert to share_links failed:', error);
+          toast({
+            title: 'Warning',
+            description: 'Link created locally. May not work in other browsers.',
+            variant: 'destructive'
+          });
+        } else {
+          console.log('✅ Share link saved to share_links successfully! Token:', newLink.token);
+          newLink.id = dbId;
         }
       } catch (dbErr) {
-        console.warn('Database unavailable, saving locally:', dbErr);
+        console.error('Database unavailable, saving locally:', dbErr);
       }
 
       // Always update local state
@@ -230,14 +293,26 @@ export function useShareLinks(resourceId?: string, resourceType?: string) {
           : link
       ));
 
-      // Try to update database
+      // Try to update database - update BOTH tables to ensure consistency
       try {
+        // Update share_links table (primary storage for new links)
+        await supabase
+          .from('share_links')
+          .update({ ...updates, updated_at: new Date().toISOString() })
+          .eq('id', linkId);
+        console.log('✅ Updated share_links table for', linkId);
+      } catch (dbErr) {
+        console.warn('share_links update failed:', dbErr);
+      }
+
+      try {
+        // Also update external_shares (legacy table)
         await supabase
           .from('external_shares')
           .update({ ...updates, updated_at: new Date().toISOString() })
           .eq('id', linkId);
       } catch (dbErr) {
-        console.warn('Database update failed:', dbErr);
+        console.warn('external_shares update failed:', dbErr);
       }
 
       toast({

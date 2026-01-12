@@ -45,78 +45,69 @@ export const SigningPage: React.FC = () => {
             setLoading(true);
             setError(null);
 
-            // Query Supabase directly using anon key (works from any browser)
-            // First, try to find the signer by access_token
-            const { data: signerResult, error: signerError } = await supabase
-                .from('signature_signers')
-                .select('*')
-                .eq('access_token', token)
-                .maybeSingle();
+            // Use backend API to verify token (bypasses RLS for cross-browser access)
+            console.log('🔐 Verifying signature token via backend API:', token);
+            const response = await fetch(`/api/signatures/verify-token/${token}`);
 
-            if (signerError) {
-                console.error('Error fetching signer:', signerError);
-                setError('Failed to load signing information');
+            if (!response.ok) {
+                const errorData = await response.json();
+                console.error('❌ Token verification failed:', errorData);
+
+                // Handle specific error codes
+                if (response.status === 404) {
+                    setError('Invalid or expired signing link');
+                } else if (response.status === 410) {
+                    setError('This signing link has expired');
+                } else {
+                    setError(errorData.detail || 'Failed to load signing information');
+                }
                 setLoading(false);
                 return;
             }
 
-            if (!signerResult) {
-                setError('Invalid or expired signing link');
-                setLoading(false);
-                return;
-            }
+            const data = await response.json();
+            console.log('✅ Token verified successfully:', data);
 
             // Check if already signed
-            if (signerResult.signed_at) {
-                setError(`You have already signed this document on ${new Date(signerResult.signed_at).toLocaleDateString()}`);
+            if (data.already_signed) {
+                const signedAt = data.signer.signed_at
+                    ? new Date(data.signer.signed_at).toLocaleDateString()
+                    : 'previously';
+                setError(`You have already signed this document on ${signedAt}`);
                 setLoading(false);
                 return;
             }
 
-            // Fetch the signature request details
-            const { data: requestResult, error: requestError } = await supabase
-                .from('signature_requests')
-                .select('*')
-                .eq('id', signerResult.request_id)
-                .maybeSingle();
-
-            if (requestError || !requestResult) {
-                console.error('Error fetching request:', requestError);
-                setError('Signature request not found');
-                setLoading(false);
-                return;
-            }
-
-            // Check if request is expired
-            if (requestResult.expires_at) {
-                const expiresAt = new Date(requestResult.expires_at);
-                if (expiresAt < new Date()) {
-                    setError('This signing link has expired');
-                    setLoading(false);
-                    return;
-                }
-            }
-
-            // Set signer and request data
+            // Set signer and request data from backend response
             setSignerData({
-                ...signerResult,
-                request_id: signerResult.request_id
+                id: data.signer.id,
+                email: data.signer.email,
+                name: data.signer.name,
+                role: data.signer.role,
+                status: data.signer.status,
+                request_id: data.signer.request_id
             });
-            setEmail(signerResult.email); // Pre-fill email
-            setRequestData(requestResult);
+            setEmail(data.signer.email); // Pre-fill email
+            setRequestData({
+                id: data.request.id,
+                title: data.request.title,
+                status: data.request.status,
+                document_name: data.request.document_name,
+                message: data.request.message
+            });
             setLoading(false);
 
             // Check if user is already authenticated
             const { data: userData } = await supabase.auth.getUser();
             if (userData.user) {
                 // Verify logged-in user's email matches signer email
-                if (userData.user.email?.toLowerCase() === signerResult.email.toLowerCase()) {
+                if (userData.user.email?.toLowerCase() === data.signer.email.toLowerCase()) {
                     // Email matches - allow access
-                    navigate('/documents?feature=signatures&requestId=' + requestResult.id);
+                    navigate('/documents?feature=signatures&requestId=' + data.request.id);
                 } else {
                     // Email doesn't match - set current user but show mismatch error
                     setCurrentUser(userData.user);
-                    setAuthError(`This document was sent to ${signerResult.email}. You are currently signed in as ${userData.user.email}. Please sign out and sign in with the correct email.`);
+                    setAuthError(`This document was sent to ${data.signer.email}. You are currently signed in as ${userData.user.email}. Please sign out and sign in with the correct email.`);
                 }
             }
         } catch (err) {
@@ -157,8 +148,9 @@ export const SigningPage: React.FC = () => {
     };
 
     const handleCreateAccount = () => {
-        // Navigate to sign up page with email pre-filled
-        navigate(`/signup?email=${encodeURIComponent(email)}&returnTo=/sign/${token}`);
+        // Navigate to auth page with signup tab active and email pre-filled
+        // The Auth page handles both sign-in and sign-up
+        navigate(`/auth?email=${encodeURIComponent(email)}&mode=signup&returnTo=/sign/${token}`);
     };
 
     if (loading) {

@@ -308,6 +308,11 @@ class MigrationEngine:
     
     async def _transfer_single_async(self, session: aiohttp.ClientSession, item: Dict[str, Any], user_id: str, delete_after: bool = False, identity_mappings: List[Dict] = None):
         """Transfer a single file using async HTTP with optional permission migration."""
+        # CRITICAL: Check cancellation IMMEDIATELY before starting any transfer
+        if self.is_cancelled:
+            logger.info(f"⏹️ Skipping {item['source_name']} - migration cancelled")
+            return
+        
         file_id = item['source_item_id']
         file_name = item['source_name']
         file_start = time.time()
@@ -364,6 +369,11 @@ class MigrationEngine:
                     raise Exception(f"Download failed: async={async_err}, sync={sync_err}")
             
             download_time = time.time() - file_start
+            
+            # Check cancellation after download, before upload
+            if self.is_cancelled:
+                logger.info(f"⏹️ Cancelled after download, before upload: {file_name}")
+                return
             
             # Upload to Supabase storage
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
@@ -727,22 +737,22 @@ class MigrationEngine:
 
 
     async def _monitor_cancellation(self):
-        """Periodically check if job is cancelled."""
+        """Periodically check if job is cancelled or paused - checks every 0.5 seconds for fast response."""
         while not self.is_cancelled:
             try:
                 # Check DB status
                 result = self.supabase.table('migration_jobs').select('status').eq('id', self.job_id).single().execute()
                 status = result.data.get('status')
                 
-                if status in ['cancelled', 'failed']:
+                if status in ['cancelled', 'paused', 'failed']:
                      self.is_cancelled = True
-                     logger.warning(f"🛑 Job {status.upper()} detected! Stopping migration...")
+                     logger.warning(f"🛑 Job {status.upper()} detected! Stopping migration IMMEDIATELY...")
                      return
                 
-                await asyncio.sleep(2)  # Check every 2 seconds
+                await asyncio.sleep(0.5)  # Check every 0.5 seconds for FAST cancellation response
             except Exception as e:
                 logger.warning(f"⚠️ Failed to check cancellation status: {e}")
-                await asyncio.sleep(5)
+                await asyncio.sleep(1)
 
 
 async def start_migration_job(job_id: str):

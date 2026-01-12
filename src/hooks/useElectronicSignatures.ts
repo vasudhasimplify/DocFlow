@@ -540,11 +540,23 @@ export const useElectronicSignatures = () => {
         // Not all signed - notify next signer for sequential signing
         try {
           console.log('📧 Notifying next signer in sequence...');
-          await fetch('/api/signatures/notify-next-signer', {
+          const notifyResponse = await fetch('/api/signatures/notify-next-signer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ request_id: requestId }),
           });
+
+          if (notifyResponse.ok) {
+            const notifyResult = await notifyResponse.json();
+            console.log('📧 Notify response:', notifyResult);
+            if (notifyResult.sent) {
+              console.log(`✅ Email sent to next signer: ${notifyResult.next_signer_email}`);
+            } else {
+              console.log('ℹ️ No email sent:', notifyResult.message);
+            }
+          } else {
+            console.error('❌ Notify API returned error:', notifyResponse.status);
+          }
         } catch (notifyError) {
           console.error('Error notifying next signer:', notifyError);
           // Non-blocking - continue even if notification fails

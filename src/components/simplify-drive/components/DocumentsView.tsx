@@ -5,7 +5,7 @@ import { SmartFolders } from '@/components/document-manager/SmartFolders';
 import { AIRecommendations } from '@/components/document-manager/AIRecommendations';
 import { MediaBrowser } from '../MediaBrowser';
 import { FileText } from 'lucide-react';
-import { ShareLinksDashboard } from '@/components/sharing/ShareLinksDashboard';
+import { SharedDocsPanel } from '@/components/sharing/SharedDocsPanel';
 import type { Document, ViewMode } from '../types';
 
 interface DocumentsViewProps {
@@ -16,6 +16,7 @@ interface DocumentsViewProps {
   onFolderSelect: (folderId: string) => void;
   onDocumentClick?: (doc: Document) => void;
   onRefresh?: () => void;
+  onNavigateToShare?: () => void;
 }
 
 export function DocumentsView({
@@ -26,6 +27,7 @@ export function DocumentsView({
   onFolderSelect,
   onDocumentClick,
   onRefresh,
+  onNavigateToShare,
 }: DocumentsViewProps) {
   console.log('📄 DocumentsView: documents count:', documents.length, 'selectedFolder:', selectedFolder);
 
@@ -46,9 +48,9 @@ export function DocumentsView({
           <div className="p-4">
             <div className="mb-4">
               <h2 className="text-2xl font-bold tracking-tight">Shared Documents</h2>
-              <p className="text-muted-foreground">Manage documents shared by you and with you</p>
+              <p className="text-muted-foreground">Documents shared via Guest Sharing and E-Signatures</p>
             </div>
-            <ShareLinksDashboard />
+            <SharedDocsPanel />
           </div>
         ) : selectedFolder === 'media-browser' ? (
           <MediaBrowser
@@ -76,6 +78,7 @@ export function DocumentsView({
               if (fullDoc) onDocumentClick?.(fullDoc);
             }}
             onRefresh={onRefresh}
+            onNavigateToShare={onNavigateToShare}
           />
         ) : (
           <DocumentList
@@ -85,6 +88,7 @@ export function DocumentsView({
               if (fullDoc) onDocumentClick?.(fullDoc);
             }}
             onRefresh={onRefresh}
+            onNavigateToShare={onNavigateToShare}
           />
         )}
       </main>

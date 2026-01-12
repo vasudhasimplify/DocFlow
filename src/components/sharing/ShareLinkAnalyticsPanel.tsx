@@ -164,14 +164,18 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
   // State for backend data (device breakdown and view counts)
   const [backendDeviceData, setBackendDeviceData] = React.useState<{ Desktop: number, Mobile: number, Tablet: number } | null>(null);
   const [backendStats, setBackendStats] = React.useState<{ total_views: number, downloads: number, unique_visitors: number } | null>(null);
+  const [dbUseCount, setDbUseCount] = React.useState<number | null>(null);
 
   // Fetch device breakdown and stats from backend on mount and periodically
   React.useEffect(() => {
     const fetchBackendData = async () => {
       try {
-        const response = await fetch(`/api/shares/access-logs-public/${link.id}`);
+        // Use full backend URL
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+        const response = await fetch(`${backendUrl}/api/shares/access-logs-public/${link.id}`);
         if (response.ok) {
           const data = await response.json();
+          console.log('📊 Analytics data from backend:', data);
           if (data.device_breakdown) {
             setBackendDeviceData(data.device_breakdown);
           }
@@ -185,6 +189,23 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
         }
       } catch (err) {
         console.log('Failed to fetch backend data:', err);
+      }
+
+      // Also fetch directly from Supabase as backup
+      try {
+        const { supabase } = await import('@/integrations/supabase/client');
+        const { data: shareData } = await supabase
+          .from('share_links')
+          .select('use_count, download_count')
+          .eq('id', link.id)
+          .single();
+
+        if (shareData) {
+          console.log('📊 Direct DB data:', shareData);
+          setDbUseCount(shareData.use_count || 0);
+        }
+      } catch (dbErr) {
+        console.log('Direct DB fetch failed:', dbErr);
       }
     };
 
@@ -243,9 +264,9 @@ export const ShareLinkAnalyticsPanel: React.FC<ShareLinkAnalyticsPanelProps> = (
 
   // Combine local and backend data for the most accurate stats
   const analytics = link.analytics || {
-    // Use the higher of backend or local view count (in case of sync issues)
-    total_views: Math.max(backendStats?.total_views || 0, link.use_count || 0),
-    unique_visitors: Math.max(backendStats?.unique_visitors || 0, link.unique_visitor_ids?.length || (link.use_count > 0 ? 1 : 0)),
+    // Use the highest of: backend API, direct DB query, or link prop (in case of sync issues)
+    total_views: Math.max(backendStats?.total_views || 0, dbUseCount || 0, link.use_count || 0),
+    unique_visitors: Math.max(backendStats?.unique_visitors || 0, link.unique_visitor_ids?.length || ((dbUseCount || link.use_count) > 0 ? 1 : 0)),
     download_count: Math.max(backendStats?.downloads || 0, link.download_count || 0),
     avg_view_duration_seconds: 120,
     views_by_date: [],

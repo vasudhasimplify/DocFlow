@@ -365,3 +365,364 @@
 | Date | Version | Changes |
 |------|---------|---------|
 | 2026-01-09 | 1.0 | Initial test cases created |
+| 2026-01-11 | 1.1 | Added Shruti's test cases for sharing, metadata, e-signature, and audit modules |
+
+---
+
+# Shruti Test Cases
+
+## 6. Share Links Module
+
+### 6.1 Create Share Link
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| SL-CR-001 | Open Quick Share dialog | 1. Right-click document<br>2. Click "Share" or share icon | Quick Share dialog opens | ☐ |
+| SL-CR-002 | Create basic share link | 1. Open Quick Share<br>2. Click "Create Link" | Share link generated with token | ☐ |
+| SL-CR-003 | Create link with View Only permission | 1. Select "View Only" permission<br>2. Create link | Link created with view-only access | ☐ |
+| SL-CR-004 | Create link with Download permission | 1. Select "Can Download" permission<br>2. Create link | Link allows file download | ☐ |
+| SL-CR-005 | Create link with Edit permission | 1. Select "Can Edit" permission<br>2. Create link | Link allows document editing | ☐ |
+| SL-CR-006 | Create password-protected link | 1. Enable "Password Protection"<br>2. Enter password<br>3. Create link | Link requires password to access | ☐ |
+| SL-CR-007 | Create link with expiry date | 1. Set expiration date/time<br>2. Create link | Link expires at specified time | ☐ |
+| SL-CR-008 | Create link with max views limit | 1. Set "Max Views" limit<br>2. Create link | Link disables after max views reached | ☐ |
+| SL-CR-009 | Copy link to clipboard | 1. Create link<br>2. Click "Copy" button | Link copied, toast shown | ☐ |
+| SL-CR-010 | Generate QR code for link | 1. Create link<br>2. Click QR code icon | QR code displayed | ☐ |
+
+### 6.2 Share Links Dashboard
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| SL-DS-001 | View Share Links dashboard | 1. Navigate to Share Links tab | Dashboard with stats and links displayed | ☐ |
+| SL-DS-002 | View total links count | 1. Check statistics cards | Active links count shown | ☐ |
+| SL-DS-003 | View total views count | 1. Check statistics | Total views across all links displayed | ☐ |
+| SL-DS-004 | Filter by Active links | 1. Click "Active" tab | Only active links shown | ☐ |
+| SL-DS-005 | Filter by Expired links | 1. Click "Expired" tab | Only expired links shown | ☐ |
+| SL-DS-006 | Filter by Revoked links | 1. Click "Revoked" tab | Only revoked links shown | ☐ |
+| SL-DS-007 | Search links by name | 1. Enter search term | Matching links filtered | ☐ |
+| SL-DS-008 | View link analytics | 1. Click on a link | Analytics panel opens with views, devices | ☐ |
+| SL-DS-009 | Revoke share link | 1. Click revoke button<br>2. Confirm | Link marked as revoked, access disabled | ☐ |
+| SL-DS-010 | Reactivate revoked link | 1. Find revoked link<br>2. Click reactivate | Link becomes active again | ☐ |
+
+### 6.3 Share Link Settings
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| SL-ST-001 | Change permission level | 1. Open link settings<br>2. Change from Edit to View<br>3. Save | Permission updated, takes effect | ☐ |
+| SL-ST-002 | Update expiry date | 1. Edit expiration<br>2. Set new date<br>3. Save | New expiry applied | ☐ |
+| SL-ST-003 | Enable/disable download | 1. Toggle "Allow Download"<br>2. Save | Download permission changed | ☐ |
+| SL-ST-004 | Enable access notifications | 1. Enable "Notify on Access"<br>2. Save | Owner gets notified when accessed | ☐ |
+| SL-ST-005 | Update link name | 1. Change link name<br>2. Save | Name updated in dashboard | ☐ |
+
+### 6.4 Share Link Analytics
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| SL-AN-001 | View total views | 1. Open analytics panel | Total views count displayed | ☐ |
+| SL-AN-002 | View unique visitors | 1. Check analytics | Unique visitor count shown | ☐ |
+| SL-AN-003 | View device breakdown | 1. Check device chart | Desktop/Mobile/Tablet breakdown shown | ☐ |
+| SL-AN-004 | View download count | 1. Check analytics | Number of downloads displayed | ☐ |
+| SL-AN-005 | View access history | 1. Scroll to access history | Recent accesses with timestamps shown | ☐ |
+| SL-AN-006 | Real-time analytics update | 1. Access link from another device<br>2. Check analytics | View count increments | ☐ |
+
+---
+
+## 7. Guest Sharing Module
+
+### 7.1 Create Guest Share
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| GS-CR-001 | Open guest share dialog | 1. Click "Share with Guest" | Guest sharing dialog opens | ☐ |
+| GS-CR-002 | Enter guest email | 1. Enter guest's email address | Email validated | ☐ |
+| GS-CR-003 | Enter guest name | 1. Enter guest's name | Name field populated | ☐ |
+| GS-CR-004 | Select permission level | 1. Choose View/Comment/Edit | Permission selected | ☐ |
+| GS-CR-005 | Add personal message | 1. Enter custom message | Message saved for email | ☐ |
+| GS-CR-006 | Send guest invitation | 1. Click "Send Invitation" | Email sent to guest | ☐ |
+
+### 7.2 Guest Access
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| GS-AC-001 | Guest opens invitation link | 1. Click link from email | Guest access page loads | ☐ |
+| GS-AC-002 | Guest enters email (if required) | 1. Enter email to verify | Access granted after verification | ☐ |
+| GS-AC-003 | Guest views document | 1. Access with view permission | Document displayed read-only | ☐ |
+| GS-AC-004 | Guest downloads document | 1. Click download (if allowed) | Document downloaded | ☐ |
+| GS-AC-005 | Guest edits document | 1. Access with edit permission<br>2. Make changes | Edits saved | ☐ |
+| GS-AC-006 | Access denied for revoked share | 1. Try accessing revoked link | Access denied message shown | ☐ |
+| GS-AC-007 | Access denied for expired share | 1. Try accessing expired link | Expired message shown | ☐ |
+
+### 7.3 Guest Share Management
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| GS-MG-001 | View all guest shares | 1. Navigate to Guest Sharing tab | All guest shares listed | ☐ |
+| GS-MG-002 | Resend invitation email | 1. Click resend on pending share | Email resent to guest | ☐ |
+| GS-MG-003 | Revoke guest access | 1. Click revoke<br>2. Confirm | Guest access removed | ☐ |
+| GS-MG-004 | Delete guest share | 1. Click delete<br>2. Confirm | Share record removed | ☐ |
+| GS-MG-005 | View share status | 1. Check status badge | Pending/Accepted/Revoked shown | ☐ |
+
+---
+
+## 8. Access Rules Module
+
+### 8.1 Access Rules Dashboard
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| AR-DS-001 | View access rules tab | 1. Navigate to Access Rules | Rules list displayed | ☐ |
+| AR-DS-002 | View active rules count | 1. Check statistics | Active rules count shown | ☐ |
+| AR-DS-003 | Filter by rule type | 1. Select rule type filter | Rules filtered | ☐ |
+
+### 8.2 Create Access Rules
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| AR-CR-001 | Open create rule dialog | 1. Click "+ Create" button | Create rule dialog opens with Step 1 form | ☐ |
+| AR-CR-002 | Enter rule name | 1. Enter name in "Rule Name" field | Name accepted (required field) | ☐ |
+| AR-CR-003 | Enter rule description | 1. Enter description text | Description saved | ☐ |
+| AR-CR-004 | Select file types to match | 1. Expand "Matching Criteria"\<br>2. Select file types (.pdf, .docx, .xlsx, etc.) | Selected types highlighted | ☐ |
+| AR-CR-005 | Add name pattern (Regex) | 1. Enter pattern like "confidential"\<br>2. Click "Add" | Pattern added to list | ☐ |
+| AR-CR-006 | Add content keywords | 1. Enter keywords like "SSN, credit card"\<br>2. Click "Add" | Keywords added for content matching | ☐ |
+| AR-CR-007 | Enable Restrict Download | 1. Expand "Access Restrictions"\<br>2. Toggle "Restrict Download" ON | Download restriction enabled | ☐ |
+| AR-CR-008 | Enable Restrict Print | 1. Toggle "Restrict Print" ON | Print restriction enabled | ☐ |
+| AR-CR-009 | Enable Restrict Sharing | 1. Toggle "Restrict Sharing" ON | Internal sharing restriction enabled | ☐ |
+| AR-CR-010 | Enable No External Share | 1. Toggle "No External Share" ON | External/guest sharing blocked | ☐ |
+| AR-CR-011 | Create rule successfully | 1. Fill required fields\<br>2. Click "Create Rule" | Rule created and appears in list | ☐ |
+| AR-CR-012 | Cancel rule creation | 1. Click "Cancel" | Dialog closes without saving | ☐ |
+
+### 8.3 Manage Access Rules
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| AR-MG-001 | Enable/disable rule | 1. Toggle rule status | Rule activation changes | ☐ |
+| AR-MG-002 | Edit existing rule | 1. Click edit<br>2. Modify<br>3. Save | Rule updated | ☐ |
+| AR-MG-003 | Delete access rule | 1. Click delete<br>2. Confirm | Rule removed | ☐ |
+| AR-MG-004 | View rule violations | 1. Check violations log | Access attempts blocked by rule shown | ☐ |
+
+---
+
+## 9. Custom Metadata Module
+
+### 9.1 Create Metadata Field
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| MT-CR-001 | Open create field dialog | 1. Click "+ Add Field" button | Create Metadata Field dialog opens | ☐ |
+| MT-CR-002 | Enter field label | 1. Enter label (e.g., "Client Name") | Label field populated (required) | ☐ |
+| MT-CR-003 | Enter field description | 1. Enter optional description | Description saved | ☐ |
+| MT-CR-004 | Create field successfully | 1. Click "Create Field" | Field created and appears in list | ☐ |
+
+### 9.2 Add Documents to Field
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| MT-AD-001 | Open add documents dialog | 1. Click "..." menu on field<br>2. Select "Add Documents" | Add Documents to Field dialog opens | ☐ |
+| MT-AD-002 | Search documents | 1. Type in search box | Documents filtered by name | ☐ |
+| MT-AD-003 | Select documents | 1. Click checkbox next to documents | Documents selected | ☐ |
+| MT-AD-004 | Add documents to field | 1. Click "Add to Field" | Documents assigned to metadata field | ☐ |
+
+### 9.3 Edit Metadata Field
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| MT-ED-001 | Open edit dialog | 1. Click "..." menu<br>2. Select "Edit" | Edit field dialog opens | ☐ |
+| MT-ED-002 | Update field label | 1. Change label text<br>2. Save | Label updated | ☐ |
+| MT-ED-003 | Update description | 1. Change description<br>2. Save | Description updated | ☐ |
+
+### 9.4 Add Metadata from Document Tab
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| MT-DT-001 | Open document properties | 1. Select document<br>2. Click Metadata button | Properties panel opens | ☐ |
+| MT-DT-002 | Add metadata to document | 1. Select metadata field<br>2. Enter value | Metadata assigned to document | ☐ |
+
+---
+
+## 10. Watermarks Module
+
+### 10.1 Watermark Configuration
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| WM-CF-001 | Access watermark settings | 1. Navigate to Watermarks tab | Watermark configuration displayed | ☐ |
+| WM-CF-002 | Enable text watermark | 1. Toggle "Text Watermark" on<br>2. Enter text | Text watermark enabled | ☐ |
+| WM-CF-003 | Set watermark position | 1. Select position (center/corner) | Position applied | ☐ |
+| WM-CF-004 | Set watermark opacity | 1. Adjust opacity slider | Opacity changed | ☐ |
+| WM-CF-005 | Set watermark color | 1. Select color | Color applied | ☐ |
+| WM-CF-006 | Enable diagonal watermark | 1. Toggle diagonal option | Watermark rotates 45 degrees | ☐ |
+
+### 10.2 Dynamic Watermarks
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| WM-DY-001 | Add user email to watermark | 1. Include {email} variable | Current user's email shown | ☐ |
+| WM-DY-002 | Add date to watermark | 1. Include {date} variable | Current date shown | ☐ |
+| WM-DY-003 | Add time to watermark | 1. Include {time} variable | Access time shown | ☐ |
+| WM-DY-004 | Add document name | 1. Include {filename} variable | File name shown | ☐ |
+
+### 10.3 Watermark Application
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| WM-AP-001 | Preview watermark | 1. Configure watermark<br>2. Click preview | Watermark shown on sample | ☐ |
+| WM-AP-002 | Apply to share link | 1. Enable watermark for link | Guests see watermarked document | ☐ |
+| WM-AP-003 | Watermark on download | 1. Enable watermark on download | Downloaded PDF has watermark | ☐ |
+| WM-AP-004 | Watermark on print | 1. Enable watermark on print | Printed document has watermark | ☐ |
+
+---
+
+## 11. E-Signature Module
+
+### 11.1 Request Signature
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| ES-RQ-001 | Open signature request dialog | 1. Click "Request Signature" | E-sign dialog opens | ☐ |
+| ES-RQ-002 | Add signer by email | 1. Enter signer email<br>2. Add to list | Signer added | ☐ |
+| ES-RQ-003 | Add multiple signers | 1. Add 2+ signer emails | Multiple signers listed with order | ☐ |
+| ES-RQ-004 | Set signing order | 1. Enable sequential signing<br>2. Arrange order | Order configured | ☐ |
+| ES-RQ-005 | Add optional message | 1. Enter message for signer | Message saved | ☐ |
+| ES-RQ-006 | Send signature request | 1. Click "Send Request" | Email sent to signer(s) | ☐ |
+
+### 11.2 Signing Process
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| ES-SG-001 | Signer opens signing link | 1. Click link from email | Signing page loads | ☐ |
+| ES-SG-002 | View document before signing | 1. Review document content | Document displayed | ☐ |
+| ES-SG-003 | Draw signature | 1. Use mouse/touch to draw | Signature captured | ☐ |
+| ES-SG-004 | Type signature | 1. Type name<br>2. Select font | Typed signature generated | ☐ |
+| ES-SG-005 | Upload signature image | 1. Upload signature file | Image signature added | ☐ |
+| ES-SG-006 | Place signature on document | 1. Position signature | Signature placed at location | ☐ |
+| ES-SG-007 | Add initials | 1. Draw/type initials | Initials added | ☐ |
+| ES-SG-008 | Add date stamp | 1. Add date field | Date auto-filled | ☐ |
+| ES-SG-009 | Complete signing | 1. Click "Finish Signing" | Document signed and saved | ☐ |
+| ES-SG-010 | Decline to sign | 1. Click "Decline"<br>2. Enter reason | Request declined, owner notified | ☐ |
+
+### 11.3 Signature Management
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| ES-MG-001 | View pending signatures | 1. Navigate to E-Sign tab<br>2. Check pending | Awaiting signatures listed | ☐ |
+| ES-MG-002 | View completed signatures | 1. Check completed tab | Signed documents listed | ☐ |
+| ES-MG-003 | Send reminder | 1. Click "Send Reminder" | Reminder email sent | ☐ |
+| ES-MG-004 | Cancel signature request | 1. Click cancel<br>2. Confirm | Request cancelled | ☐ |
+| ES-MG-005 | Download signed document | 1. Click download | Signed PDF downloaded | ☐ |
+| ES-MG-006 | View signature certificate | 1. Click "View Certificate" | Certificate with timestamps shown | ☐ |
+
+---
+
+## 12. Audit Trail Module
+
+### 12.1 Audit Dashboard
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| AU-DS-001 | Access audit trail | 1. Navigate to Audit Trail tab | Audit events displayed | ☐ |
+| AU-DS-002 | View event timeline | 1. Check timeline view | Events shown chronologically | ☐ |
+| AU-DS-003 | View event statistics | 1. Check stats cards | Event counts by type shown | ☐ |
+
+### 12.2 Filter and Search
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| AU-FL-001 | Filter by event type | 1. Select event type (view/edit/share) | Events filtered | ☐ |
+| AU-FL-002 | Filter by date range | 1. Select date range | Events filtered by date | ☐ |
+| AU-FL-003 | Filter by user | 1. Select specific user | Only user's events shown | ☐ |
+| AU-FL-004 | Filter by document | 1. Select document | Document's events shown | ☐ |
+| AU-FL-005 | Search events | 1. Enter search term | Matching events displayed | ☐ |
+
+### 12.3 Event Details
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| AU-EV-001 | View event details | 1. Click on event | Details panel opens | ☐ |
+| AU-EV-002 | View user info | 1. Check event details | User email, name shown | ☐ |
+| AU-EV-003 | View IP address | 1. Check event details | IP address logged | ☐ |
+| AU-EV-004 | View timestamp | 1. Check event | Exact timestamp shown | ☐ |
+| AU-EV-005 | View document link | 1. Click document name | Navigate to document | ☐ |
+
+### 12.4 Export Audit
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| AU-EX-001 | Export as CSV | 1. Click "Export CSV" | CSV file downloaded | ☐ |
+| AU-EX-002 | Export as PDF report | 1. Click "Export PDF" | PDF report generated | ☐ |
+| AU-EX-003 | Export filtered results | 1. Apply filters<br>2. Export | Only filtered events exported | ☐ |
+
+---
+
+## 13. Migration Module (Extended)
+
+### 13.1 Connect Cloud Storage
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| MG-CN-001 | Connect Google Drive | 1. Click "Connect Google"<br>2. Sign in<br>3. Grant permissions | Google Drive connected | ☐ |
+| MG-CN-002 | Connect OneDrive | 1. Click "Connect OneDrive"<br>2. Sign in | OneDrive connected | ☐ |
+| MG-CN-003 | Disconnect account | 1. Click disconnect | Account removed | ☐ |
+| MG-CN-004 | View connected accounts | 1. Check credentials panel | Connected accounts listed | ☐ |
+
+### 13.2 Create Migration Job
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| MG-JB-001 | Create migration job | 1. Click "Create Migration"<br>2. Fill details | Job created | ☐ |
+| MG-JB-002 | Select source folder | 1. Browse folders<br>2. Select | Folder selected | ☐ |
+| MG-JB-003 | Enable "Delete after migration" | 1. Toggle delete option | Files will be deleted from source | ☐ |
+| MG-JB-004 | Set job name | 1. Enter descriptive name | Name saved | ☐ |
+| MG-JB-005 | Start migration | 1. Click "Start" | Migration begins | ☐ |
+
+### 13.3 Monitor Migration
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| MG-MN-001 | View migration progress | 1. Check job card | Progress bar and percentage shown | ☐ |
+| MG-MN-002 | View file count | 1. Check job details | Files processed/total shown | ☐ |
+| MG-MN-003 | View transfer speed | 1. Check metrics | KB/s or MB/s displayed | ☐ |
+| MG-MN-004 | View completed files | 1. Expand job details | List of migrated files | ☐ |
+| MG-MN-005 | View failed files | 1. Check failures tab | Failed files with error reasons | ☐ |
+| MG-MN-006 | Pause migration | 1. Click pause button | Migration paused | ☐ |
+| MG-MN-007 | Resume migration | 1. Click resume button | Migration continues | ☐ |
+| MG-MN-008 | Cancel migration | 1. Click cancel<br>2. Confirm | Migration stopped | ☐ |
+
+### 13.4 Identity Mapping
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| MG-ID-001 | View identity mappings | 1. Check Identity Mapping panel | Mappings listed | ☐ |
+| MG-ID-002 | Create identity mapping | 1. Enter source email<br>2. Select target user<br>3. Save | Mapping created | ☐ |
+| MG-ID-003 | Import mappings from CSV | 1. Click "Import CSV"<br>2. Upload file | Mappings imported | ☐ |
+| MG-ID-004 | Export mappings | 1. Click "Export" | CSV downloaded | ☐ |
+| MG-ID-005 | Delete mapping | 1. Click delete<br>2. Confirm | Mapping removed | ☐ |
+| MG-ID-006 | Verify mapping | 1. Click verify | Mapping marked as verified | ☐ |
+
+### 13.5 Permission Transfer Log
+
+| Test ID | Test Case | Steps | Expected Result | Status |
+|---------|-----------|-------|-----------------|--------|
+| MG-PT-001 | View permission transfer log | 1. Navigate to log panel | Permission transfers listed | ☐ |
+| MG-PT-002 | Filter by status | 1. Select success/failed | Log filtered | ☐ |
+| MG-PT-003 | View transfer details | 1. Click on log entry | Details shown | ☐ |
+
+---
+
+## Test Execution Summary (Updated)
+
+| Module | Total Tests | Passed | Failed | Blocked | Not Run |
+|--------|-------------|--------|--------|---------|---------|
+| Documents | 54 | | | | |
+| Compare | 21 | | | | |
+| Compliance | 36 | | | | |
+| Processing | 15 | | | | |
+| Migration (Basic) | 10 | | | | |
+| **Share Links** | 25 | | | | |
+| **Guest Sharing** | 12 | | | | |
+| **Access Rules** | 12 | | | | |
+| **Metadata** | 13 | | | | |
+| **Watermarks** | 12 | | | | |
+| **E-Signature** | 19 | | | | |
+| **Audit Trail** | 14 | | | | |
+| **Migration (Extended)** | 22 | | | | |
+| **TOTAL** | **265** | | | | |
+

@@ -63,16 +63,43 @@ async def send_signature_request_emails(body: SendSignatureEmailsRequest):
         
         all_signers = signers_response.data
         
-        # For sequential signing, only include the first pending signer
+        # Log all signers for debugging
+        print(f"📋 All signers for request {body.request_id}:")
+        for s in all_signers:
+            print(f"  - {s.get('email')}: order={s.get('signing_order')}, status={s.get('status')}, role={s.get('role')}")
+        
+        # For sequential signing, only include the first signer who needs notification
         if is_sequential:
-            # Find signers who haven't been sent an email yet and haven't signed
-            pending_signers = [s for s in all_signers if s.get('status') in ['pending', None] and s.get('role') in ['signer', 'approver']]
-            signers_to_email = pending_signers[:1] if pending_signers else []
-            print(f"🔄 Sequential signing: sending to first pending signer only ({len(signers_to_email)} signer)")
+            # Find the first signer who:
+            # 1. Has role 'signer' or 'approver'
+            # 2. Has NOT signed yet (status != 'signed')
+            # 3. Has NOT been sent email yet (status not 'sent')
+            signers_to_email = []
+            for signer in all_signers:
+                role = signer.get('role', 'signer')
+                status = signer.get('status', 'pending')
+                
+                if role not in ['signer', 'approver']:
+                    continue  # Skip non-signing roles
+                
+                if status == 'signed':
+                    continue  # Already signed, skip
+                
+                if status == 'sent':
+                    # Already sent email, don't send again but stop here for sequential
+                    print(f"🔄 Sequential: {signer.get('email')} already notified (status=sent)")
+                    break
+                
+                # This signer needs email (status is 'pending' or None)
+                signers_to_email = [signer]
+                print(f"🔄 Sequential signing: will send to {signer.get('email')} (order={signer.get('signing_order')})")
+                break  # Only the first pending signer for sequential
         else:
-            # Parallel signing: send to all signers who haven't signed yet
-            signers_to_email = [s for s in all_signers if s.get('status') != 'signed']
-            print(f"⏩ Parallel signing: sending to all {len(signers_to_email)} pending signers")
+            # Parallel signing: send to all signers who haven't signed and haven't been notified
+            signers_to_email = [s for s in all_signers 
+                               if s.get('status') not in ['signed', 'sent'] 
+                               and s.get('role', 'signer') in ['signer', 'approver']]
+            print(f"⏩ Parallel signing: sending to {len(signers_to_email)} pending signers")
         
         # Get user details (sender)
         user_response = get_supabase().auth.admin.get_user_by_id(request_data['user_id'])
@@ -174,12 +201,38 @@ async def notify_next_signer(body: NotifyNextSignerRequest):
         if not signers_response.data:
             return {"success": True, "message": "No signers found", "sent": False}
         
-        # Find the next signer who needs to sign (pending status, signer/approver role)
+        # Log all signers for debugging
+        for s in signers_response.data:
+            print(f"  📋 Signer: {s.get('email')}, order={s.get('signing_order')}, status={s.get('status')}, role={s.get('role')}")
+        
+        # Find the next signer who needs to sign and hasn't been notified yet
+        # For sequential, we notify the first signer who:
+        # 1. Has role 'signer' or 'approver'
+        # 2. Has NOT signed yet (status != 'signed')
+        # 3. All previous signers with 'signer'/'approver' role have signed
         next_signer = None
+        all_previous_signed = True
+        
         for signer in signers_response.data:
-            if signer.get('status') in ['pending', None] and signer.get('role') in ['signer', 'approver']:
-                next_signer = signer
-                break
+            role = signer.get('role', 'signer')
+            status = signer.get('status', 'pending')
+            
+            # Skip non-signer roles (like 'viewer'/'copy')
+            if role not in ['signer', 'approver']:
+                continue
+            
+            # If this signer hasn't signed
+            if status != 'signed':
+                # If all previous have signed, this is the next signer
+                if all_previous_signed:
+                    next_signer = signer
+                    break
+            else:
+                # This signer has signed, continue checking
+                continue
+            
+            # If we reach here, previous signer hasn't signed, so we can't notify this one
+            all_previous_signed = False
         
         if not next_signer:
             return {"success": True, "message": "All signers have been notified or have signed", "sent": False}

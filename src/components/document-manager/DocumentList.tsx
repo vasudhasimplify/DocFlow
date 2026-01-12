@@ -67,6 +67,7 @@ import { TransferOwnershipDialog } from '@/components/ownership/TransferOwnershi
 import { DocumentEditorModal } from './DocumentEditorModal';
 import { ApplyComplianceLabelDialog } from '@/components/compliance/ApplyComplianceLabelDialog';
 import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
+import { logDocumentDownloaded, logDocumentDeleted } from '@/utils/auditLogger';
 import { MoveToFolderDialog } from './MoveToFolderDialog';
 
 interface Document {
@@ -116,12 +117,14 @@ interface DocumentListProps {
   documents: Document[];
   onDocumentClick: (document: Document) => void;
   onRefresh?: () => void;
+  onNavigateToShare?: () => void;
 }
 
 export const DocumentList: React.FC<DocumentListProps> = ({
   documents,
   onDocumentClick,
-  onRefresh
+  onRefresh,
+  onNavigateToShare
 }) => {
   const { toast } = useToast();
   const { pinDocument, unpinDocument, isPinned } = useQuickAccess();

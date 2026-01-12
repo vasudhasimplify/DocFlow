@@ -225,20 +225,80 @@ async def get_user_shares(current_user = Depends(get_current_user)):
 async def get_shared_with_me(current_user = Depends(get_current_user)):
     """
     Get shares where the current user is the guest (recipient)
+    Queries both external_shares (by email) and document_shares (by user ID)
     """
     try:
         supabase = get_supabase_client()
         
-        # Get user's email
+        # Get user's email and ID
         user_email = current_user.email
+        user_id = current_user.id
         
-        response = supabase.table('external_shares')\
+        shares_list = []
+        
+        # 1. Query external_shares table (documents shared via guest email)
+        external_response = supabase.table('external_shares')\
             .select('*')\
             .eq('guest_email', user_email)\
             .order('created_at', desc=True)\
             .execute()
         
-        return [ShareResponse(**share) for share in response.data]
+        if external_response.data:
+            shares_list.extend(external_response.data)
+        
+        # 2. Query document_shares table (documents shared with registered user by ID)
+        try:
+            doc_shares_response = supabase.table('document_shares')\
+                .select('id, document_id, shared_by, shared_with, permission, share_token, created_at')\
+                .eq('shared_with', user_id)\
+                .order('created_at', desc=True)\
+                .execute()
+            
+            if doc_shares_response.data:
+                # For each document share, we need to fetch document info and format it
+                for doc_share in doc_shares_response.data:
+                    try:
+                        # Get document name
+                        doc_response = supabase.table('documents')\
+                            .select('id, file_name')\
+                            .eq('id', doc_share['document_id'])\
+                            .single()\
+                            .execute()
+                        
+                        doc_name = doc_response.data.get('file_name', 'Document') if doc_response.data else 'Document'
+                        
+                        # Format as ShareResponse-compatible dict
+                        formatted_share = {
+                            'id': doc_share['id'],
+                            'owner_id': doc_share['shared_by'] or '',
+                            'resource_type': 'document',
+                            'resource_id': doc_share['document_id'],
+                            'resource_name': doc_name,
+                            'guest_email': user_email,  # The recipient's email
+                            'guest_name': None,
+                            'permission': doc_share.get('permission', 'view'),
+                            'allow_download': True,
+                            'allow_print': True,
+                            'allow_reshare': False,
+                            'expires_at': None,
+                            'max_views': None,
+                            'view_count': 0,
+                            'status': 'accepted',  # Direct shares are always active
+                            'invitation_token': doc_share.get('share_token') or f"direct-{doc_share['id'][:8]}",
+                            'created_at': doc_share['created_at'],
+                            'updated_at': doc_share['created_at']
+                        }
+                        shares_list.append(formatted_share)
+                    except Exception as doc_err:
+                        logger.warning(f"Error fetching document for share {doc_share['id']}: {doc_err}")
+        except Exception as ds_err:
+            logger.warning(f"Error querying document_shares: {ds_err}")
+            # Continue with external_shares only
+        
+        # Sort combined list by created_at (most recent first)
+        shares_list.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        
+        return [ShareResponse(**share) for share in shares_list]
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch shared with me: {str(e)}")
@@ -469,11 +529,12 @@ async def get_access_logs_public(share_id: str):
     """
     Get access logs for a share link (public endpoint for local shares).
     Returns device breakdown, recent access history, and view counts.
+    Now also fetches from database for accurate counts.
     """
     try:
         logs = _access_logs_cache.get(share_id, [])
         
-        # Calculate device breakdown
+        # Calculate device breakdown from cache
         device_breakdown = {"Desktop": 0, "Mobile": 0, "Tablet": 0}
         for log in logs:
             device = log.get("device_type", "Desktop")
@@ -482,18 +543,40 @@ async def get_access_logs_public(share_id: str):
             else:
                 device_breakdown["Desktop"] += 1
         
-        # Calculate view counts
-        total_views = len([l for l in logs if l.get("action") == "view"])
-        downloads = len([l for l in logs if l.get("action") == "download"])
+        # Calculate view counts from cache
+        cache_views = len([l for l in logs if l.get("action") == "view"])
+        cache_downloads = len([l for l in logs if l.get("action") == "download"])
         unique_visitors = len(set(l.get("accessor_email", "Anonymous") for l in logs))
+        
+        # Also try to get use_count from share_links database
+        db_use_count = 0
+        try:
+            supabase = get_supabase_client()
+            
+            # Query share_links table for this share ID
+            share_response = supabase.table('share_links')\
+                .select('use_count, download_count')\
+                .eq('id', share_id)\
+                .maybe_single()\
+                .execute()
+            
+            if share_response.data:
+                db_use_count = share_response.data.get('use_count') or 0
+                db_downloads = share_response.data.get('download_count') or 0
+                cache_downloads = max(cache_downloads, db_downloads)
+        except Exception as db_err:
+            print(f"Could not fetch from share_links: {db_err}")
+        
+        # Use the higher of cache or DB count
+        total_views = max(cache_views, db_use_count)
         
         return {
             "logs": logs[-20:],  # Return last 20 logs
             "device_breakdown": device_breakdown,
             "total_accesses": len(logs),
             "total_views": total_views,
-            "downloads": downloads,
-            "unique_visitors": unique_visitors
+            "downloads": cache_downloads,
+            "unique_visitors": max(unique_visitors, 1 if total_views > 0 else 0)
         }
     
     except Exception as e:
@@ -570,17 +653,17 @@ async def resend_invitation(
     try:
         supabase = get_supabase_client()
         
-        # Fetch share
+        # Fetch share - use limit(1) instead of single() to avoid Supabase client bugs
         share_response = supabase.table('external_shares')\
             .select('*')\
             .eq('id', share_id)\
-            .single()\
+            .limit(1)\
             .execute()
         
-        if not share_response.data:
+        if not share_response.data or len(share_response.data) == 0:
             raise HTTPException(status_code=404, detail="Share not found")
         
-        share = share_response.data
+        share = share_response.data[0]
         
         if share['owner_id'] != current_user.id:
             raise HTTPException(status_code=403, detail="Not authorized")

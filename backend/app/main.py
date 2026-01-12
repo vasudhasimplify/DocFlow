@@ -24,6 +24,7 @@ from .api.ownership_transfers import router as ownership_transfers_router
 from .api.shares import router as shares_router
 from .api.rules import router as rules_router
 from .api.guest import router as guest_router
+from .api.share_link import router as share_link_router
 from .api.signatures import router as signatures_router
 from .api.watermarks import router as watermarks_router
 from .api.migration import router as migration_router
@@ -170,6 +171,7 @@ app.include_router(ownership_transfers_router)
 app.include_router(shares_router)
 app.include_router(rules_router)
 app.include_router(guest_router)
+app.include_router(share_link_router)
 app.include_router(signatures_router)
 app.include_router(watermarks_router)
 app.include_router(migration_router)
