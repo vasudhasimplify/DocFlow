@@ -26,24 +26,35 @@ async def get_share_link_document_url(token: str):
     try:
         logger.info(f"📄 Fetching document for share link token: {token}")
         
-        # First try by token field
-        share_response = supabase.table('share_links')\
-            .select('*')\
-            .eq('token', token)\
-            .maybe_single()\
-            .execute()
+        share = None
         
-        share = share_response.data
+        # First try by token field
+        try:
+            share_response = supabase.table('share_links')\
+                .select('*')\
+                .eq('token', token)\
+                .maybe_single()\
+                .execute()
+            
+            if share_response and hasattr(share_response, 'data'):
+                share = share_response.data
+        except Exception as e:
+            logger.warning(f"⚠️ Error querying by token: {e}")
         
         # If not found by token, try by short_code
         if not share:
             logger.info(f"🔍 Token not found, trying short_code: {token}")
-            share_response = supabase.table('share_links')\
-                .select('*')\
-                .eq('short_code', token)\
-                .maybe_single()\
-                .execute()
-            share = share_response.data
+            try:
+                share_response = supabase.table('share_links')\
+                    .select('*')\
+                    .eq('short_code', token)\
+                    .maybe_single()\
+                    .execute()
+                
+                if share_response and hasattr(share_response, 'data'):
+                    share = share_response.data
+            except Exception as e:
+                logger.warning(f"⚠️ Error querying by short_code: {e}")
         
         if not share:
             logger.warning(f"❌ Share link not found for token: {token}")
@@ -77,16 +88,22 @@ async def get_share_link_document_url(token: str):
         
         # Get the document using service role (bypasses RLS)
         logger.info(f"🔍 Fetching document: {resource_id}")
-        doc_response = supabase.table('documents')\
-            .select('*')\
-            .eq('id', resource_id)\
-            .single()\
-            .execute()
+        document = None
+        try:
+            doc_response = supabase.table('documents')\
+                .select('*')\
+                .eq('id', resource_id)\
+                .single()\
+                .execute()
+            
+            if doc_response and hasattr(doc_response, 'data'):
+                document = doc_response.data
+        except Exception as e:
+            logger.error(f"❌ Error fetching document: {e}")
         
-        if not doc_response.data:
+        if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
-        document = doc_response.data
         logger.info(f"✅ Document found: {document.get('file_name')}")
         
         # Create signed URL using service role (bypasses RLS)
@@ -178,24 +195,35 @@ async def track_share_link_view(token: str, request: ViewTrackingRequest = None)
     try:
         if request is None:
             request = ViewTrackingRequest()
-            
-        # Find the share link - only select columns that exist
-        share_response = supabase.table('share_links')\
-            .select('id, use_count')\
-            .eq('token', token)\
-            .maybe_single()\
-            .execute()
         
-        share = share_response.data
+        share = None
+        
+        # Find the share link - only select columns that exist
+        try:
+            share_response = supabase.table('share_links')\
+                .select('id, use_count')\
+                .eq('token', token)\
+                .maybe_single()\
+                .execute()
+            
+            if share_response and hasattr(share_response, 'data'):
+                share = share_response.data
+        except Exception as e:
+            logger.warning(f"⚠️ Error querying by token in view tracking: {e}")
         
         if not share:
             # Try by short_code
-            share_response = supabase.table('share_links')\
-                .select('id, use_count')\
-                .eq('short_code', token)\
-                .maybe_single()\
-                .execute()
-            share = share_response.data
+            try:
+                share_response = supabase.table('share_links')\
+                    .select('id, use_count')\
+                    .eq('short_code', token)\
+                    .maybe_single()\
+                    .execute()
+                
+                if share_response and hasattr(share_response, 'data'):
+                    share = share_response.data
+            except Exception as e:
+                logger.warning(f"⚠️ Error querying by short_code in view tracking: {e}")
         
         if not share:
             raise HTTPException(status_code=404, detail="Share link not found")

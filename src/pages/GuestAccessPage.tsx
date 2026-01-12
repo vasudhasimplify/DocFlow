@@ -63,7 +63,7 @@ export default function GuestAccessPage() {
   const [showViewer, setShowViewer] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [viewCount, setViewCount] = useState(0);
-  const [showEditor, setShowEditor] = useState(false);
+
 
   // Password protection state
   const [isLocked, setIsLocked] = useState(false);
