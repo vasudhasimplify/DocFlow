@@ -7,6 +7,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -34,7 +41,9 @@ import {
   TrendingUp,
   Building,
   Gavel,
-  X
+  X,
+  Sparkles,
+  BarChart3
 } from 'lucide-react';
 import { useLegalHolds } from '@/hooks/useLegalHolds';
 import type { EnhancedLegalHold, LegalHoldStatus } from '@/types/legalHold';
@@ -43,6 +52,8 @@ import { formatDistanceToNow, format, differenceInDays } from 'date-fns';
 import { CreateLegalHoldDialog } from './CreateLegalHoldDialog';
 import { LegalHoldDetail } from './LegalHoldDetail';
 import { SendNotificationsDialog } from './SendNotificationsDialog';
+import { AILegalHoldRecommendations } from './AILegalHoldRecommendations';
+import { AILegalHoldInsights } from './AILegalHoldInsights';
 import { useNavigate } from 'react-router-dom';
 
 export const LegalHoldDashboard: React.FC = () => {
@@ -54,6 +65,8 @@ export const LegalHoldDashboard: React.FC = () => {
   const [selectedHold, setSelectedHold] = useState<EnhancedLegalHold | null>(null);
   const [editingHold, setEditingHold] = useState<EnhancedLegalHold | null>(null);
   const [notifyingHold, setNotifyingHold] = useState<EnhancedLegalHold | null>(null);
+  const [showAIRecommendations, setShowAIRecommendations] = useState(false);
+  const [showAIInsights, setShowAIInsights] = useState(false);
 
   // Update selectedHold when holds change (e.g., after acknowledgement)
   useEffect(() => {
@@ -127,10 +140,28 @@ export const LegalHoldDashboard: React.FC = () => {
                 <p className="text-muted-foreground">Preserve and protect documents for legal matters</p>
               </div>
             </div>
-            <Button onClick={() => setShowCreateDialog(true)} className="bg-purple-600 hover:bg-purple-700">
-              <Plus className="w-4 h-4 mr-2" />
-              New Legal Hold
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => setShowAIInsights(true)}
+                className="border-purple-500/30 hover:bg-purple-500/5"
+              >
+                <BarChart3 className="w-4 h-4 mr-2 text-purple-600" />
+                AI Insights
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => setShowAIRecommendations(true)}
+                className="border-purple-500/30 hover:bg-purple-500/5"
+              >
+                <Sparkles className="w-4 h-4 mr-2 text-purple-600" />
+                AI Recommendations
+              </Button>
+              <Button onClick={() => setShowCreateDialog(true)} className="bg-purple-600 hover:bg-purple-700">
+                <Plus className="w-4 h-4 mr-2" />
+                New Legal Hold
+              </Button>
+            </div>
           </div>
 
           {/* Warning Banner */}
@@ -507,6 +538,39 @@ export const LegalHoldDashboard: React.FC = () => {
           }}
         />
       )}
+
+      {/* AI Recommendations Dialog */}
+      <Dialog open={showAIRecommendations} onOpenChange={setShowAIRecommendations}>
+        <DialogContent className="sm:max-w-[700px] max-h-[85vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-purple-600" />
+              AI Document Recommendations
+            </DialogTitle>
+            <DialogDescription>
+              AI-powered analysis to identify documents that may require legal hold
+            </DialogDescription>
+          </DialogHeader>
+          <AILegalHoldRecommendations
+            holdReason=""
+            keywords=""
+            matterType="litigation"
+            selectedDocumentIds={[]}
+            onSelectDocuments={(ids) => {
+              console.log('Selected documents for legal hold:', ids);
+              // Could auto-fill these into the create dialog
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Insights Dialog */}
+      <AILegalHoldInsights
+        open={showAIInsights}
+        onOpenChange={setShowAIInsights}
+      />
     </div>
   );
 };
+
+export default LegalHoldDashboard;

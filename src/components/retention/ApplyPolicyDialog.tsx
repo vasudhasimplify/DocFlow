@@ -44,7 +44,7 @@ export const ApplyPolicyDialog: React.FC<ApplyPolicyDialogProps> = ({
   onOpenChange,
   onCreatePolicy,
 }) => {
-  const { policies, applyPolicyToDocument, documentStatuses } = useRetentionPolicies();
+  const { policies, applyPolicyToDocument, documentStatuses, refresh } = useRetentionPolicies();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
   const [selectedPolicy, setSelectedPolicy] = useState<string>('');
@@ -228,6 +228,9 @@ export const ApplyPolicyDialog: React.FC<ApplyPolicyDialogProps> = ({
         for (const docId of selectedDocuments) {
           await applyPolicyToDocument(docId, policyId);
         }
+        
+        // Refresh policies after applying
+        await refresh();
       } else if (actionType === 'legalhold') {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('User not authenticated');

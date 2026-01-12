@@ -2,7 +2,7 @@
 Checkout Request API
 Handles guest/shared user requests for document editing access
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Header
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -153,20 +153,28 @@ async def create_checkout_request(request: CheckoutRequestCreate):
         
         logger.info(f"📝 Creating checkout request for document {request.document_id} by {request.requester_email}")
         
-        # Get document details and owner info
+        # Get document details
         doc_response = supabase.table('documents').select('id, file_name, user_id').eq('id', request.document_id).single().execute()
         if not doc_response.data:
             raise HTTPException(status_code=404, detail="Document not found")
         
         document = doc_response.data
+        owner_user_id = document['user_id']
         
-        # Get owner profile separately
-        owner_response = supabase.table('profiles').select('email, full_name').eq('id', document['user_id']).single().execute()
-        owner_email = owner_response.data.get('email') if owner_response.data else None
-        owner_name = owner_response.data.get('full_name', 'Document Owner') if owner_response.data else 'Document Owner'
+        # Get owner email from auth.users using admin client
+        from supabase import create_client
+        supabase_admin = create_client(
+            os.getenv("SUPABASE_URL"),
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        )
         
-        if not owner_email:
+        # Query auth.users for owner email
+        owner_response = supabase_admin.auth.admin.get_user_by_id(owner_user_id)
+        if not owner_response or not owner_response.user:
             raise HTTPException(status_code=404, detail="Document owner not found")
+        
+        owner_email = owner_response.user.email
+        owner_name = owner_response.user.user_metadata.get('full_name') or owner_response.user.email.split('@')[0] or 'Document Owner'
         
         # Check if document is already locked
         lock_response = supabase.table('document_locks')\
@@ -235,7 +243,7 @@ async def create_checkout_request(request: CheckoutRequestCreate):
 
 
 @router.post("/approve")
-async def approve_checkout_request(request: ApproveRequestBody, user_id: str):
+async def approve_checkout_request(body: ApproveRequestBody):
     """
     Approve a checkout request and grant edit access
     - Creates a document lock for the guest user
@@ -244,12 +252,12 @@ async def approve_checkout_request(request: ApproveRequestBody, user_id: str):
     try:
         supabase = get_supabase_client()
         
-        logger.info(f"✅ Approving checkout request {request.request_id}")
+        logger.info(f"✅ Approving checkout request {body.request_id}")
         
         # Get the request
         req_response = supabase.table('checkout_requests')\
-            .select('*, documents!inner(*, profiles!documents_user_id_fkey(email, full_name))')\
-            .eq('id', request.request_id)\
+            .select('*')\
+            .eq('id', body.request_id)\
             .single()\
             .execute()
         
@@ -257,30 +265,37 @@ async def approve_checkout_request(request: ApproveRequestBody, user_id: str):
             raise HTTPException(status_code=404, detail="Request not found")
         
         checkout_req = req_response.data
-        document = checkout_req['documents']
         
-        # Verify user owns the document
-        if document['user_id'] != user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to approve this request")
+        # Get document details
+        doc_response = supabase.table('documents')\
+            .select('id, file_name, user_id')\
+            .eq('id', checkout_req['document_id'])\
+            .single()\
+            .execute()
+        
+        if not doc_response.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        document = doc_response.data
         
         # Check if already approved/rejected
         if checkout_req['status'] != 'pending':
             raise HTTPException(status_code=400, detail=f"Request already {checkout_req['status']}")
         
         # Update request status
-        expires_at = datetime.utcnow() + timedelta(hours=request.duration_hours)
+        expires_at = datetime.utcnow() + timedelta(hours=body.duration_hours)
         supabase.table('checkout_requests').update({
             'status': 'approved',
             'approved_at': datetime.utcnow().isoformat(),
-            'approved_by': user_id,
+            'approved_by': document['user_id'],
             'expires_at': expires_at.isoformat(),
             'updated_at': datetime.utcnow().isoformat()
-        }).eq('id', request.request_id).execute()
+        }).eq('id', body.request_id).execute()
         
         # Create a document lock for the guest
         lock_data = {
             'document_id': checkout_req['document_id'],
-            'locked_by': user_id,  # Owner's ID for tracking
+            'locked_by': document['user_id'],  # Owner's ID for tracking
             'guest_email': checkout_req['requester_email'],
             'locked_at': datetime.utcnow().isoformat(),
             'expires_at': expires_at.isoformat(),
@@ -294,27 +309,47 @@ async def approve_checkout_request(request: ApproveRequestBody, user_id: str):
         try:
             # Construct edit URL based on share type
             if checkout_req.get('share_id'):
-                edit_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:4173')}/guest/{checkout_req['share_id']}/edit"
+                # For guest sharing (external_shares), we need to get the invitation_token
+                share_response = supabase.table('external_shares')\
+                    .select('invitation_token')\
+                    .eq('id', checkout_req['share_id'])\
+                    .single()\
+                    .execute()
+                
+                if share_response.data and share_response.data.get('invitation_token'):
+                    token = share_response.data['invitation_token']
+                    edit_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:4173')}/guest/{token}"
+                    logger.info(f"📧 Using external_shares token for edit URL: {token[:20]}...")
+                else:
+                    # Fallback to share_id if token not found
+                    logger.warning(f"⚠️ invitation_token not found for share_id {checkout_req['share_id']}, using share_id as fallback")
+                    edit_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:4173')}/guest/{checkout_req['share_id']}"
             elif checkout_req.get('share_link_id'):
-                edit_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:4173')}/shared/{checkout_req['share_link_id']}/edit"
+                # share_link_id stores the token from the URL, not a UUID
+                # Use it directly for the edit URL
+                token = checkout_req['share_link_id']
+                edit_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:4173')}/s/{token}"
+                logger.info(f"📧 Using share_link token directly for edit URL: {token[:20] if len(token) > 20 else token}...")
             else:
                 edit_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:4173')}/documents/{checkout_req['document_id']}"
+            
+            logger.info(f"📧 Sending approval email with edit URL: {edit_url}")
             
             await send_approval_email(
                 requester_email=checkout_req['requester_email'],
                 requester_name=checkout_req.get('requester_name', ''),
                 document_name=document['file_name'],
-                duration_hours=request.duration_hours,
+                duration_hours=body.duration_hours,
                 edit_url=edit_url
             )
         except Exception as e:
             logger.warning(f"Approval email failed but access was granted: {e}")
         
-        logger.info(f"✅ Checkout request approved, access granted for {request.duration_hours} hours")
+        logger.info(f"✅ Checkout request approved, access granted for {body.duration_hours} hours")
         
         return {
             "success": True,
-            "message": f"Checkout request approved. Access granted for {request.duration_hours} hours.",
+            "message": f"Checkout request approved. Access granted for {body.duration_hours} hours.",
             "expires_at": expires_at.isoformat()
         }
         
@@ -326,17 +361,22 @@ async def approve_checkout_request(request: ApproveRequestBody, user_id: str):
 
 
 @router.post("/reject")
-async def reject_checkout_request(request: RejectRequestBody, user_id: str):
+async def reject_checkout_request(body: RejectRequestBody, request: Request):
     """Reject a checkout request"""
     try:
         supabase = get_supabase_client()
         
-        logger.info(f"❌ Rejecting checkout request {request.request_id}")
+        # Get user ID from header
+        user_id = request.headers.get("x-user-id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not provided")
+        
+        logger.info(f"❌ Rejecting checkout request {body.request_id}")
         
         # Get the request to verify ownership
         req_response = supabase.table('checkout_requests')\
             .select('*, documents!inner(user_id)')\
-            .eq('id', request.request_id)\
+            .eq('id', body.request_id)\
             .single()\
             .execute()
         
@@ -351,7 +391,7 @@ async def reject_checkout_request(request: RejectRequestBody, user_id: str):
         supabase.table('checkout_requests').update({
             'status': 'rejected',
             'updated_at': datetime.utcnow().isoformat()
-        }).eq('id', request.request_id).execute()
+        }).eq('id', body.request_id).execute()
         
         logger.info(f"✅ Request rejected")
         
@@ -364,10 +404,15 @@ async def reject_checkout_request(request: RejectRequestBody, user_id: str):
 
 
 @router.get("/pending", response_model=List[CheckoutRequestResponse])
-async def get_pending_requests(user_id: str):
+async def get_pending_requests(request: Request):
     """Get all pending checkout requests for user's documents"""
     try:
         supabase = get_supabase_client()
+        
+        # Get user ID from header
+        user_id = request.headers.get("x-user-id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not provided")
         
         # Get pending requests for user's documents
         requests_response = supabase.table('checkout_requests')\
@@ -378,7 +423,7 @@ async def get_pending_requests(user_id: str):
             .execute()
         
         results = []
-        for req in requests_response.data:
+        for req in requests_response.data or []:
             results.append(CheckoutRequestResponse(
                 **{k: v for k, v in req.items() if k != 'documents'},
                 document_name=req['documents']['file_name']
@@ -387,8 +432,10 @@ async def get_pending_requests(user_id: str):
         logger.info(f"📋 Retrieved {len(results)} pending requests for user {user_id}")
         
         return results
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching pending requests: {e}")
+        logger.error(f"Error fetching pending requests: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

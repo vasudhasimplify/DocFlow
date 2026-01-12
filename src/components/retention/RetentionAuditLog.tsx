@@ -119,6 +119,9 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
   const getFilteredLogs = () => {
     let filtered = logs;
 
+    console.log('RetentionAuditLog - Total logs:', logs.length);
+    console.log('RetentionAuditLog - Filters:', { searchQuery, actionFilter, dateRange });
+
     // Search filter
     if (searchQuery) {
       filtered = filtered.filter(log =>
@@ -127,11 +130,13 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
         log.reason?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         log.certificate_number?.toLowerCase().includes(searchQuery.toLowerCase())
       );
+      console.log('After search filter:', filtered.length);
     }
 
     // Action filter
     if (actionFilter !== 'all') {
       filtered = filtered.filter(log => log.action === actionFilter);
+      console.log('After action filter:', filtered.length);
     }
 
     // Date filter
@@ -139,6 +144,7 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
       const days = dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : 90;
       const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
       filtered = filtered.filter(log => new Date(log.created_at) >= cutoff);
+      console.log('After date filter:', filtered.length);
     }
 
     return filtered;
@@ -194,26 +200,87 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
     }
   };
 
-  const exportLogs = () => {
-    const csv = [
-      ['Date', 'Action', 'Document ID', 'Previous Status', 'New Status', 'Reason', 'Certificate'],
-      ...filteredLogs.map(log => [
-        new Date(log.created_at).toISOString(),
-        log.action,
-        log.document_id,
-        log.previous_status || '',
-        log.new_status || '',
-        log.reason || '',
-        log.certificate_number || '',
-      ])
-    ].map(row => row.join(',')).join('\n');
+  const exportToPdf = () => {
+    console.log('Exporting logs to PDF:', filteredLogs.length);
+    
+    // Create a printable HTML document
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast({
+        title: "Error",
+        description: "Unable to open print window. Please allow popups.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `retention-audit-log-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Retention Audit Log - ${new Date().toLocaleDateString()}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { color: #333; margin-bottom: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+            th { background-color: #f4f4f4; font-weight: bold; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+            .summary { background-color: #f0f0f0; padding: 10px; border-radius: 4px; margin-bottom: 20px; }
+            @media print {
+              body { padding: 0; }
+              button { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Retention Audit Log Report</h1>
+            <button onclick="window.print()">Print / Save as PDF</button>
+          </div>
+          <div class="summary">
+            <strong>Report Generated:</strong> ${new Date().toLocaleString()}<br/>
+            <strong>Total Records:</strong> ${filteredLogs.length}<br/>
+            <strong>Filters Applied:</strong> Action: ${actionFilter}, Date Range: ${dateRange}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Action</th>
+                <th>Document</th>
+                <th>Previous Status</th>
+                <th>New Status</th>
+                <th>Reason</th>
+                <th>Certificate</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filteredLogs.map(log => `
+                <tr>
+                  <td>${new Date(log.created_at).toLocaleString()}</td>
+                  <td>${log.action.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</td>
+                  <td>${documentNames[log.document_id] || log.document_id}</td>
+                  <td>${log.previous_status || '-'}</td>
+                  <td>${log.new_status || '-'}</td>
+                  <td>${log.reason || '-'}</td>
+                  <td>${log.certificate_number || '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    
+    toast({
+      title: "Export Ready",
+      description: `PDF report generated with ${filteredLogs.length} records. Use Print dialog to save as PDF.`,
+    });
   };
 
   return (
@@ -237,12 +304,14 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Actions</SelectItem>
+            <SelectItem value="policy_applied">Policy Applied</SelectItem>
             <SelectItem value="disposed">Disposed</SelectItem>
             <SelectItem value="archived">Archived</SelectItem>
-            <SelectItem value="held">Held</SelectItem>
-            <SelectItem value="released">Released</SelectItem>
+            <SelectItem value="legal_hold_applied">Legal Hold Applied</SelectItem>
+            <SelectItem value="legal_hold_released">Legal Hold Released</SelectItem>
             <SelectItem value="extended">Extended</SelectItem>
             <SelectItem value="exception_granted">Exception Granted</SelectItem>
+            <SelectItem value="status_changed">Status Changed</SelectItem>
           </SelectContent>
         </Select>
 
@@ -259,9 +328,9 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
           ))}
         </div>
 
-        <Button variant="outline" onClick={exportLogs}>
+        <Button variant="outline" onClick={exportToPdf}>
           <Download className="h-4 w-4 mr-2" />
-          Export CSV
+          Export PDF
         </Button>
       </div>
 

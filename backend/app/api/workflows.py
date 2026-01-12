@@ -602,6 +602,9 @@ async def list_instances(
             "*, workflow_definitions(name, color, category), documents(file_name), workflow_step_instances(*)"
         )
         
+        # ALWAYS exclude cancelled workflows
+        query = query.neq("status", "cancelled")
+        
         if status:
             query = query.eq("status", status)
         if workflow_id:

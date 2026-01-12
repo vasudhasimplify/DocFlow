@@ -68,16 +68,41 @@ export const DispositionQueue: React.FC = () => {
     fetchDocumentNames();
   }, [documentStatuses]);
 
-  // Get documents pending review or approval (exclude terminal states)
+  // Get all documents for disposition queue - show documents that are:
+  // 1. pending_review or pending_approval status
+  // 2. active documents that have passed their retention end date
+  // 3. active documents approaching end date (within 30 days)
   const pendingDocs = documentStatuses.filter(doc => {
     // Exclude documents that are already disposed or archived
     if (doc.current_status === 'disposed' || doc.current_status === 'archived') {
       return false;
     }
-    return doc.current_status === 'pending_review' || 
-           doc.current_status === 'pending_approval' ||
-           (doc.current_status === 'active' && new Date(doc.retention_end_date) <= new Date());
+    
+    // Always show pending_review and pending_approval
+    if (doc.current_status === 'pending_review' || doc.current_status === 'pending_approval') {
+      return true;
+    }
+    
+    // Show active documents that are past end date or within 30 days of end date
+    if (doc.current_status === 'active') {
+      const endDate = new Date(doc.retention_end_date);
+      const now = new Date();
+      const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      return endDate <= thirtyDaysFromNow;
+    }
+    
+    // Also show on_hold documents for visibility
+    if (doc.current_status === 'on_hold') {
+      return true;
+    }
+    
+    return false;
   });
+
+  console.log('DispositionQueue - Total document statuses:', documentStatuses.length);
+  console.log('DispositionQueue - Pending docs:', pendingDocs.length);
+  console.log('DispositionQueue - Document statuses sample:', documentStatuses.slice(0, 3));
+  console.log('DispositionQueue - Status breakdown:', documentStatuses.reduce((acc, d) => { acc[d.current_status] = (acc[d.current_status] || 0) + 1; return acc; }, {} as Record<string, number>));
 
   const filteredDocs = pendingDocs.filter(doc => {
     const documentName = documentsMap.get(doc.document_id)?.file_name || '';

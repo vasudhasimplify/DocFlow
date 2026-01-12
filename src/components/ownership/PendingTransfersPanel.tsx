@@ -303,7 +303,7 @@ export function PendingTransfersPanel() {
                           {transfer.document_file_name || transfer.document?.file_name || 'Unnamed Document'}
                         </p>
                         <p className="text-xs text-muted-foreground truncate">
-                          To: {transfer.to_user_email}
+                          From: {transfer.from_user_email || 'Unknown sender'}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {formatDistanceToNow(new Date(transfer.created_at), { addSuffix: true })}

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DocumentClassificationBadge } from "@/components/document-manager/DocumentClassificationBadge";
+import { PolicyDocumentDetector } from "@/components/retention/PolicyDocumentDetector";
 import {
   Upload,
   FileText,
@@ -39,6 +40,19 @@ import { autoClassifyDocument } from "@/services/autoClassificationService";
 import { useContentAccessRules } from '@/hooks/useContentAccessRules';
 import { logDocumentCreated, logAuditEvent } from '@/utils/auditLogger';
 
+// Policy document keywords for detection (single words and phrases)
+const POLICY_KEYWORDS = [
+  // Compound terms
+  'retention policy', 'retention schedule', 'records retention',
+  'data retention', 'document retention', 'archival policy',
+  'disposition schedule', 'records management', 'compliance policy',
+  'policy framework', 'corporate policy', 'hr policy', 'data policy',
+  // Single keywords that indicate policy documents
+  'policy', 'retention', 'compliance', 'hipaa', 'gdpr', 'sox', 'pci-dss',
+  'ferpa', 'regulatory', 'governance', 'framework', 'indian_corporate',
+  'hr_policy', 'corporate_policy'
+];
+
 interface UploadFile {
   id: string;
   file: File;
@@ -51,6 +65,7 @@ interface UploadFile {
     categoryName: string;
     confidence: number;
   };
+  isPolicyDocument?: boolean;
 }
 
 interface EnhancedDocumentUploadProps {
@@ -70,11 +85,14 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [policyDocumentId, setPolicyDocumentId] = useState<string | null>(null);
+  const [policyDocumentName, setPolicyDocumentName] = useState<string | null>(null);
 
   const [enableRAG, setEnableRAG] = useState(true);
   const [enableClassification, setEnableClassification] = useState(false);
   const [enableWorkflowSuggestion, setEnableWorkflowSuggestion] = useState(true);
   const [enableAccessRules, setEnableAccessRules] = useState(false);
+  const [enablePolicyDetection, setEnablePolicyDetection] = useState(true);
   const [uploadComplete, setUploadComplete] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -657,12 +675,44 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
             console.warn('Could not update processing queue:', queueUpdateError);
           }
 
-          // Final success update for file status (though user might not see it if modal closed)
+          // Check if this is a policy document (for auto-policy creation)
+          if (enablePolicyDetection) {
+            const fileName = uploadFile.file.name.toLowerCase();
+
+            const matchedKeywordInName = POLICY_KEYWORDS.find(k => fileName.includes(k));
+            const isPolicyByName = !!matchedKeywordInName;
+
+            // Also check extracted text for policy keywords
+            const matchedKeywordInContent = extractedText && POLICY_KEYWORDS.find(k =>
+              extractedText.toLowerCase().includes(k)
+            );
+            const isPolicyByContent = !!matchedKeywordInContent;
+
+            if (isPolicyByName || isPolicyByContent) {
+              console.log('📋 Policy document detected:', uploadFile.file.name, 'Document ID:', documentData.id);
+              // Mark for policy detection dialog after upload
+              // Note: Since valid upload modal closes immediately, we rely on the global event
+
+              // Dispatch event to SimplifyDrive to show policy detection dialog
+              console.log('📋 Dispatching policy-document-detected event for:', uploadFile.file.name);
+              window.dispatchEvent(new CustomEvent('policy-document-detected', {
+                detail: {
+                  documentId: documentData.id,
+                  documentName: uploadFile.file.name,
+                }
+              }));
+            }
+          }
+
+          // Final success update for file status
           updateFileStatus(uploadFile.id, {
             status: 'complete',
             progress: 100,
             documentId: documentData.id
           });
+
+          // Dispatch upload-completed event to update processing banner
+          window.dispatchEvent(new CustomEvent('upload-completed', { detail: { count: 1, documentId: documentData.id } }));
 
         } catch (backgroundError) {
           console.error('Background processing error:', backgroundError);
@@ -674,8 +724,11 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
       runBackgroundProcessing();
 
       // Return immediately to close UI
+      // The optimistic upload-completed event is dispatched here to ensure immediate feedback
+      // The background process will dispatch another one when fully done (optional, but good for consistency)
       window.dispatchEvent(new CustomEvent('upload-completed', { detail: { count: 1, documentId: documentData.id } }));
       return documentData.id;
+
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -837,12 +890,12 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CheckCircle className="w-5 h-5 text-green-500" />
-            All Documents Uploaded Successfully
+            {completedCount} {completedCount === 1 ? 'Document' : 'Documents'} Uploaded Successfully
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground mb-4">
-            {completedCount} file(s) have been saved to SimplifyDrive
+            {completedCount} file{completedCount !== 1 ? 's have' : ' has'} been saved to SimplifyDrive
             {enableRAG && ' with RAG indexing enabled'}
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -1048,6 +1101,30 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
             </div>
           </div>
         </div>
+
+        <div
+          className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${enablePolicyDetection ? 'border-purple-500 bg-purple-500/5' : 'border-border hover:border-muted-foreground/50 bg-card'
+            }`}
+          onClick={() => setEnablePolicyDetection(!enablePolicyDetection)}
+        >
+          <Checkbox
+            id="policy-toggle"
+            checked={enablePolicyDetection}
+            onCheckedChange={(checked) => setEnablePolicyDetection(checked as boolean)}
+            className="h-4 w-4 flex-shrink-0"
+          />
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <Sparkles className="h-4 w-4 text-purple-500 flex-shrink-0" />
+            <div className="min-w-0">
+              <Label htmlFor="policy-toggle" className="text-sm font-medium cursor-pointer block truncate">
+                Detect Policy Documents
+              </Label>
+              <p className="text-xs text-muted-foreground truncate">
+                Auto-create retention policies
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* File List */}
@@ -1100,10 +1177,35 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
                       {uploadFile.status === 'pending' && (
                         <Badge variant="outline">Pending</Badge>
                       )}
-                      {(uploadFile.status === 'uploading' || uploadFile.status === 'processing') && (
+                      {uploadFile.status === 'uploading' && (
                         <div className="flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                          <span className="text-xs text-muted-foreground">{uploadFile.progress}%</span>
+                          <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                          <div className="flex flex-col">
+                            <span className="text-xs font-medium text-blue-600">Uploading...</span>
+                            <span className="text-xs text-muted-foreground">{uploadFile.progress}%</span>
+                          </div>
+                        </div>
+                      )}
+                      {uploadFile.status === 'processing' && (
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin text-purple-500" />
+                          <div className="flex flex-col">
+                            <span className="text-xs font-medium text-purple-600">
+                              {uploadFile.progress < 60 ? 'Extracting text...' :
+                                uploadFile.progress < 75 ? 'Analyzing content...' :
+                                  uploadFile.progress < 90 ? 'Detecting workflows...' : 'Finalizing...'}
+                            </span>
+                            <span className="text-xs text-muted-foreground">{uploadFile.progress}%</span>
+                          </div>
+                        </div>
+                      )}
+                      {uploadFile.status === 'classifying' && (
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 animate-pulse text-amber-500" />
+                          <div className="flex flex-col">
+                            <span className="text-xs font-medium text-amber-600">AI Classification...</span>
+                            <span className="text-xs text-muted-foreground">{uploadFile.progress}%</span>
+                          </div>
                         </div>
                       )}
                       {uploadFile.status === 'complete' && (
@@ -1170,6 +1272,22 @@ export const EnhancedDocumentUpload: React.FC<EnhancedDocumentUploadProps> = ({
           onClose={() => setShowCamera(false)}
         />
       )}
+
+      {/* Policy Document Detector Dialog */}
+      <PolicyDocumentDetector
+        documentId={policyDocumentId}
+        documentName={policyDocumentName}
+        onClose={() => {
+          setPolicyDocumentId(null);
+          setPolicyDocumentName(null);
+        }}
+        onPoliciesCreated={(policyIds) => {
+          toast({
+            title: 'Retention Policies Created',
+            description: `${policyIds.length} policy(s) created from the document.`,
+          });
+        }}
+      />
     </div>
   );
 };

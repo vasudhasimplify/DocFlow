@@ -56,7 +56,7 @@ export const useRetentionPolicies = () => {
         supabase.from('legal_holds').select('*').order('created_at', { ascending: false }),
         supabase.from('document_retention_status').select('*').order('retention_end_date', { ascending: true }),
         supabase.from('retention_policy_templates').select('*').order('compliance_framework'),
-        supabase.from('disposition_audit_log').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('disposition_audit_log').select('*').order('created_at', { ascending: false }).limit(500),
       ]);
 
       if (policiesRes.data) {
@@ -390,8 +390,22 @@ export const useRetentionPolicies = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const policy = policies.find(p => p.id === policyId);
-      if (!policy) throw new Error('Policy not found');
+      // Try to find policy in local state first
+      let policy = policies.find(p => p.id === policyId);
+      
+      // If not found (e.g., newly created), fetch from database
+      if (!policy) {
+        const { data: fetchedPolicy, error: fetchError } = await supabase
+          .from('retention_policies')
+          .select('*')
+          .eq('id', policyId)
+          .single();
+        
+        if (fetchError || !fetchedPolicy) {
+          throw new Error('Policy not found');
+        }
+        policy = fetchedPolicy as any;
+      }
 
       const startDate = new Date();
       const endDate = new Date(startDate.getTime() + policy.retention_period_days * 24 * 60 * 60 * 1000);

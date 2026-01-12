@@ -110,14 +110,14 @@ export function RequestCheckoutButton({
       </Button>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5 text-primary" />
               Request Edit Access
             </DialogTitle>
-            <DialogDescription>
-              Request permission to edit <strong>"{documentName}"</strong>. The owner will be notified via email.
+            <DialogDescription className="break-words">
+              Request permission to edit <strong className="break-all">"{documentName}"</strong>. The owner will be notified via email.
             </DialogDescription>
           </DialogHeader>
 

@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -48,7 +49,9 @@ import {
   PauseCircle,
   Clock,
   AlertTriangle,
-  ChevronsUpDown
+  ChevronsUpDown,
+  Sparkles,
+  Settings
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -59,6 +62,7 @@ import {
   PRIORITY_CONFIG,
   ESCALATION_ACTION_CONFIG
 } from '@/types/workflow';
+import { AIEscalationRecommendations } from './AIEscalationRecommendations';
 
 interface CreateEscalationRuleDialogProps {
   open: boolean;
@@ -207,43 +211,87 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
     }));
   };
 
+  const [activeTab, setActiveTab] = useState<'manual' | 'ai'>('manual');
+
+  // Handle AI recommendation application
+  const handleApplyRecommendation = (rec: any) => {
+    setFormData(prev => ({
+      ...prev,
+      name: rec.suggestedRuleName,
+      description: rec.suggestedDescription,
+      scope: 'workflow',
+      workflow_id: rec.workflowId,
+      priority: rec.suggestedPriority,
+      trigger_after_hours: rec.suggestedTriggerHours,
+      actions: [{ action: rec.suggestedAction, delay_hours: 0 }]
+    }));
+    setActiveTab('manual');
+    setStep(3); // Go to review step
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl max-h-[85vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Zap className="h-5 w-5" />
             Create Escalation Rule
           </DialogTitle>
           <DialogDescription>
-            Step {step} of {totalSteps} — 
-            {step === 1 && ' Basic Settings'}
-            {step === 2 && ' Timing & Actions'}
-            {step === 3 && ' Review & Create'}
+            Configure automatic escalation for overdue workflow steps
           </DialogDescription>
         </DialogHeader>
 
-        {/* Progress */}
-        <div className="flex gap-1 mb-4">
-          {Array.from({ length: totalSteps }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-1 flex-1 rounded-full transition-colors ${
-                i < step ? 'bg-primary' : 'bg-muted'
-              }`}
-            />
-          ))}
-        </div>
+        {/* Tab Selection */}
+        <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="manual" className="gap-2">
+              <Settings className="h-4 w-4" />
+              Manual Setup
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="gap-2">
+              <Sparkles className="h-4 w-4" />
+              AI Recommendations
+            </TabsTrigger>
+          </TabsList>
 
-        <ScrollArea className="max-h-[60vh] pr-4">
-          {/* Step 1: Basic Settings */}
-          {step === 1 && (
+          {/* AI Recommendations Tab */}
+          <TabsContent value="ai" className="mt-4">
+            <AIEscalationRecommendations onCreateRule={handleApplyRecommendation} />
+          </TabsContent>
+
+          {/* Manual Setup Tab */}
+          <TabsContent value="manual" className="mt-4">
             <div className="space-y-4">
-              <div>
-                <Label htmlFor="name">Rule Name</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
+              {/* Progress for manual setup */}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  Step {step} of {totalSteps} — 
+                  {step === 1 && ' Basic Settings'}
+                  {step === 2 && ' Timing & Actions'}
+                  {step === 3 && ' Review & Create'}
+                </span>
+              </div>
+              <div className="flex gap-1 mb-4">
+                {Array.from({ length: totalSteps }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`h-1 flex-1 rounded-full transition-colors ${
+                      i < step ? 'bg-primary' : 'bg-muted'
+                    }`}
+                  />
+                ))}
+              </div>
+
+              <ScrollArea className="max-h-[50vh] pr-4">
+                {/* Step 1: Basic Settings */}
+                {step === 1 && (
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="name">Rule Name</Label>
+                      <Input
+                        id="name"
+                        value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   placeholder="e.g., Standard Escalation"
                   className="mt-1"
@@ -748,6 +796,7 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
           )}
         </ScrollArea>
 
+        {/* Footer for Manual Setup */}
         <DialogFooter className="flex justify-between">
           <div>
             {step > 1 && (
@@ -780,6 +829,9 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
             )}
           </div>
         </DialogFooter>
+            </div>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

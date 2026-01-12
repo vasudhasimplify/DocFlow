@@ -6,3 +6,5 @@ export { DispositionQueue } from './DispositionQueue';
 export { RetentionAuditLog } from './RetentionAuditLog';
 export { CreatePolicyDialog } from './CreatePolicyDialog';
 export { CreateLegalHoldDialog } from './CreateLegalHoldDialog';
+export { AIPolicyRecommendations } from './AIPolicyRecommendations';
+export { PolicyDocumentDetector } from './PolicyDocumentDetector';

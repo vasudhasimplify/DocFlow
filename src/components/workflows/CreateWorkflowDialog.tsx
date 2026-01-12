@@ -55,6 +55,7 @@ interface CreateWorkflowDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workflow?: any; // For editing existing workflow
+  onWorkflowCreated?: (workflowId: string) => void; // Callback when workflow is created
 }
 
 const WORKFLOW_COLORS = [
@@ -104,7 +105,8 @@ const getSchedulePreview = (formData: any): string => {
 export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
   open,
   onOpenChange,
-  workflow
+  workflow,
+  onWorkflowCreated
 }) => {
   const { createWorkflow, updateWorkflow, isLoading } = useWorkflows();
   const { user } = useAuth();
@@ -245,13 +247,16 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
       return;
     }
     
+    // If there's a callback, the workflow will be used immediately, so set it as active
+    const shouldBeActive = !!onWorkflowCreated;
+    
     const workflowData = {
       name: formData.name,
       description: formData.description,
       category: formData.category,
       color: formData.color,
       version: workflow?.version || 1,
-      status: workflow?.status || 'draft',
+      status: workflow?.status || (shouldBeActive ? 'active' : 'draft'),
       trigger_type: formData.trigger_type,
       trigger_config: {
         document_types: formData.trigger_document_types.length > 0 
@@ -307,12 +312,26 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
     if (workflow) {
       // Update existing workflow
       await updateWorkflow(workflow.id, workflowData);
+      onOpenChange(false);
     } else {
       // Create new workflow
-      await createWorkflow(workflowData);
+      const newWorkflow = await createWorkflow(workflowData);
+      console.log('🎯 Workflow created:', newWorkflow);
+      // Call the callback with the new workflow ID if provided
+      if (newWorkflow?.id && onWorkflowCreated) {
+        console.log('🎯 Calling onWorkflowCreated callback with ID:', newWorkflow.id);
+        onWorkflowCreated(newWorkflow.id);
+        // Don't close the dialog here - let the parent handle it
+      } else {
+        console.warn('⚠️ No callback or workflow ID:', { 
+          hasCallback: !!onWorkflowCreated, 
+          workflowId: newWorkflow?.id 
+        });
+        // Only close if no callback (standalone usage)
+        onOpenChange(false);
+      }
     }
     
-    onOpenChange(false);
     resetForm();
   };
 

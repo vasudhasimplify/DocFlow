@@ -212,7 +212,6 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
       let query = supabase
         .from('documents')
         .select(DOCUMENT_SELECT_COLUMNS, { count: 'exact' })
-        .select('*')
         .eq('is_deleted', false)
         .or(orFilter);
 

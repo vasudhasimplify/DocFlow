@@ -17,12 +17,14 @@ import {
   Zap,
   BarChart3,
   CheckCircle2,
-  RefreshCw
+  RefreshCw,
+  FolderTree
 } from 'lucide-react';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { STATUS_CONFIG, WorkflowStatus } from '@/types/workflow';
 import { WorkflowCard } from './WorkflowCard';
 import { WorkflowInstancesList } from './WorkflowInstancesList';
+import { WorkflowInstancesAdminView } from './WorkflowInstancesAdminView';
 import { EscalationRulesPanel } from './EscalationRulesPanel';
 import { CreateWorkflowDialog } from './CreateWorkflowDialog';
 
@@ -218,6 +220,10 @@ export const WorkflowDashboard: React.FC = () => {
                 </Badge>
               )}
             </TabsTrigger>
+            <TabsTrigger value="admin-view" className="gap-2">
+              <FolderTree className="h-4 w-4" />
+              Admin View
+            </TabsTrigger>
             <TabsTrigger value="completed" className="gap-2">
               <CheckCircle2 className="h-4 w-4" />
               Completed
@@ -304,6 +310,10 @@ export const WorkflowDashboard: React.FC = () => {
 
         <TabsContent value="instances" className="mt-0">
           <WorkflowInstancesList />
+        </TabsContent>
+
+        <TabsContent value="admin-view" className="mt-0">
+          <WorkflowInstancesAdminView />
         </TabsContent>
 
         <TabsContent value="completed" className="mt-0">

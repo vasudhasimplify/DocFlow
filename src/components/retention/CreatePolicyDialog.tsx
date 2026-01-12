@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { 
   Shield, Clock, Archive, Trash2, Eye, Send, 
-  AlertTriangle, CheckCircle, Plus, CalendarIcon, Pencil
+  AlertTriangle, CheckCircle, Plus, CalendarIcon, Pencil, Sparkles
 } from 'lucide-react';
 import { EditTemplateDialog } from './EditTemplateDialog';
+import { AIPolicyRecommendations } from './AIPolicyRecommendations';
 import { format } from 'date-fns';
 import {
   Dialog,
@@ -43,6 +44,7 @@ import {
   type DispositionAction,
   type TriggerType,
   type ComplianceFramework,
+  type RetentionPolicy,
 } from '@/types/retention';
 import { cn } from '@/lib/utils';
 
@@ -51,6 +53,7 @@ interface CreatePolicyDialogProps {
   onOpenChange: (open: boolean) => void;
   templates: RetentionPolicyTemplate[];
   initialData?: RetentionPolicy | null;
+  existingPolicies?: RetentionPolicy[];
 }
 
 export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
@@ -58,12 +61,14 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
   onOpenChange,
   templates,
   initialData,
+  existingPolicies = [],
 }) => {
   const { createPolicy, createFromTemplate, updatePolicy } = useRetentionPolicies();
   const [activeTab, setActiveTab] = useState<'template' | 'custom'>('template');
   const [editingTemplate, setEditingTemplate] = useState<RetentionPolicyTemplate | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showAIRecommendations, setShowAIRecommendations] = useState(false);
 
   // Form state
   const [name, setName] = useState('');
@@ -571,17 +576,29 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
           </ScrollArea>
         </Tabs>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleSubmit} 
-            disabled={isSubmitting || (activeTab === 'template' ? !selectedTemplate : !name)}
-          >
-            <Shield className="h-4 w-4 mr-2" />
-            {isEditing ? 'Update Policy' : 'Create Policy'}
-          </Button>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <div className="flex-1">
+            <Button 
+              variant="outline" 
+              onClick={() => setShowAIRecommendations(true)}
+              className="w-full sm:w-auto text-purple-600 border-purple-200 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-800 dark:hover:bg-purple-950"
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              AI Recommendations
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSubmit} 
+              disabled={isSubmitting || (activeTab === 'template' ? !selectedTemplate : !name)}
+            >
+              <Shield className="h-4 w-4 mr-2" />
+              {isEditing ? 'Update Policy' : 'Create Policy'}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
 
@@ -592,6 +609,36 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
         template={editingTemplate}
         onSuccess={() => {
           // Template updated - parent will refresh
+        }}
+      />
+
+      {/* AI Policy Recommendations Dialog */}
+      <AIPolicyRecommendations
+        open={showAIRecommendations}
+        onOpenChange={setShowAIRecommendations}
+        existingPolicies={existingPolicies}
+        onCreatePolicy={(policyData) => {
+          // Pre-fill the form with AI recommendation
+          setName(policyData.name || '');
+          setDescription(policyData.description || '');
+          if (policyData.retention_period_days) {
+            const days = policyData.retention_period_days;
+            if (days >= 365 && days % 365 === 0) {
+              setRetentionUnit('years');
+              setRetentionDays(days / 365);
+            } else {
+              setRetentionUnit('days');
+              setRetentionDays(days);
+            }
+          }
+          setDispositionAction(policyData.disposition_action || 'review');
+          setTriggerType(policyData.trigger_type || 'creation_date');
+          setComplianceFramework(policyData.compliance_framework || '');
+          setRequiresApproval(policyData.requires_approval || false);
+          setNotificationDays(policyData.notification_days_before || 30);
+          setCategories(policyData.applies_to_categories || []);
+          setActiveTab('custom');
+          setShowAIRecommendations(false);
         }}
       />
     </Dialog>

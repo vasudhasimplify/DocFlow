@@ -21,6 +21,8 @@ import {
   CheckCircle,
   FileText,
   ExternalLink,
+  ThumbsUp,
+  ThumbsDown,
 } from 'lucide-react';
 import { useLockNotifications } from '@/hooks/useLockNotifications';
 import { formatDistanceToNow } from 'date-fns';
@@ -34,6 +36,8 @@ const notificationIcons = {
   ownership_transferred: UserCheck,
   access_requested: ExternalLink,
   share_accessed: ExternalLink,
+  workflow_approved: ThumbsUp,
+  workflow_rejected: ThumbsDown,
 };
 
 const notificationColors = {
@@ -44,6 +48,8 @@ const notificationColors = {
   ownership_transferred: 'text-purple-500',
   access_requested: 'text-emerald-500',
   share_accessed: 'text-emerald-500',
+  workflow_approved: 'text-green-500',
+  workflow_rejected: 'text-red-500',
 };
 
 export function LockNotificationsList() {

@@ -71,7 +71,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { CheckOutDialog } from '@/components/checkinout/CheckOutDialog';
+
 import { TransferOwnershipDialog } from '@/components/ownership/TransferOwnershipDialog';
 import { useOfflineMode } from '@/hooks/useOfflineMode';
 import { MoveToFolderDialog } from './MoveToFolderDialog';
@@ -148,8 +148,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
     return !!(doc.metadata as any)?.has_ai_insights;
   };
 
-  // Check Out and Transfer Dialog states
-  const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
+  // Transfer Dialog state
   const [showTransferDialog, setShowTransferDialog] = useState(false);
   const [showComplianceDialog, setShowComplianceDialog] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
@@ -815,14 +814,6 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                               <DropdownMenuItem onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedDocument(document);
-                                setShowCheckOutDialog(true);
-                              }}>
-                                <Lock className="w-4 h-4 mr-2" />
-                                Check Out
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedDocument(document);
                                 setShowTransferDialog(true);
                               }}>
                                 <UserMinus className="w-4 h-4 mr-2" />
@@ -1030,13 +1021,6 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
                   <ContextMenuSeparator />
                   <ContextMenuItem onClick={() => {
                     setSelectedDocument(document);
-                    setShowCheckOutDialog(true);
-                  }}>
-                    <Lock className="w-4 h-4 mr-2" />
-                    Check Out
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => {
-                    setSelectedDocument(document);
                     setShowTransferDialog(true);
                   }}>
                     <UserMinus className="w-4 h-4 mr-2" />
@@ -1114,18 +1098,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
       {/* Other Dialogs */}
       {selectedDocument && (
         <>
-          <CheckOutDialog
-            open={showCheckOutDialog}
-            onOpenChange={setShowCheckOutDialog}
-            documentId={selectedDocument.id}
-            documentName={selectedDocument.file_name}
-            onCheckOutComplete={() => {
-              toast({
-                title: "Document checked out",
-                description: "You can now work on this document exclusively.",
-              });
-            }}
-          />
+          {/* CheckOutDialog removed - only guest checkout requests supported */}
 
           <TransferOwnershipDialog
             open={showTransferDialog}

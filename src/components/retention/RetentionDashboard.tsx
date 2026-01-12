@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Shield, Clock, AlertTriangle, Archive, Trash2, FileText, 
   Scale, Plus, RefreshCw, Settings, Download, Filter,
-  Calendar, CheckCircle, XCircle, Eye, Send, Lock
+  Calendar, CheckCircle, XCircle, Eye, Send, Lock, ExternalLink
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,10 +28,28 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { FileSpreadsheet, FileText as FileTextIcon } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import ExcelJS from 'exceljs';
+
+// Document filter type for navigation
+type DocumentFilterType = 
+  | 'active' 
+  | 'pending_review' 
+  | 'pending_approval' 
+  | 'on_hold' 
+  | 'disposed' 
+  | 'archived'
+  | 'expiring_soon'
+  | 'legal_hold'
+  | 'all';
 
 export const RetentionDashboard: React.FC = () => {
   const {
@@ -51,6 +69,28 @@ export const RetentionDashboard: React.FC = () => {
   const [showApplyPolicy, setShowApplyPolicy] = useState(false);
   const [editingHold, setEditingHold] = useState<typeof legalHolds[0] | null>(null);
   const [editingPolicy, setEditingPolicy] = useState<typeof policies[0] | null>(null);
+  const [documentFilter, setDocumentFilter] = useState<DocumentFilterType | undefined>(undefined);
+
+  // Handler for navigating to documents tab with optional filter
+  const handleNavigateToDocuments = (filter?: DocumentFilterType) => {
+    setDocumentFilter(filter);
+    setActiveTab('documents');
+  };
+
+  // Handler for navigating to legal holds tab
+  const handleNavigateToLegalHolds = () => {
+    setActiveTab('holds');
+  };
+
+  // Stat card descriptions for tooltips
+  const statDescriptions: Record<string, string> = {
+    'Active Policies': 'Number of retention policies currently in effect. Click to view all policies.',
+    'Documents Tracked': 'Total documents under retention management. Click to view all documents.',
+    'Pending Review': 'Documents awaiting review before disposition. Click to view pending documents.',
+    'Expiring Soon': 'Documents with retention periods ending within 30 days. Click to view expiring documents.',
+    'Legal Holds': 'Active legal holds preventing document disposition. Click to view legal holds.',
+    'Disposed This Month': 'Documents disposed of in the current month. Click to view disposed documents.',
+  };
 
   const exportToPDF = async () => {
     try {
@@ -396,6 +436,8 @@ export const RetentionDashboard: React.FC = () => {
       icon: Shield,
       color: 'text-blue-500',
       bgColor: 'bg-blue-500/10',
+      onClick: () => setActiveTab('policies'),
+      filterType: undefined as DocumentFilterType | undefined,
     },
     {
       title: 'Documents Tracked',
@@ -403,6 +445,8 @@ export const RetentionDashboard: React.FC = () => {
       icon: FileText,
       color: 'text-green-500',
       bgColor: 'bg-green-500/10',
+      onClick: () => handleNavigateToDocuments('all'),
+      filterType: 'all' as DocumentFilterType,
     },
     {
       title: 'Pending Review',
@@ -411,6 +455,8 @@ export const RetentionDashboard: React.FC = () => {
       color: 'text-yellow-500',
       bgColor: 'bg-yellow-500/10',
       alert: stats.documents_pending_review > 0,
+      onClick: () => handleNavigateToDocuments('pending_review'),
+      filterType: 'pending_review' as DocumentFilterType,
     },
     {
       title: 'Expiring Soon',
@@ -419,6 +465,8 @@ export const RetentionDashboard: React.FC = () => {
       color: 'text-orange-500',
       bgColor: 'bg-orange-500/10',
       alert: stats.documents_expiring_soon > 0,
+      onClick: () => handleNavigateToDocuments('expiring_soon'),
+      filterType: 'expiring_soon' as DocumentFilterType,
     },
     {
       title: 'Legal Holds',
@@ -426,6 +474,8 @@ export const RetentionDashboard: React.FC = () => {
       icon: Scale,
       color: 'text-purple-500',
       bgColor: 'bg-purple-500/10',
+      onClick: () => handleNavigateToLegalHolds(),
+      filterType: 'legal_hold' as DocumentFilterType,
     },
     {
       title: 'Disposed This Month',
@@ -433,10 +483,13 @@ export const RetentionDashboard: React.FC = () => {
       icon: Archive,
       color: 'text-gray-500',
       bgColor: 'bg-gray-500/10',
+      onClick: () => handleNavigateToDocuments('disposed'),
+      filterType: 'disposed' as DocumentFilterType,
     },
   ];
 
   return (
+    <TooltipProvider>
     <div className="bg-background">
       {/* Header */}
       <div className="border-b p-6">
@@ -493,28 +546,44 @@ export const RetentionDashboard: React.FC = () => {
       <div className="p-6 border-b">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {statCards.map((stat) => (
-            <Card key={stat.title} className={cn("relative overflow-hidden", stat.alert && "ring-2 ring-orange-500/50")}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className={cn("p-2 rounded-lg", stat.bgColor)}>
-                    <stat.icon className={cn("h-5 w-5", stat.color)} />
-                  </div>
-                  {stat.alert && (
-                    <AlertTriangle className="h-4 w-4 text-orange-500 animate-pulse" />
+            <Tooltip key={stat.title}>
+              <TooltipTrigger asChild>
+                <Card 
+                  className={cn(
+                    "relative overflow-hidden cursor-pointer transition-all hover:shadow-md hover:scale-[1.02]", 
+                    stat.alert && "ring-2 ring-orange-500/50"
                   )}
-                </div>
-                <div className="mt-3">
-                  <p className="text-2xl font-bold">{stat.value}</p>
-                  <p className="text-xs text-muted-foreground">{stat.title}</p>
-                  {stat.total !== undefined && (
-                    <Progress 
-                      value={(stat.value / stat.total) * 100} 
-                      className="h-1 mt-2" 
-                    />
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                  onClick={stat.onClick}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className={cn("p-2 rounded-lg", stat.bgColor)}>
+                        <stat.icon className={cn("h-5 w-5", stat.color)} />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {stat.alert && (
+                          <AlertTriangle className="h-4 w-4 text-orange-500 animate-pulse" />
+                        )}
+                        <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <p className="text-2xl font-bold">{stat.value}</p>
+                      <p className="text-xs text-muted-foreground">{stat.title}</p>
+                      {stat.total !== undefined && (
+                        <Progress 
+                          value={(stat.value / stat.total) * 100} 
+                          className="h-1 mt-2" 
+                        />
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[200px]">
+                <p className="text-sm">{statDescriptions[stat.title]}</p>
+              </TooltipContent>
+            </Tooltip>
           ))}
         </div>
       </div>
@@ -566,6 +635,8 @@ export const RetentionDashboard: React.FC = () => {
               legalHolds={legalHolds}
               auditLogs={auditLogs}
               stats={stats}
+              onNavigateToDocuments={handleNavigateToDocuments}
+              onNavigateToLegalHolds={handleNavigateToLegalHolds}
             />
           </TabsContent>
 
@@ -583,7 +654,7 @@ export const RetentionDashboard: React.FC = () => {
           </TabsContent>
 
           <TabsContent value="documents" className="m-0">
-            <DocumentRetentionList />
+            <DocumentRetentionList initialFilter={documentFilter} />
           </TabsContent>
 
           <TabsContent value="disposition" className="m-0">
@@ -609,6 +680,7 @@ export const RetentionDashboard: React.FC = () => {
         open={showCreatePolicy} 
         onOpenChange={setShowCreatePolicy}
         templates={templates}
+        existingPolicies={policies}
       />
       
       {/* Edit Policy Dialog */}
@@ -620,6 +692,7 @@ export const RetentionDashboard: React.FC = () => {
           }}
           templates={templates}
           initialData={editingPolicy}
+          existingPolicies={policies}
         />
       )}
       <CreateLegalHoldDialog 
@@ -644,5 +717,6 @@ export const RetentionDashboard: React.FC = () => {
         onCreatePolicy={() => setShowCreatePolicy(true)}
       />
     </div>
+    </TooltipProvider>
   );
 };

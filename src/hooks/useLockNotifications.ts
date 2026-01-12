@@ -6,9 +6,9 @@ import { useToast } from './use-toast';
 export interface LockNotification {
   id: string;
   document_id: string;
-  lock_id: string;
+  lock_id: string | null;
   notified_user_id: string;
-  notification_type: 'lock_acquired' | 'lock_released' | 'lock_expired' | 'force_unlock' | 'ownership_transferred' | 'access_requested' | 'share_accessed';
+  notification_type: 'lock_acquired' | 'lock_released' | 'lock_expired' | 'force_unlock' | 'ownership_transferred' | 'access_requested' | 'share_accessed' | 'workflow_approved' | 'workflow_rejected';
   message: string | null;
   is_read: boolean;
   created_at: string;

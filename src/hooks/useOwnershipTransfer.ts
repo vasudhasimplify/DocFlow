@@ -125,7 +125,7 @@ export function useOwnershipTransfer() {
       if (lookupError || !targetUserId) {
         toast({
           title: 'User not found',
-          description: `No user found with email: ${toEmail}. They may need to sign up first.`,
+          description: `${toEmail} hasn't created an account yet. They can sign up with any email (Gmail, Outlook, etc.) at the signup page.`,
           variant: 'destructive',
         });
         console.error('📧 Target user not found:', toEmail, lookupError);
@@ -134,33 +134,44 @@ export function useOwnershipTransfer() {
 
       console.log('📧 Target user found:', targetUserId);
 
-      const transferData = {
+      // Call backend API to create transfer (this sends emails and notifications)
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const requestBody = {
         document_id: documentId,
-        from_user_id: user.user.id,
-        to_user_id: targetUserId,
         to_user_email: toEmail,
-        message,
-        status: 'pending' as const,
+        message: message || null,
       };
+      console.log('📧 Sending request to backend:', { url: `${API_BASE_URL}/api/v1/transfers/initiate`, body: requestBody, headers: { 'x-user-id': user.user.id } });
+      
+      const response = await fetch(`${API_BASE_URL}/api/v1/transfers/initiate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.user.id,
+        },
+        body: JSON.stringify({
+          document_id: documentId,
+          to_user_email: toEmail,
+          message: message || null,
+        }),
+      });
 
-      console.log('📧 Creating transfer:', transferData);
-
-      const { data, error } = await supabase
-        .from('document_ownership_transfers')
-        .insert(transferData)
-        .select()
-        .single();
-
-      if (error) {
-        console.error('📧 Transfer creation error:', error);
-        throw error;
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('📧 Backend error response:', errorData);
+        console.error('📧 Detail array:', Array.isArray(errorData.detail) ? errorData.detail : 'not an array');
+        const errorMsg = Array.isArray(errorData.detail) 
+          ? errorData.detail.map((e: any) => `${e.loc?.join('.')}: ${e.msg}`).join(', ')
+          : errorData.detail || JSON.stringify(errorData);
+        throw new Error(errorMsg || 'Failed to create transfer');
       }
 
+      const data = await response.json();
       console.log('📧 Transfer created successfully:', data);
 
       toast({
         title: 'Transfer initiated',
-        description: `Ownership transfer request sent to ${toEmail}`,
+        description: `Ownership transfer request sent to ${toEmail}. They will receive an email notification.`,
       });
 
       fetchTransfers();
@@ -181,6 +192,8 @@ export function useOwnershipTransfer() {
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) throw new Error('Not authenticated');
 
+      console.log('🔄 Accepting transfer:', transferId, 'User:', user.user.id, user.user.email);
+
       // Get the transfer to validate
       const { data: transfer } = await supabase
         .from('document_ownership_transfers')
@@ -196,6 +209,8 @@ export function useOwnershipTransfer() {
         });
         return;
       }
+
+      console.log('📋 Transfer details before acceptance:', transfer);
 
       // Prevent accepting your own transfer
       if (transfer.from_user_id === user.user.id) {
@@ -217,19 +232,37 @@ export function useOwnershipTransfer() {
         return;
       }
 
+      console.log('✅ Validation passed, calling accept_ownership_transfer function...');
+
       // Call the database function to handle ownership transfer atomically
       const { error } = await supabase.rpc('accept_ownership_transfer', {
         transfer_id: transferId
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error from accept_ownership_transfer:', error);
+        throw error;
+      }
+
+      console.log('✅ Transfer accepted successfully');
+
+      // Verify the document ownership was updated
+      const { data: updatedDoc } = await supabase
+        .from('documents')
+        .select('id, file_name, user_id')
+        .eq('id', transfer.document_id)
+        .single();
+
+      console.log('📄 Document after transfer:', updatedDoc);
+      console.log('🔍 New owner matches current user?', updatedDoc?.user_id === user.user.id);
 
       toast({
         title: 'Transfer accepted',
-        description: 'You are now the owner of this document. The previous owner no longer has access.',
+        description: 'You are now the owner of this document. Refreshing your documents...',
       });
 
-      fetchTransfers();
+      // Force a full page reload to refresh all queries and clear any cache
+      window.location.reload();
     } catch (error) {
       console.error('Error accepting transfer:', error);
       toast({
