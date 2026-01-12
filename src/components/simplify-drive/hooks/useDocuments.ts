@@ -189,15 +189,13 @@ export function useDocuments(options: UseDocumentsOptions = {}) {
       const sharedDocIds = sharedDocs?.map(s => s.resource_id) || [];
       console.log('📤 Found', sharedDocIds.length, 'documents shared with user');
 
-      // Build query for owned documents
+      // Build query for owned documents (by user_id or uploaded_by) and shared documents
       let query = supabase
         .from('documents')
         .select(DOCUMENT_SELECT_COLUMNS, { count: 'exact' })
-        .or(`uploaded_by.eq.${user.user.id},user_id.eq.${user.user.id}`)
-        .select('*')
         .eq('is_deleted', false);
 
-      // Include both owned documents AND shared documents
+      // Include owned documents AND shared documents in a single OR clause
       if (sharedDocIds.length > 0) {
         query = query.or(`uploaded_by.eq.${user.user.id},user_id.eq.${user.user.id},id.in.(${sharedDocIds.join(',')})`);
       } else {

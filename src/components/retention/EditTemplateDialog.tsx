@@ -111,8 +111,6 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
           trigger_type: triggerType,
           compliance_framework: complianceFramework || null,
           requires_approval: requiresApproval,
-          notification_days_before: notificationDays,
-          updated_at: new Date().toISOString(),
         })
         .eq('id', template.id);
 

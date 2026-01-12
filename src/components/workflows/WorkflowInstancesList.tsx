@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -13,6 +14,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Activity,
@@ -25,13 +33,18 @@ import {
   FileText,
   ChevronRight,
   Play,
-  Trash2
+  Trash2,
+  Send,
+  MessageSquare,
+  ArrowRightLeft
 } from 'lucide-react';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { useAuth } from '@/hooks/useAuth';
 import { PRIORITY_CONFIG } from '@/types/workflow';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ExtractedDataViewer } from './ExtractedDataViewer';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/hooks/use-toast';
 
 const stepStatusConfig: Record<string, { icon: React.ReactNode; color: string; bgColor: string }> = {
   pending: { icon: <Clock className="h-4 w-4" />, color: 'text-gray-500', bgColor: 'bg-gray-100' },
@@ -47,7 +60,7 @@ interface WorkflowInstancesListProps {
 }
 
 export const WorkflowInstancesList: React.FC<WorkflowInstancesListProps> = ({ filter = 'active' }) => {
-  const { instances, approveStep, rejectStep, deleteInstance, isLoading, fetchInstances } = useWorkflows();
+  const { instances, workflows, approveStep, rejectStep, deleteInstance, isLoading, fetchInstances } = useWorkflows();
   const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInstance, setSelectedInstance] = useState<any | null>(null);
@@ -58,6 +71,11 @@ export const WorkflowInstancesList: React.FC<WorkflowInstancesListProps> = ({ fi
   } | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<any | null>(null);
   const [comment, setComment] = useState('');
+  const [sendToOriginator, setSendToOriginator] = useState(true);
+  
+  // Redirect workflow dialog - user initiated
+  const [redirectDialog, setRedirectDialog] = useState<any | null>(null);
+  const [selectedRedirectWorkflow, setSelectedRedirectWorkflow] = useState<string>('');
 
   // Listen for open-workflow-instance event (from email links)
   useEffect(() => {
@@ -75,11 +93,12 @@ export const WorkflowInstancesList: React.FC<WorkflowInstancesListProps> = ({ fi
     };
   }, [instances]);
 
-  // Filter instances by status based on filter prop
+  // Filter instances by status based on filter prop - EXCLUDE cancelled from the start
   const statusFilteredInstances = filter === 'completed' 
-    ? instances.filter(inst => inst.status === 'completed' || inst.status === 'rejected')
-    : instances.filter(inst => inst.status === 'active' || inst.status === 'paused');
+    ? instances.filter(inst => (inst.status === 'completed' || inst.status === 'rejected') && inst.status !== 'cancelled')
+    : instances.filter(inst => (inst.status === 'active' || inst.status === 'paused') && inst.status !== 'cancelled');
 
+  // Apply search filter
   const filteredInstances = statusFilteredInstances.filter(inst =>
     (inst.document_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (inst.workflow?.name || '').toLowerCase().includes(searchQuery.toLowerCase())
@@ -88,15 +107,145 @@ export const WorkflowInstancesList: React.FC<WorkflowInstancesListProps> = ({ fi
   const handleAction = async () => {
     if (!actionDialog) return;
 
-    if (actionDialog.type === 'approve') {
-      await approveStep(actionDialog.instance.id, actionDialog.step.step_id, comment);
-    } else {
-      await rejectStep(actionDialog.instance.id, actionDialog.step.step_id, comment);
+    try {
+      if (actionDialog.type === 'approve') {
+        await approveStep(actionDialog.instance.id, actionDialog.step.step_id, comment);
+        
+        // Send comment to originator if enabled
+        if (sendToOriginator && comment.trim() && actionDialog.instance.started_by) {
+          await sendCommentToOriginator(actionDialog.instance, comment, 'approved');
+        }
+        
+        toast({
+          title: 'Step Approved',
+          description: comment ? 'Approval comment sent to originator' : 'Step approved successfully',
+        });
+      } else {
+        await rejectStep(actionDialog.instance.id, actionDialog.step.step_id, comment);
+        
+        // Always notify originator on rejection
+        if (actionDialog.instance.started_by) {
+          await sendCommentToOriginator(actionDialog.instance, comment, 'rejected');
+        }
+        
+        toast({
+          title: 'Step Rejected',
+          description: 'Rejection notification sent to originator',
+          variant: 'destructive'
+        });
+      }
+    } catch (error) {
+      console.error('Action failed:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to perform action',
+        variant: 'destructive'
+      });
     }
 
     setActionDialog(null);
     setComment('');
     setSelectedInstance(null);
+  };
+
+  // Send comment notification to the document originator
+  const sendCommentToOriginator = async (instance: any, commentText: string, action: string) => {
+    try {
+      // Insert into lock_notifications table (reusing existing notification infrastructure)
+      await supabase.from('lock_notifications').insert({
+        document_id: instance.document_id,
+        lock_id: null, // Not related to a lock
+        notified_user_id: instance.started_by,
+        notification_type: action === 'approved' ? 'workflow_approved' : 'workflow_rejected',
+        message: `Your workflow "${instance.workflow?.name}" was ${action}. ${commentText ? `Comment: ${commentText}` : ''}`,
+        is_read: false,
+      });
+      console.log(`📧 Notification sent to originator for ${action} workflow`);
+    } catch (error) {
+      console.error('Failed to send notification:', error);
+    }
+  };
+
+  // Handle redirect workflow - user decides wrong workflow was started
+  const handleRedirectWorkflow = async () => {
+    if (!redirectDialog || !selectedRedirectWorkflow) return;
+
+    try {
+      // Cancel current workflow instance
+      await (supabase as any)
+        .from('workflow_instances')
+        .update({ 
+          status: 'cancelled',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', redirectDialog.id);
+
+      // Also cancel all pending step instances for this workflow
+      await (supabase as any)
+        .from('workflow_step_instances')
+        .update({ 
+          status: 'cancelled',
+          completed_at: new Date().toISOString()
+        })
+        .eq('instance_id', redirectDialog.id)
+        .in('status', ['pending', 'in_progress']);
+
+      console.log('✅ Previous workflow and steps cancelled');
+
+      // Get the selected workflow
+      const selectedWorkflow = workflows.find(w => w.id === selectedRedirectWorkflow);
+      
+      if (selectedWorkflow && redirectDialog.document_id) {
+        // Use backend API to create new workflow instance properly (with steps and emails)
+        // API endpoint is POST /{workflow_id}/instances
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+        const response = await fetch(`${backendUrl}/api/workflows/${selectedRedirectWorkflow}/instances`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+          },
+          body: JSON.stringify({
+            document_id: redirectDialog.document_id,
+            priority: redirectDialog.priority,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || 'Failed to start workflow');
+        }
+
+        const result = await response.json();
+        console.log('✅ New workflow created with steps:', result);
+
+        // Send notification to originator about the redirect
+        await supabase.from('lock_notifications').insert({
+          document_id: redirectDialog.document_id,
+          lock_id: null,
+          notified_user_id: redirectDialog.started_by,
+          notification_type: 'workflow_approved', // Reusing existing type
+          message: `Your workflow "${redirectDialog.workflow?.name}" was redirected to "${selectedWorkflow.name}"`,
+          is_read: false,
+        });
+
+        toast({
+          title: 'Workflow Redirected',
+          description: `Document redirected to "${selectedWorkflow.name}" with email notifications sent`,
+        });
+      }
+    } catch (error) {
+      console.error('Redirect failed:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to redirect workflow',
+        variant: 'destructive'
+      });
+    }
+
+    setRedirectDialog(null);
+    setSelectedRedirectWorkflow('');
+    fetchInstances();
   };
   
   const handleDelete = async () => {
@@ -406,7 +555,21 @@ export const WorkflowInstancesList: React.FC<WorkflowInstancesListProps> = ({ fi
               </div>
               </ScrollArea>
 
-              <DialogFooter>
+              <DialogFooter className="flex-col sm:flex-row gap-2">
+                {/* Wrong Workflow? Redirect option */}
+                {selectedInstance.status === 'active' && (
+                  <Button 
+                    variant="outline" 
+                    className="text-amber-600 border-amber-300 hover:bg-amber-50"
+                    onClick={() => {
+                      setRedirectDialog(selectedInstance);
+                      setSelectedInstance(null);
+                    }}
+                  >
+                    <ArrowRightLeft className="h-4 w-4 mr-2" />
+                    Wrong Workflow? Redirect
+                  </Button>
+                )}
                 <Button variant="outline" onClick={() => setSelectedInstance(null)}>
                   Close
                 </Button>
@@ -416,34 +579,72 @@ export const WorkflowInstancesList: React.FC<WorkflowInstancesListProps> = ({ fi
         </DialogContent>
       </Dialog>
 
-      {/* Action Dialog */}
+      {/* Action Dialog with Comments to Originator */}
       <Dialog open={!!actionDialog} onOpenChange={() => setActionDialog(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {actionDialog?.type === 'approve' ? 'Approve Step' : 'Reject Step'}
+            <DialogTitle className="flex items-center gap-2">
+              {actionDialog?.type === 'approve' ? (
+                <>
+                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                  Approve Step
+                </>
+              ) : (
+                <>
+                  <XCircle className="h-5 w-5 text-red-500" />
+                  Reject Step
+                </>
+              )}
             </DialogTitle>
             <DialogDescription>
               {actionDialog?.type === 'approve'
-                ? 'Add an optional comment and approve this step'
-                : 'Please provide a reason for rejection'}
+                ? 'Add a comment (optional) to send to the document originator'
+                : 'Please provide a reason for rejection (required)'}
             </DialogDescription>
           </DialogHeader>
 
-          <div>
-            <label className="text-sm font-medium">
-              {actionDialog?.type === 'approve' ? 'Comment (optional)' : 'Rejection Reason'}
-            </label>
-            <Textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder={actionDialog?.type === 'approve'
-                ? 'Add a comment...'
-                : 'Explain why this is being rejected...'}
-              className="mt-1"
-              rows={3}
-            />
-          </div>
+          {actionDialog && (
+            <div className="space-y-4">
+              <div className="bg-muted p-3 rounded-lg">
+                <p className="font-medium">{actionDialog.instance.document_name}</p>
+                <p className="text-sm text-muted-foreground">
+                  Step: {actionDialog.step.step_name || 'Current Step'}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="comment" className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  Comment {actionDialog.type === 'reject' && <span className="text-destructive">*</span>}
+                </Label>
+                <Textarea
+                  id="comment"
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder={actionDialog.type === 'approve'
+                    ? 'Add an optional comment for the originator...'
+                    : 'Please explain why you are rejecting this step...'}
+                  rows={3}
+                />
+              </div>
+
+              {actionDialog.type === 'approve' && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="sendToOriginator"
+                    checked={sendToOriginator}
+                    onChange={(e) => setSendToOriginator(e.target.checked)}
+                    className="rounded"
+                  />
+                  <Label htmlFor="sendToOriginator" className="text-sm cursor-pointer flex items-center gap-1">
+                    <Send className="h-3 w-3" />
+                    Send comment to originator
+                  </Label>
+                </div>
+              )}
+            </div>
+          )}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setActionDialog(null)}>
@@ -502,6 +703,76 @@ export const WorkflowInstancesList: React.FC<WorkflowInstancesListProps> = ({ fi
             <Button variant="destructive" onClick={handleDelete}>
               <Trash2 className="h-4 w-4 mr-2" />
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Redirect Workflow Dialog - User initiated */}
+      <Dialog open={!!redirectDialog} onOpenChange={() => setRedirectDialog(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-5 w-5 text-amber-500" />
+              Redirect to Correct Workflow
+            </DialogTitle>
+            <DialogDescription>
+              If this document was assigned to the wrong workflow, select the correct one below.
+            </DialogDescription>
+          </DialogHeader>
+
+          {redirectDialog && (
+            <div className="space-y-4">
+              <div className="bg-muted p-3 rounded-lg">
+                <p className="font-medium">{redirectDialog.document_name}</p>
+                <p className="text-sm text-muted-foreground">
+                  Current Workflow: {redirectDialog.workflow?.name || 'Unknown'}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Select Correct Workflow</Label>
+                <Select value={selectedRedirectWorkflow} onValueChange={setSelectedRedirectWorkflow}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose the correct workflow..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workflows.length === 0 ? (
+                      <SelectItem value="none" disabled>No workflows available</SelectItem>
+                    ) : (
+                      workflows
+                        .filter(w => w.id !== redirectDialog.workflow_id)
+                        .map(w => (
+                          <SelectItem key={w.id} value={w.id}>
+                            {w.name} {w.category ? `(${w.category})` : ''} 
+                            {w.status !== 'active' ? ` [${w.status}]` : ''}
+                          </SelectItem>
+                        ))
+                    )}
+                  </SelectContent>
+                </Select>
+                {workflows.length === 0 && (
+                  <p className="text-xs text-amber-600">No workflows loaded. Try refreshing the page.</p>
+                )}
+              </div>
+
+              <p className="text-sm text-muted-foreground">
+                The current workflow will be cancelled and a new one will be started with the selected workflow.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRedirectDialog(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRedirectWorkflow}
+              disabled={!selectedRedirectWorkflow || isLoading}
+              className="bg-amber-500 hover:bg-amber-600"
+            >
+              <ArrowRightLeft className="h-4 w-4 mr-2" />
+              Redirect Workflow
             </Button>
           </DialogFooter>
         </DialogContent>

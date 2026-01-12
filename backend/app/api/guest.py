@@ -4,10 +4,41 @@ Provides signed URLs for guest document viewing
 """
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from app.core.supabase import supabase
 import os
 
 router = APIRouter(prefix="/api/guest", tags=["guest"])
+
+
+class SignedUrlRequest(BaseModel):
+    storage_path: str
+    expires_in: int = 3600  # Default 1 hour
+
+
+@router.post("/signed-url")
+async def create_signed_url(request: SignedUrlRequest):
+    """
+    Create a signed URL for a storage path
+    Uses service role to bypass RLS restrictions
+    """
+    try:
+        # Create signed URL using service role (bypasses RLS)
+        signed_url_response = supabase.storage\
+            .from_('documents')\
+            .create_signed_url(request.storage_path, request.expires_in)
+        
+        if not signed_url_response or not signed_url_response.get('signedURL'):
+            raise HTTPException(status_code=500, detail="Failed to generate signed URL")
+        
+        return {
+            "signed_url": signed_url_response['signedURL'],
+            "expires_in": request.expires_in
+        }
+    
+    except Exception as e:
+        print(f"Error creating signed URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/document/{share_token}")
 async def get_guest_document_url(share_token: str):

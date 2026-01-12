@@ -108,18 +108,26 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
   const [showSaveButton, setShowSaveButton] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [guestAccessValidated, setGuestAccessValidated] = useState(false);
+  const [guestAccessChecked, setGuestAccessChecked] = useState(false);
 
   // Validate guest access if guestEmail is provided and mode is edit
   useEffect(() => {
+    // Skip if already checked or validated
+    if (guestAccessChecked || guestAccessValidated) {
+      return;
+    }
+    
     if (!guestEmail || mode !== 'edit') {
       setGuestAccessValidated(true);
+      setGuestAccessChecked(true);
       return;
     }
 
     const validateAccess = async () => {
+      setGuestAccessChecked(true);
       try {
         const response = await fetch(
-          `/api/v1/editor/validate-guest-access?document_id=${documentId}&guest_email=${encodeURIComponent(guestEmail)}`
+          `/api/editor/validate-guest-access?document_id=${documentId}&guest_email=${encodeURIComponent(guestEmail)}`
         );
         
         const data = await response.json();
@@ -196,6 +204,16 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
       documentName,
       fileType
     });
+
+    // Verify documentUrl is valid
+    if (!documentUrl || !documentUrl.startsWith('http')) {
+      const errorMsg = `Invalid document URL: ${documentUrl}`;
+      console.error(errorMsg);
+      setError(errorMsg);
+      setIsLoading(false);
+      onError?.(errorMsg);
+      return;
+    }
 
     // Generate unique key for document
     const documentKey = `${documentId}_${Date.now()}`;
@@ -287,6 +305,8 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
       type: 'desktop',
     };
 
+    console.log('OnlyOffice Config:', JSON.stringify(config, null, 2));
+
     try {
       // Destroy existing editor if any
       if (editorRef.current) {
@@ -295,11 +315,12 @@ export const OnlyOfficeEditor: React.FC<OnlyOfficeEditorProps> = ({
 
       // Create new editor
       editorRef.current = new window.DocsAPI.DocEditor('onlyoffice-editor', config);
-      console.log('OnlyOffice editor created');
+      console.log('OnlyOffice editor created successfully');
     } catch (err) {
       console.error('Failed to create OnlyOffice editor:', err);
       setError(`Failed to create editor: ${err}`);
       setIsLoading(false);
+      onError?.(err instanceof Error ? err.message : String(err));
     }
 
     return () => {

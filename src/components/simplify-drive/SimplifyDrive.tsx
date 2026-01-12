@@ -13,6 +13,7 @@ import { FeatureContent } from './components/FeatureContent';
 import { DocumentModals } from './components/DocumentModals';
 import { DocumentChatbot } from '../document-manager/DocumentChatbot';
 import { DocumentViewer } from '../document-manager/DocumentViewer';
+import { PolicyDocumentDetector } from '../retention/PolicyDocumentDetector';
 import {
   OfflineDocumentsPanel,
   SyncStatusDialog
@@ -76,6 +77,10 @@ export function SimplifyDrive() {
   const [showOfflinePanel, setShowOfflinePanel] = useState(false);
   const [showSyncDialog, setShowSyncDialog] = useState(false);
 
+  // Policy Detection State (lifted from EnhancedDocumentUpload to persist after upload modal closes)
+  const [policyDocumentId, setPolicyDocumentId] = useState<string | null>(null);
+  const [policyDocumentName, setPolicyDocumentName] = useState<string | null>(null);
+
   const { toast } = useToast();
   const {
     status: offlineStatus,
@@ -94,17 +99,63 @@ export function SimplifyDrive() {
       // Fetch documents under this legal hold
       const fetchLegalHoldDocuments = async () => {
         try {
-          const { data: retentionStatuses, error } = await supabase
-            .from('document_retention_status')
-            .select('document_id')
-            .contains('legal_hold_ids', [state.legalHoldId]);
+          console.log('Fetching documents for legal hold:', state.legalHoldId);
+          
+          // First, get the legal hold details to find document IDs
+          const { data: holdData, error: holdError } = await supabase
+            .from('legal_holds')
+            .select('document_ids, scope, scope_details')
+            .eq('id', state.legalHoldId)
+            .single();
 
-          if (error) {
-            console.error('Error fetching legal hold documents:', error);
+          console.log('Legal hold data:', holdData);
+
+          if (holdError) {
+            console.error('Error fetching legal hold:', holdError);
+            toast({
+              title: "Error",
+              description: "Failed to fetch legal hold details",
+              variant: "destructive",
+            });
             return;
           }
 
-          const documentIds = retentionStatuses?.map(s => s.document_id) || [];
+          let documentIds: string[] = [];
+
+          // Check document_ids array first
+          if (holdData?.document_ids && holdData.document_ids.length > 0) {
+            documentIds = holdData.document_ids;
+          }
+          // Then check scope_details
+          else if (holdData?.scope_details) {
+            const scopeDetails = typeof holdData.scope_details === 'string' 
+              ? JSON.parse(holdData.scope_details) 
+              : holdData.scope_details;
+            
+            if (scopeDetails?.document_ids?.length > 0) {
+              documentIds = scopeDetails.document_ids;
+            }
+          }
+
+          // Also check document_retention_status for documents linked to this hold
+          const { data: retentionStatuses, error: retentionError } = await supabase
+            .from('document_retention_status')
+            .select('document_id, legal_hold_ids')
+            .not('legal_hold_ids', 'is', null);
+
+          if (!retentionError && retentionStatuses) {
+            const additionalDocIds = retentionStatuses
+              .filter(s => {
+                const holdIds = s.legal_hold_ids || [];
+                return Array.isArray(holdIds) && holdIds.includes(state.legalHoldId);
+              })
+              .map(s => s.document_id);
+            
+            // Merge without duplicates
+            documentIds = [...new Set([...documentIds, ...additionalDocIds])];
+          }
+
+          console.log('All document IDs for legal hold:', documentIds);
 
           if (documentIds.length > 0) {
             setSearchQuery(`legal_hold:${state.legalHoldId}:${documentIds.join(',')}`);
@@ -120,6 +171,11 @@ export function SimplifyDrive() {
           }
         } catch (error) {
           console.error('Error loading legal hold documents:', error);
+          toast({
+            title: "Error",
+            description: "Failed to load legal hold documents",
+            variant: "destructive",
+          });
         }
       };
 
@@ -244,16 +300,28 @@ export function SimplifyDrive() {
       }
     };
 
+    // Listen for policy document detection event (from EnhancedDocumentUpload)
+    const handlePolicyDocumentDetected = (event: CustomEvent) => {
+      const { documentId, documentName } = event.detail || {};
+      if (documentId) {
+        console.log('📋 Policy document detected event received:', documentId, documentName);
+        setPolicyDocumentId(documentId);
+        setPolicyDocumentName(documentName);
+      }
+    };
+
     window.addEventListener('documents-changed', handleDocumentsChanged);
     window.addEventListener('upload-started', handleUploadStarted as EventListener);
     window.addEventListener('upload-completed', handleUploadCompleted as EventListener);
     window.addEventListener('preview-document', handlePreviewDocument as EventListener);
+    window.addEventListener('policy-document-detected', handlePolicyDocumentDetected as EventListener);
 
     return () => {
       window.removeEventListener('documents-changed', handleDocumentsChanged);
       window.removeEventListener('upload-started', handleUploadStarted as EventListener);
       window.removeEventListener('upload-completed', handleUploadCompleted as EventListener);
       window.removeEventListener('preview-document', handlePreviewDocument as EventListener);
+      window.removeEventListener('policy-document-detected', handlePolicyDocumentDetected as EventListener);
     };
   }, [refetch, documents]);
 
@@ -603,6 +671,22 @@ export function SimplifyDrive() {
         pendingUploads={pendingUploads}
         onSync={syncSelectedUploads}
         onDismiss={closeSyncDialog}
+      />
+
+      {/* Policy Document Detector - lifted from EnhancedDocumentUpload to persist after upload modal closes */}
+      <PolicyDocumentDetector
+        documentId={policyDocumentId}
+        documentName={policyDocumentName}
+        onClose={() => {
+          setPolicyDocumentId(null);
+          setPolicyDocumentName(null);
+        }}
+        onPoliciesCreated={(policyIds) => {
+          toast({
+            title: 'Retention Policies Created',
+            description: `${policyIds.length} policy(s) created from the document.`,
+          });
+        }}
       />
     </div>
   );

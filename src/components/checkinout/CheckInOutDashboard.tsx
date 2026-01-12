@@ -29,6 +29,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface CheckedOutDocument {
   id: string;
@@ -41,6 +42,11 @@ interface CheckedOutDocument {
   expires_at?: string;
   is_active: boolean;
   document_owner_id?: string;
+  document_owner_email?: string;
+  is_guest_checkout?: boolean;
+  guest_email?: string;
+  approved_at?: string;
+  checkout_request_id?: string;
 }
 
 interface CheckInOutHistory {
@@ -69,6 +75,8 @@ export const CheckInOutDashboard: React.FC = () => {
     expiringSoon: 0,
     checkedInToday: 0
   });
+  const [viewingDocument, setViewingDocument] = useState<{id: string, name: string} | null>(null);
+  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -127,6 +135,7 @@ export const CheckInOutDashboard: React.FC = () => {
   const fetchMyCheckouts = async () => {
     if (!user) return;
     
+    // Fetch regular checkouts (documents I locked as owner)
     const { data, error } = await supabase
       .from('document_locks')
       .select(`
@@ -136,7 +145,8 @@ export const CheckInOutDashboard: React.FC = () => {
         locked_at,
         lock_reason,
         expires_at,
-        is_active
+        is_active,
+        guest_email
       `)
       .eq('locked_by', user.id)
       .eq('is_active', true)
@@ -147,14 +157,39 @@ export const CheckInOutDashboard: React.FC = () => {
       return;
     }
 
-    // Fetch document names
-    const documentIds = data?.map(d => d.document_id) || [];
+    // Also fetch guest checkouts (documents I checked out as a guest)
+    const { data: guestCheckouts, error: guestError } = await supabase
+      .from('document_locks')
+      .select(`
+        id,
+        document_id,
+        locked_by,
+        locked_at,
+        lock_reason,
+        expires_at,
+        is_active,
+        guest_email
+      `)
+      .eq('guest_email', user.email)
+      .eq('is_active', true)
+      .order('locked_at', { ascending: false});
+
+    if (guestError) {
+      console.error('Error fetching guest checkouts:', error);
+    }
+
+    // Combine both lists
+    const allMyCheckouts = [...(data || []), ...(guestCheckouts || [])];
+
+    // Fetch document names and owners
+    const documentIds = allMyCheckouts.map(d => d.document_id) || [];
     let documentsMap: Record<string, string> = {};
+    let documentOwnersMap: Record<string, string> = {};
     
     if (documentIds.length > 0) {
       const { data: docs, error: docsError } = await supabase
         .from('documents')
-        .select('id, file_name')
+        .select('id, file_name, user_id')
         .in('id', documentIds);
       
       if (docsError) {
@@ -167,14 +202,34 @@ export const CheckInOutDashboard: React.FC = () => {
         acc[doc.id] = doc.file_name;
         return acc;
       }, {} as Record<string, string>);
+
+      documentOwnersMap = (docs || []).reduce((acc, doc) => {
+        acc[doc.id] = doc.user_id;
+        return acc;
+      }, {} as Record<string, string>);
       
       console.log('📋 Documents map (My Checkouts):', documentsMap);
     }
 
-    const checkouts: CheckedOutDocument[] = (data || []).map(lock => ({
+    // Fetch owner emails
+    const ownerIds = [...new Set(Object.values(documentOwnersMap))];
+    const ownerEmailsMap: Record<string, string> = {};
+    
+    for (const ownerId of ownerIds) {
+      const { data: email } = await supabase.rpc('get_user_email_by_id', { user_id: ownerId });
+      if (email) {
+        ownerEmailsMap[ownerId] = email;
+      }
+    }
+
+    const checkouts: CheckedOutDocument[] = allMyCheckouts.map(lock => ({
       ...lock,
       document_name: documentsMap[lock.document_id] || 'Unknown Document',
-      locker_email: user?.email || 'Unknown User'
+      locker_email: user?.email || 'Unknown User',
+      document_owner_id: documentOwnersMap[lock.document_id],
+      document_owner_email: ownerEmailsMap[documentOwnersMap[lock.document_id]],
+      is_guest_checkout: lock.guest_email === user.email,
+      approved_at: lock.locked_at
     }));
 
     setMyCheckouts(checkouts);
@@ -191,6 +246,8 @@ export const CheckInOutDashboard: React.FC = () => {
   };
 
   const fetchAllCheckouts = async () => {
+    if (!user) return;
+
     const { data, error } = await supabase
       .from('document_locks')
       .select(`
@@ -200,7 +257,8 @@ export const CheckInOutDashboard: React.FC = () => {
         locked_at,
         lock_reason,
         expires_at,
-        is_active
+        is_active,
+        guest_email
       `)
       .eq('is_active', true)
       .order('locked_at', { ascending: false });
@@ -252,43 +310,130 @@ export const CheckInOutDashboard: React.FC = () => {
       }
     }
 
+    // Fetch owner emails
+    const ownerIds = [...new Set(Object.values(documentOwnersMap))];
+    const ownerEmailsMap: Record<string, string> = {};
+    
+    for (const ownerId of ownerIds) {
+      const { data: email } = await supabase.rpc('get_user_email_by_id', { user_id: ownerId });
+      if (email) {
+        ownerEmailsMap[ownerId] = email;
+      }
+    }
+
     const checkouts: CheckedOutDocument[] = (data || []).map(lock => ({
       ...lock,
       document_name: documentsMap[lock.document_id] || 'Unknown Document',
       locker_email: userEmailsMap[lock.locked_by] || 'Unknown User',
-      document_owner_id: documentOwnersMap[lock.document_id]
+      document_owner_id: documentOwnersMap[lock.document_id],
+      document_owner_email: ownerEmailsMap[documentOwnersMap[lock.document_id]],
+      is_guest_checkout: !!lock.guest_email,
+      approved_at: lock.locked_at
     }));
 
-    setAllCheckouts(checkouts);
+    // Filter based on user role - show only relevant checkouts for non-admin
+    const filteredCheckouts = checkouts.filter(checkout => {
+      // If user is the owner or the one who checked it out (or guest), show it
+      return checkout.document_owner_id === user.id || 
+             checkout.locked_by === user.id || 
+             checkout.guest_email === user.email;
+    });
+
+    setAllCheckouts(filteredCheckouts);
     setStats(prev => ({
       ...prev,
-      totalCheckedOut: checkouts.length
+      totalCheckedOut: filteredCheckouts.length
     }));
   };
 
   const fetchHistory = async () => {
-    // For now, use lock_notifications as history proxy
-    const { data, error } = await supabase
-      .from('lock_notifications')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50);
+    if (!user) return;
 
-    if (error) {
-      console.error('Error fetching history:', error);
+    // Fetch inactive locks (completed checkouts) that involve this user
+    const { data: inactiveLocks, error: locksError } = await supabase
+      .from('document_locks')
+      .select(`
+        id,
+        document_id,
+        locked_by,
+        locked_at,
+        lock_reason,
+        expires_at,
+        is_active,
+        guest_email
+      `)
+      .eq('is_active', false)
+      .order('locked_at', { ascending: false })
+      .limit(100);
+
+    if (locksError) {
+      console.error('Error fetching history locks:', locksError);
       return;
     }
 
+    // Fetch document names
+    const documentIds = inactiveLocks?.map(d => d.document_id) || [];
+    let documentsMap: Record<string, string> = {};
+    let documentOwnersMap: Record<string, string> = {};
+    
+    if (documentIds.length > 0) {
+      const { data: docs } = await supabase
+        .from('documents')
+        .select('id, file_name, user_id')
+        .in('id', documentIds);
+      
+      documentsMap = (docs || []).reduce((acc, doc) => {
+        acc[doc.id] = doc.file_name;
+        return acc;
+      }, {} as Record<string, string>);
+
+      documentOwnersMap = (docs || []).reduce((acc, doc) => {
+        acc[doc.id] = doc.user_id;
+        return acc;
+      }, {} as Record<string, string>);
+    }
+
+    // Fetch user emails
+    const userIds = [...new Set(inactiveLocks?.map(d => d.locked_by) || [])];
+    const userEmailsMap: Record<string, string> = {};
+    
+    for (const userId of userIds) {
+      const { data: email } = await supabase.rpc('get_user_email_by_id', { user_id: userId });
+      if (email) {
+        userEmailsMap[userId] = email;
+      }
+    }
+
+    // Fetch owner emails
+    const ownerIds = [...new Set(Object.values(documentOwnersMap))];
+    const ownerEmailsMap: Record<string, string> = {};
+    
+    for (const ownerId of ownerIds) {
+      const { data: email } = await supabase.rpc('get_user_email_by_id', { user_id: ownerId });
+      if (email) {
+        ownerEmailsMap[ownerId] = email;
+      }
+    }
+
     // Transform to history format
-    const historyData: CheckInOutHistory[] = (data || []).map(n => ({
-      id: n.id,
-      document_id: n.document_id,
-      document_name: 'Document',
-      action: n.notification_type === 'lock_released' ? 'check_in' : 'check_out',
-      performed_by: n.notified_user_id,
-      performed_at: n.created_at,
-      notes: n.message || undefined
-    }));
+    const historyData: CheckInOutHistory[] = (inactiveLocks || [])
+      .filter(lock => {
+        // Filter to show only relevant history for this user
+        const isOwner = documentOwnersMap[lock.document_id] === user.id;
+        const isLocker = lock.locked_by === user.id;
+        const isGuest = lock.guest_email === user.email;
+        return isOwner || isLocker || isGuest;
+      })
+      .map(lock => ({
+        id: lock.id,
+        document_id: lock.document_id,
+        document_name: documentsMap[lock.document_id] || 'Unknown Document',
+        action: 'check_in' as const,
+        performed_by: lock.locked_by,
+        performer_email: lock.guest_email || userEmailsMap[lock.locked_by] || 'Unknown',
+        performed_at: lock.locked_at,
+        notes: lock.lock_reason
+      }));
 
     setHistory(historyData);
   };
@@ -380,13 +525,19 @@ export const CheckInOutDashboard: React.FC = () => {
     }
   };
 
-  const filteredMyCheckouts = myCheckouts.filter(c =>
-    c.document_name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filterCheckouts = (checkouts: CheckedOutDocument[]) => {
+    if (!searchQuery.trim()) return checkouts;
+    
+    const query = searchQuery.toLowerCase();
+    return checkouts.filter(c => 
+      c.document_name.toLowerCase().includes(query) ||
+      c.guest_email?.toLowerCase().includes(query) ||
+      c.document_owner_email?.toLowerCase().includes(query)
+    );
+  };
 
-  const filteredAllCheckouts = allCheckouts.filter(c =>
-    c.document_name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredMyCheckouts = filterCheckouts(myCheckouts);
+  const filteredAllCheckouts = filterCheckouts(allCheckouts);
 
   const isExpiringSoon = (expiresAt?: string) => {
     if (!expiresAt) return false;
@@ -396,6 +547,42 @@ export const CheckInOutDashboard: React.FC = () => {
   const isExpired = (expiresAt?: string) => {
     if (!expiresAt) return false;
     return new Date(expiresAt) < new Date();
+  };
+
+  const handleViewDocument = async (documentId: string, documentName: string) => {
+    try {
+      setViewingDocument({ id: documentId, name: documentName });
+      
+      // Fetch document details and generate signed URL
+      const { data: docData, error: docError } = await supabase
+        .from('documents')
+        .select('storage_path, file_type')
+        .eq('id', documentId)
+        .single();
+      
+      if (docError || !docData?.storage_path) {
+        throw new Error('Document not found');
+      }
+      
+      const { data: signedUrlData, error: urlError } = await supabase
+        .storage
+        .from('documents')
+        .createSignedUrl(docData.storage_path, 3600); // 1 hour
+      
+      if (urlError || !signedUrlData?.signedUrl) {
+        throw new Error('Failed to generate document URL');
+      }
+      
+      setDocumentUrl(signedUrlData.signedUrl);
+    } catch (error) {
+      console.error('Error viewing document:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load document',
+        variant: 'destructive'
+      });
+      setViewingDocument(null);
+    }
   };
 
   return (
@@ -469,7 +656,7 @@ export const CheckInOutDashboard: React.FC = () => {
                 Check-in / Check-out Management
               </CardTitle>
               <CardDescription>
-                Manage document locks and track editing sessions
+                Track your checkouts and documents you own that are checked out by others
               </CardDescription>
             </div>
             <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
@@ -480,14 +667,19 @@ export const CheckInOutDashboard: React.FC = () => {
         </CardHeader>
         <CardContent>
           {/* Search */}
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search documents..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+          <div className="mb-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search documents..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Search by: document name, guest email, owner email
+            </p>
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -502,6 +694,9 @@ export const CheckInOutDashboard: React.FC = () => {
               <TabsTrigger value="all-checkouts" className="flex items-center gap-2">
                 <Lock className="h-4 w-4" />
                 All Checkouts
+                {allCheckouts.length > 0 && (
+                  <Badge variant="secondary" className="ml-1">{allCheckouts.length}</Badge>
+                )}
               </TabsTrigger>
               <TabsTrigger value="history" className="flex items-center gap-2">
                 <History className="h-4 w-4" />
@@ -536,6 +731,7 @@ export const CheckInOutDashboard: React.FC = () => {
                         isExpired={isExpired(checkout.expires_at)}
                         onCheckIn={() => handleCheckIn(checkout.id, checkout.document_id)}
                         onExtend={() => handleExtendLock(checkout.id)}
+                        onViewDocument={() => handleViewDocument(checkout.document_id, checkout.document_name)}
                       />
                     ))}
                   </div>
@@ -553,9 +749,9 @@ export const CheckInOutDashboard: React.FC = () => {
               ) : filteredAllCheckouts.length === 0 ? (
                 <div className="text-center py-12">
                   <CheckCircle className="h-12 w-12 mx-auto text-green-500 mb-4" />
-                  <p className="text-lg font-medium">All Documents Available</p>
+                  <p className="text-lg font-medium">All Clear</p>
                   <p className="text-sm text-muted-foreground">
-                    No documents are currently checked out
+                    No active checkouts for your documents or by you
                   </p>
                 </div>
               ) : (
@@ -572,6 +768,7 @@ export const CheckInOutDashboard: React.FC = () => {
                         onExtend={() => handleExtendLock(checkout.id)}
                         onForceUnlock={() => handleForceUnlock(checkout.id, checkout.document_id)}
                         showForceUnlock={checkout.document_owner_id === user?.id}
+                        onViewDocument={() => handleViewDocument(checkout.document_id, checkout.document_name)}
                       />
                     ))}
                   </div>
@@ -638,6 +835,47 @@ export const CheckInOutDashboard: React.FC = () => {
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Document Viewer Dialog */}
+      <Dialog open={!!viewingDocument} onOpenChange={(open) => {
+        if (!open) {
+          setViewingDocument(null);
+          setDocumentUrl(null);
+        }
+      }}>
+        <DialogContent className="max-w-6xl h-[90vh] p-0">
+          <DialogHeader className="px-6 pt-4 pb-2 border-b">
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              {viewingDocument?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden p-4 h-[calc(90vh-80px)]">
+            {documentUrl ? (
+              <object
+                data={documentUrl}
+                type="application/pdf"
+                className="w-full h-full rounded-lg border"
+                title={viewingDocument?.name}
+              >
+                {/* Fallback for non-PDF files or if object doesn't work */}
+                <iframe
+                  src={`https://docs.google.com/viewer?url=${encodeURIComponent(documentUrl)}&embedded=true`}
+                  className="w-full h-full rounded-lg border"
+                  title={viewingDocument?.name}
+                />
+              </object>
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <Skeleton className="h-12 w-12 mx-auto mb-4 rounded-full" />
+                  <p className="text-muted-foreground">Loading document...</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -651,6 +889,7 @@ interface CheckoutCardProps {
   onExtend: () => void;
   onForceUnlock?: () => void;
   showForceUnlock?: boolean;
+  onViewDocument?: () => void;
 }
 
 const CheckoutCard: React.FC<CheckoutCardProps> = ({
@@ -661,7 +900,8 @@ const CheckoutCard: React.FC<CheckoutCardProps> = ({
   onCheckIn,
   onExtend,
   onForceUnlock,
-  showForceUnlock
+  showForceUnlock,
+  onViewDocument
 }) => {
   return (
     <div className={`flex items-center gap-4 p-4 rounded-lg border ${
@@ -683,9 +923,18 @@ const CheckoutCard: React.FC<CheckoutCardProps> = ({
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <p className="font-medium truncate">{checkout.document_name}</p>
-          {isOwner && (
+          <button 
+            onClick={onViewDocument}
+            className="font-medium truncate hover:underline hover:text-primary cursor-pointer text-left"
+            title="Click to view document"
+          >
+            {checkout.document_name}
+          </button>
+          {isOwner && !checkout.is_guest_checkout && (
             <Badge variant="outline" className="text-xs">You</Badge>
+          )}
+          {checkout.is_guest_checkout && (
+            <Badge variant="secondary" className="text-xs">Guest Access</Badge>
           )}
           {isExpired && (
             <Badge variant="destructive" className="text-xs">Expired</Badge>
@@ -697,14 +946,33 @@ const CheckoutCard: React.FC<CheckoutCardProps> = ({
           )}
         </div>
         <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <User className="h-3 w-3" />
-            {checkout.locker_email || 'Unknown User'}
-          </span>
+          {checkout.is_guest_checkout ? (
+            <>
+              <span className="flex items-center gap-1">
+                <User className="h-3 w-3" />
+                Guest: {checkout.guest_email || checkout.locker_email}
+              </span>
+              <span className="flex items-center gap-1" title="Document Owner">
+                <Shield className="h-3 w-3" />
+                Owner: {checkout.document_owner_email || 'Unknown'}
+              </span>
+            </>
+          ) : (
+            <span className="flex items-center gap-1">
+              <User className="h-3 w-3" />
+              {checkout.locker_email || 'Unknown User'}
+            </span>
+          )}
           <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />
-            {formatDistanceToNow(new Date(checkout.locked_at), { addSuffix: true })}
+            Checked out {formatDistanceToNow(new Date(checkout.locked_at), { addSuffix: true })}
           </span>
+          {checkout.approved_at && checkout.is_guest_checkout && (
+            <span className="flex items-center gap-1" title="Approved Time">
+              <CheckCircle className="h-3 w-3" />
+              Approved {formatDistanceToNow(new Date(checkout.approved_at), { addSuffix: true })}
+            </span>
+          )}
           {checkout.expires_at && (
             <span className="flex items-center gap-1">
               <Timer className="h-3 w-3" />

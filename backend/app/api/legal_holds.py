@@ -405,12 +405,95 @@ async def add_custodian(
     current_user = Depends(get_current_user)
 ):
     try:
+        # Fetch hold details for email
+        hold_res = supabase.table('legal_holds').select('*').eq('id', hold_id).single().execute()
+        if not hold_res.data:
+            raise HTTPException(status_code=404, detail="Legal hold not found")
+        hold = hold_res.data
+        
         cust_data = req.dict()
         cust_data['hold_id'] = hold_id
         cust_data['status'] = 'pending'
         cust_data['added_by'] = current_user.id
         
         res = supabase.table('legal_hold_custodians').insert(cust_data).execute()
+        
+        # Send notification email to the new custodian
+        try:
+            email_service = EmailService()
+            subject = f"🔒 Legal Hold Assignment: {hold['name']}"
+            
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                    .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                    .header {{ background-color: #7c3aed; color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+                    .content {{ background-color: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; }}
+                    .footer {{ background-color: #f3f4f6; padding: 15px; border-radius: 0 0 8px 8px; text-align: center; font-size: 12px; color: #6b7280; }}
+                    .alert {{ background-color: #ede9fe; border-left: 4px solid #7c3aed; padding: 15px; margin: 15px 0; }}
+                    .button {{ display: inline-block; background-color: #7c3aed; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 15px; }}
+                    .info-box {{ background-color: #f3f4f6; padding: 15px; border-radius: 6px; margin: 15px 0; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h2 style="margin:0;">🔒 Legal Hold Assignment</h2>
+                        <p style="margin:5px 0 0 0; font-size: 14px;">You have been assigned to a legal hold</p>
+                    </div>
+                    <div class="content">
+                        <p>Dear {req.name},</p>
+                        
+                        <div class="alert">
+                            <strong>IMPORTANT: You have been assigned to a legal hold</strong>
+                        </div>
+                        
+                        <p>You have been identified as a custodian for the following legal matter:</p>
+                        
+                        <div class="info-box">
+                            <p style="margin:5px 0;"><strong>Hold Name:</strong> {hold['name']}</p>
+                            <p style="margin:5px 0;"><strong>Matter:</strong> {hold.get('matter_name', 'N/A')}</p>
+                            <p style="margin:5px 0;"><strong>Matter ID:</strong> {hold.get('matter_id', 'N/A')}</p>
+                            <p style="margin:5px 0;"><strong>Reason:</strong> {hold.get('hold_reason', 'Legal preservation requirement')}</p>
+                        </div>
+                        
+                        <p><strong>Your Obligations:</strong></p>
+                        <ul>
+                            <li>Preserve all relevant documents and communications</li>
+                            <li>Do not delete, modify, or destroy any potentially relevant materials</li>
+                            <li>Suspend all automatic deletion policies for relevant data</li>
+                            <li>Immediately report any accidental deletion or modification</li>
+                        </ul>
+                        
+                        <p><strong>Please click below to view your legal hold documents and acknowledge receipt:</strong></p>
+                        
+                        <a href="http://localhost:4173/documents?tab=legal-hold&hold_id={hold_id}" class="button">
+                            View Legal Hold Documents →
+                        </a>
+                        
+                        <p style="margin-top: 20px; font-size: 14px; color: #666;">
+                            Failure to comply with this legal hold may result in serious legal and disciplinary consequences.
+                        </p>
+                    </div>
+                    <div class="footer">
+                        <p>This is an automated notification from the Legal Hold system</p>
+                        <p>© {datetime.now().year} SimplifyAI. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            email_service.send_email(
+                to_email=req.email,
+                subject=subject,
+                html_content=html_content
+            )
+        except Exception as email_error:
+            print(f"Failed to send custodian assignment email: {str(email_error)}")
         
         await log_audit(hold_id, "custodian_added", current_user, target_name=req.name, target_type='custodian')
         
@@ -425,7 +508,86 @@ async def remove_custodian(
     current_user = Depends(get_current_user)
 ):
     try:
+        # Fetch hold and custodian details for email
+        hold_res = supabase.table('legal_holds').select('*').eq('id', hold_id).single().execute()
+        if not hold_res.data:
+            raise HTTPException(status_code=404, detail="Legal hold not found")
+        hold = hold_res.data
+        
+        cust_res = supabase.table('legal_hold_custodians').select('*').eq('id', custodian_id).single().execute()
+        if not cust_res.data:
+            raise HTTPException(status_code=404, detail="Custodian not found")
+        custodian = cust_res.data
+        
+        # Delete the custodian
         supabase.table('legal_hold_custodians').delete().eq('id', custodian_id).eq('hold_id', hold_id).execute()
+        
+        # Send removal notification email
+        try:
+            email_service = EmailService()
+            subject = f"📢 Legal Hold Release Notice: {hold['name']}"
+            
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                    .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                    .header {{ background-color: #059669; color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+                    .content {{ background-color: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; }}
+                    .footer {{ background-color: #f3f4f6; padding: 15px; border-radius: 0 0 8px 8px; text-align: center; font-size: 12px; color: #6b7280; }}
+                    .notice {{ background-color: #d1fae5; border-left: 4px solid #059669; padding: 15px; margin: 15px 0; }}
+                    .info-box {{ background-color: #f3f4f6; padding: 15px; border-radius: 6px; margin: 15px 0; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h2 style="margin:0;">📢 Legal Hold Release Notice</h2>
+                        <p style="margin:5px 0 0 0; font-size: 14px;">You have been released from a legal hold</p>
+                    </div>
+                    <div class="content">
+                        <p>Dear {custodian['name']},</p>
+                        
+                        <div class="notice">
+                            <strong>You have been removed from the following legal hold</strong>
+                        </div>
+                        
+                        <div class="info-box">
+                            <p style="margin:5px 0;"><strong>Hold Name:</strong> {hold['name']}</p>
+                            <p style="margin:5px 0;"><strong>Matter:</strong> {hold.get('matter_name', 'N/A')}</p>
+                            <p style="margin:5px 0;"><strong>Matter ID:</strong> {hold.get('matter_id', 'N/A')}</p>
+                        </div>
+                        
+                        <p><strong>What this means:</strong></p>
+                        <ul>
+                            <li>You are no longer required to preserve documents specifically for this matter</li>
+                            <li>Normal document retention policies may resume for this matter</li>
+                            <li>You may still be subject to other legal holds - check your active holds</li>
+                        </ul>
+                        
+                        <p style="margin-top: 20px; font-size: 14px; color: #666;">
+                            <strong>Note:</strong> If you believe this removal was made in error, please contact your legal department immediately.
+                        </p>
+                    </div>
+                    <div class="footer">
+                        <p>This is an automated notification from the Legal Hold system</p>
+                        <p>© {datetime.now().year} SimplifyAI. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            email_service.send_email(
+                to_email=custodian['email'],
+                subject=subject,
+                html_content=html_content
+            )
+        except Exception as email_error:
+            print(f"Failed to send custodian removal email: {str(email_error)}")
+        
         await log_audit(hold_id, "custodian_removed", current_user, target_id=custodian_id, target_type='custodian')
         return {"success": True}
     except Exception as e:

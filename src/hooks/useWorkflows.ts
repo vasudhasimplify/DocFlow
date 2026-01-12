@@ -406,6 +406,8 @@ export const useWorkflows = () => {
     isLoading,
     fetchWorkflows,
     fetchInstances,
+    fetchEscalationRules,
+    fetchStats,
     createWorkflow,
     updateWorkflow,
     deleteWorkflow,

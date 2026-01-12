@@ -198,22 +198,71 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
     if (scope === 'folder' && open && availableFolders.length === 0 && !loadingFolders) {
       setLoadingFolders(true);
       setFoldersError('');
-      supabase
-        .from('smart_folders')
-        .select('id, name')
-        .order('name', { ascending: true })
-        .then(({ data, error }) => {
+      console.log('🔍 Fetching folders from smart_folders table...');
+      
+      // Get current user and fetch their folders
+      const fetchFolders = async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          console.log('👤 Current user:', user?.id);
+          
+          if (!user) {
+            setFoldersError('Please log in to view folders');
+            setLoadingFolders(false);
+            return;
+          }
+
+          // Try with user_id filter first
+          let { data, error } = await supabase
+            .from('smart_folders')
+            .select('id, name')
+            .eq('user_id', user.id)
+            .order('name');
+
+          // If error, try without user filter (might be RLS issue)
+          if (error) {
+            console.warn('⚠️ Error with user_id filter, trying without:', error);
+            const result = await supabase
+              .from('smart_folders')
+              .select('id, name')
+              .order('name');
+            data = result.data;
+            error = result.error;
+          }
+
+          console.log('📁 Folder query result:', { 
+            data, 
+            error, 
+            userId: user.id,
+            dataLength: data?.length,
+            errorCode: error?.code,
+            errorMessage: error?.message,
+            errorDetails: error?.details 
+          });
+          
           if (error) {
             console.error('Error fetching folders:', error);
-            setFoldersError('Failed to load folders. Please check permissions or try again later.');
+            setFoldersError(`Failed to load folders: ${error.message}`);
             setAvailableFolders([]);
-          } else if (data) {
+          } else if (data && data.length > 0) {
             // Extract folder names
             const folderNames = data.map(f => f.name);
+            console.log('📁 Folders found:', folderNames);
             setAvailableFolders(folderNames);
+          } else {
+            console.log('📁 No folders found for user');
+            setFoldersError('No folders found. Please create folders in SimplifyDrive first.');
+            setAvailableFolders([]);
           }
+        } catch (err: any) {
+          console.error('Folder fetch error:', err);
+          setFoldersError(`Failed to load folders: ${err.message || 'Unknown error'}`);
+        } finally {
           setLoadingFolders(false);
-        });
+        }
+      };
+
+      fetchFolders();
     }
   }, [scope, open, availableFolders.length, loadingFolders]);
 
@@ -301,9 +350,40 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
     setFolderSearchQuery('');
   };
 
+  // Custodian validation error states
+  const [custodianNameError, setCustodianNameError] = useState<string>('');
+  const [custodianEmailError, setCustodianEmailError] = useState<string>('');
+
   const addCustodian = () => {
-    if (newCustodianEmail && newCustodianName && !custodians.some(c => c.email === newCustodianEmail)) {
-      setCustodians([...custodians, { name: newCustodianName, email: newCustodianEmail }]);
+    // Reset errors
+    setCustodianNameError('');
+    setCustodianEmailError('');
+    
+    let hasError = false;
+    
+    // Validate name
+    if (!newCustodianName.trim()) {
+      setCustodianNameError('Name is required');
+      hasError = true;
+    } else if (!isValidName(newCustodianName)) {
+      setCustodianNameError('Name must be at least 2 characters (letters and spaces only)');
+      hasError = true;
+    }
+    
+    // Validate email
+    if (!newCustodianEmail.trim()) {
+      setCustodianEmailError('Email is required');
+      hasError = true;
+    } else if (!isValidEmail(newCustodianEmail)) {
+      setCustodianEmailError('Please enter a valid email address');
+      hasError = true;
+    } else if (custodians.some(c => c.email.toLowerCase() === newCustodianEmail.toLowerCase())) {
+      setCustodianEmailError('This email is already added');
+      hasError = true;
+    }
+    
+    if (!hasError) {
+      setCustodians([...custodians, { name: newCustodianName.trim(), email: newCustodianEmail.trim().toLowerCase() }]);
       setNewCustodianName('');
       setNewCustodianEmail('');
     }
@@ -329,13 +409,67 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
     }
   };
 
+  // Email validation regex
+  const isValidEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  // Name validation - non-empty, at least 2 characters, letters and spaces only
+  const isValidName = (name: string) => {
+    const nameRegex = /^[a-zA-Z\s]{2,}$/;
+    return name.trim().length >= 2 && nameRegex.test(name.trim());
+  };
+
   const canProceed = () => {
     switch (step) {
-      case 1: return name && matterId && matterName && holdReason;
-      case 2: return scope;
-      case 3: return true;
-      case 4: return true;
-      default: return false;
+      case 1: 
+        return name && matterId && matterName && holdReason;
+      case 2: 
+        // Must have a scope selected
+        if (!scope) return false;
+        // For specific_documents, must have at least one document selected
+        if (scope === 'specific_documents') return selectedDocumentIds.length > 0;
+        // For folder, must have at least one folder selected
+        if (scope === 'folder') return selectedFolderNames.length > 0;
+        // For search_criteria, must have keywords OR date range
+        if (scope === 'search_criteria') return keywords.trim().length > 0 || (dateRangeStart && dateRangeEnd);
+        // For date_range, must have both dates
+        if (scope === 'date_range') return dateRangeStart && dateRangeEnd;
+        // For custodian_content, no additional requirements
+        return true;
+      case 3: 
+        return true; // Custodians are optional
+      case 4: 
+        return true;
+      default: 
+        return false;
+    }
+  };
+
+  // Get validation message for current step
+  const getValidationMessage = () => {
+    if (canProceed()) return '';
+    switch (step) {
+      case 1:
+        if (!name) return 'Hold name is required';
+        if (!matterId) return 'Matter ID is required';
+        if (!matterName) return 'Matter name is required';
+        if (!holdReason) return 'Hold reason is required';
+        return '';
+      case 2:
+        if (!scope) return 'Please select a scope type';
+        if (scope === 'specific_documents' && selectedDocumentIds.length === 0) 
+          return 'Please select at least one document';
+        if (scope === 'folder' && selectedFolderNames.length === 0) 
+          return 'Please select at least one folder';
+        if (scope === 'search_criteria' && !keywords.trim() && (!dateRangeStart || !dateRangeEnd))
+          return 'Please enter keywords or a date range';
+        if (scope === 'date_range' && (!dateRangeStart || !dateRangeEnd))
+          return 'Please select both start and end dates';
+        return '';
+      default:
+        return '';
     }
   };
 
@@ -516,6 +650,7 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
 
               <Separator />
 
+              {/* Scope-specific additional options */}
               {scope === 'search_criteria' && (
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -573,7 +708,7 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
                   <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
                     <p className="text-sm text-blue-600 font-medium">Document Selection</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Select individual documents to place on legal hold
+                      Select individual documents to place on legal hold. Use AI recommendations on the right for suggestions.
                     </p>
                   </div>
                   
@@ -592,46 +727,81 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
                     <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
                       <p className="text-sm text-destructive font-medium">Error Loading Documents</p>
                       <p className="text-xs text-muted-foreground mt-1">{documentsError}</p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Run the SQL file: <code>add_documents_rls_policy.sql</code> in Supabase Dashboard
-                      </p>
                     </div>
                   ) : (
-                    <ScrollArea className="h-[300px] border rounded-lg p-4">
-                      <div className="space-y-2">
-                        {availableDocuments
-                          .filter(doc => 
-                            documentSearchQuery === '' || 
-                            doc.file_name.toLowerCase().includes(documentSearchQuery.toLowerCase()) ||
-                            doc.file_type?.toLowerCase().includes(documentSearchQuery.toLowerCase())
-                          )
-                          .map((doc) => (
-                            <div key={doc.id} className="flex items-center gap-3 p-2 hover:bg-muted rounded">
-                              <Checkbox
-                                checked={selectedDocumentIds.includes(doc.id)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setSelectedDocumentIds([...selectedDocumentIds, doc.id]);
-                                  } else {
-                                    setSelectedDocumentIds(selectedDocumentIds.filter(id => id !== doc.id));
-                                  }
-                                }}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{doc.file_name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {doc.folder && `${doc.folder} • `}
-                                  {doc.file_type || 'Unknown type'} • 
-                                  {(doc.file_size / 1024).toFixed(1)} KB
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                        {availableDocuments.length === 0 && (
-                          <p className="text-center text-sm text-muted-foreground py-4">No documents found</p>
-                        )}
+                    <>
+                      {/* Select All Header */}
+                      <div className="flex items-center justify-between py-2 px-4 bg-muted/50 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            checked={
+                              availableDocuments.length > 0 &&
+                              availableDocuments
+                                .filter(doc => 
+                                  documentSearchQuery === '' || 
+                                  doc.file_name.toLowerCase().includes(documentSearchQuery.toLowerCase()) ||
+                                  doc.file_type?.toLowerCase().includes(documentSearchQuery.toLowerCase())
+                                )
+                                .every(doc => selectedDocumentIds.includes(doc.id))
+                            }
+                            onCheckedChange={(checked) => {
+                              const filteredDocs = availableDocuments.filter(doc => 
+                                documentSearchQuery === '' || 
+                                doc.file_name.toLowerCase().includes(documentSearchQuery.toLowerCase()) ||
+                                doc.file_type?.toLowerCase().includes(documentSearchQuery.toLowerCase())
+                              );
+                              if (checked) {
+                                const allIds = filteredDocs.map(doc => doc.id);
+                                setSelectedDocumentIds([...new Set([...selectedDocumentIds, ...allIds])]);
+                              } else {
+                                const filteredIds = new Set(filteredDocs.map(doc => doc.id));
+                                setSelectedDocumentIds(selectedDocumentIds.filter(id => !filteredIds.has(id)));
+                              }
+                            }}
+                          />
+                          <span className="text-sm font-medium">Select All</span>
+                        </div>
+                        <Badge variant="secondary">
+                          {selectedDocumentIds.length} / {availableDocuments.length} selected
+                        </Badge>
                       </div>
-                    </ScrollArea>
+                      
+                      <ScrollArea className="h-[200px] border rounded-lg p-4">
+                        <div className="space-y-2">
+                          {availableDocuments
+                            .filter(doc => 
+                              documentSearchQuery === '' || 
+                              doc.file_name.toLowerCase().includes(documentSearchQuery.toLowerCase()) ||
+                              doc.file_type?.toLowerCase().includes(documentSearchQuery.toLowerCase())
+                            )
+                            .map((doc) => (
+                              <div key={doc.id} className="flex items-center gap-3 p-2 hover:bg-muted rounded">
+                                <Checkbox
+                                  checked={selectedDocumentIds.includes(doc.id)}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setSelectedDocumentIds([...selectedDocumentIds, doc.id]);
+                                    } else {
+                                      setSelectedDocumentIds(selectedDocumentIds.filter(id => id !== doc.id));
+                                    }
+                                  }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{doc.file_name}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {doc.folder && `${doc.folder} • `}
+                                    {doc.file_type || 'Unknown type'} • 
+                                    {(doc.file_size / 1024).toFixed(1)} KB
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          {availableDocuments.length === 0 && (
+                            <p className="text-center text-sm text-muted-foreground py-4">No documents found</p>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </>
                   )}
                   
                   <p className="text-xs text-muted-foreground">
@@ -669,36 +839,71 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
                       </p>
                     </div>
                   ) : (
-                    <ScrollArea className="h-[300px] border rounded-lg p-4">
-                      <div className="space-y-2">
-                        {availableFolders
-                          .filter(folder => 
-                            folderSearchQuery === '' || 
-                            folder.toLowerCase().includes(folderSearchQuery.toLowerCase())
-                          )
-                          .map((folder) => (
-                            <div key={folder} className="flex items-center gap-3 p-2 hover:bg-muted rounded">
-                              <Checkbox
-                                checked={selectedFolderNames.includes(folder)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setSelectedFolderNames([...selectedFolderNames, folder]);
-                                  } else {
-                                    setSelectedFolderNames(selectedFolderNames.filter(f => f !== folder));
-                                  }
-                                }}
-                              />
-                              <Folder className="w-4 h-4 text-blue-600" />
-                              <div className="flex-1">
-                                <p className="text-sm font-medium">{folder}</p>
-                              </div>
-                            </div>
-                          ))}
-                        {availableFolders.length === 0 && (
-                          <p className="text-center text-sm text-muted-foreground py-4">No folders found</p>
-                        )}
+                    <>
+                      {/* Select All Header */}
+                      <div className="flex items-center justify-between py-2 px-4 bg-muted/50 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            checked={
+                              availableFolders.length > 0 &&
+                              availableFolders
+                                .filter(folder => 
+                                  folderSearchQuery === '' || 
+                                  folder.toLowerCase().includes(folderSearchQuery.toLowerCase())
+                                )
+                                .every(folder => selectedFolderNames.includes(folder))
+                            }
+                            onCheckedChange={(checked) => {
+                              const filteredFolders = availableFolders.filter(folder => 
+                                folderSearchQuery === '' || 
+                                folder.toLowerCase().includes(folderSearchQuery.toLowerCase())
+                              );
+                              if (checked) {
+                                setSelectedFolderNames([...new Set([...selectedFolderNames, ...filteredFolders])]);
+                              } else {
+                                const filteredSet = new Set(filteredFolders);
+                                setSelectedFolderNames(selectedFolderNames.filter(f => !filteredSet.has(f)));
+                              }
+                            }}
+                          />
+                          <span className="text-sm font-medium">Select All</span>
+                        </div>
+                        <Badge variant="secondary">
+                          {selectedFolderNames.length} / {availableFolders.length} selected
+                        </Badge>
                       </div>
-                    </ScrollArea>
+                      
+                      <ScrollArea className="h-[250px] border rounded-lg p-4">
+                        <div className="space-y-2">
+                          {availableFolders
+                            .filter(folder => 
+                              folderSearchQuery === '' || 
+                              folder.toLowerCase().includes(folderSearchQuery.toLowerCase())
+                            )
+                            .map((folder) => (
+                              <div key={folder} className="flex items-center gap-3 p-2 hover:bg-muted rounded">
+                                <Checkbox
+                                  checked={selectedFolderNames.includes(folder)}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setSelectedFolderNames([...selectedFolderNames, folder]);
+                                    } else {
+                                      setSelectedFolderNames(selectedFolderNames.filter(f => f !== folder));
+                                    }
+                                  }}
+                                />
+                                <Folder className="w-4 h-4 text-blue-600" />
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium">{folder}</p>
+                                </div>
+                              </div>
+                            ))}
+                          {availableFolders.length === 0 && (
+                            <p className="text-center text-sm text-muted-foreground py-4">No folders found</p>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </>
                   )}
                   
                   <p className="text-xs text-muted-foreground">
@@ -742,22 +947,38 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
               <div className="space-y-2">
                 <Label>Add Custodians</Label>
                 <div className="flex gap-2">
-                  <Input
-                    placeholder="Custodian Name"
-                    value={newCustodianName}
-                    onChange={(e) => setNewCustodianName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && addCustodian()}
-                    className="flex-1"
-                  />
-                  <Input
-                    type="email"
-                    placeholder="custodian@company.com"
-                    value={newCustodianEmail}
-                    onChange={(e) => setNewCustodianEmail(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && addCustodian()}
-                    className="flex-1"
-                  />
-                  <Button onClick={addCustodian} variant="outline">
+                  <div className="flex-1 space-y-1">
+                    <Input
+                      placeholder="Custodian Name"
+                      value={newCustodianName}
+                      onChange={(e) => {
+                        setNewCustodianName(e.target.value);
+                        setCustodianNameError('');
+                      }}
+                      onKeyDown={(e) => e.key === 'Enter' && addCustodian()}
+                      className={custodianNameError ? 'border-destructive' : ''}
+                    />
+                    {custodianNameError && (
+                      <p className="text-xs text-destructive">{custodianNameError}</p>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <Input
+                      type="email"
+                      placeholder="custodian@company.com"
+                      value={newCustodianEmail}
+                      onChange={(e) => {
+                        setNewCustodianEmail(e.target.value);
+                        setCustodianEmailError('');
+                      }}
+                      onKeyDown={(e) => e.key === 'Enter' && addCustodian()}
+                      className={custodianEmailError ? 'border-destructive' : ''}
+                    />
+                    {custodianEmailError && (
+                      <p className="text-xs text-destructive">{custodianEmailError}</p>
+                    )}
+                  </div>
+                  <Button onClick={addCustodian} variant="outline" className="self-start">
                     <Plus className="w-4 h-4" />
                   </Button>
                 </div>
@@ -911,31 +1132,42 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
           )}
         </ScrollArea>
 
-        <DialogFooter className="gap-2 sm:gap-0">
-          {step > 1 && (
-            <Button variant="outline" onClick={() => setStep(step - 1)}>
-              Back
-            </Button>
+        <DialogFooter className="flex-col gap-2 sm:flex-row sm:gap-0">
+          {/* Show validation message when button is disabled */}
+          {!canProceed() && getValidationMessage() && (
+            <div className="w-full mb-2 sm:mb-0 sm:mr-auto">
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertTriangle className="w-4 h-4" />
+                {getValidationMessage()}
+              </p>
+            </div>
           )}
-          {step < 4 ? (
-            <Button 
-              onClick={() => setStep(step + 1)} 
-              disabled={!canProceed()}
-              className="bg-purple-600 hover:bg-purple-700"
-            >
-              Continue
-            </Button>
-          ) : (
-            <Button 
-              onClick={handleCreate} 
-              disabled={creating}
-              className="bg-purple-600 hover:bg-purple-700"
-            >
-              {creating 
-                ? (isEditing ? 'Updating...' : 'Creating...') 
-                : (isEditing ? 'Update Legal Hold' : 'Create Legal Hold')}
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {step > 1 && (
+              <Button variant="outline" onClick={() => setStep(step - 1)}>
+                Back
+              </Button>
+            )}
+            {step < 4 ? (
+              <Button 
+                onClick={() => setStep(step + 1)} 
+                disabled={!canProceed()}
+                className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
+              >
+                Continue
+              </Button>
+            ) : (
+              <Button 
+                onClick={handleCreate} 
+                disabled={creating}
+                className="bg-purple-600 hover:bg-purple-700"
+              >
+                {creating 
+                  ? (isEditing ? 'Updating...' : 'Creating...') 
+                  : (isEditing ? 'Update Legal Hold' : 'Create Legal Hold')}
+              </Button>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -50,6 +50,7 @@ interface StartWorkflowDialogProps {
   onOpenChange: (open: boolean) => void;
   document: Document;
   onSuccess?: (instanceId: string) => void;
+  initialWorkflowId?: string; // Pre-select a workflow when dialog opens
 }
 
 export const StartWorkflowDialog: React.FC<StartWorkflowDialogProps> = ({
@@ -57,6 +58,7 @@ export const StartWorkflowDialog: React.FC<StartWorkflowDialogProps> = ({
   onOpenChange,
   document,
   onSuccess,
+  initialWorkflowId,
 }) => {
   const [workflows, setWorkflows] = useState<WorkflowWithColor[]>([]);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('');
@@ -66,6 +68,7 @@ export const StartWorkflowDialog: React.FC<StartWorkflowDialogProps> = ({
   const [isFetchingWorkflows, setIsFetchingWorkflows] = useState(false);
   const [showStepAssignment, setShowStepAssignment] = useState(false);
   const [stepEmails, setStepEmails] = useState<Record<string, string>>({});
+  const [workflowsLoaded, setWorkflowsLoaded] = useState(false);
 
   const selectedWorkflow = workflows.find(w => w.id === selectedWorkflowId);
 
@@ -73,24 +76,55 @@ export const StartWorkflowDialog: React.FC<StartWorkflowDialogProps> = ({
   useEffect(() => {
     if (open) {
       fetchActiveWorkflows();
+    } else {
+      // Reset state when dialog closes
+      setWorkflowsLoaded(false);
     }
   }, [open]);
+
+  // Set initial workflow ID when provided AND workflows are loaded
+  useEffect(() => {
+    if (open && initialWorkflowId && workflowsLoaded && workflows.length > 0) {
+      console.log('🎯 Setting initial workflow ID:', initialWorkflowId);
+      // Check if the workflow exists in the list
+      const workflowExists = workflows.some(w => w.id === initialWorkflowId);
+      if (workflowExists) {
+        setSelectedWorkflowId(initialWorkflowId);
+        console.log('✅ Workflow found and selected:', initialWorkflowId);
+      } else {
+        console.warn('⚠️ Initial workflow not found in list, may need to refetch');
+        // Refetch to get the newly created workflow
+        fetchActiveWorkflows();
+      }
+    }
+  }, [open, initialWorkflowId, workflowsLoaded, workflows]);
 
   const fetchActiveWorkflows = async () => {
     setIsFetchingWorkflows(true);
     try {
-      const data = await workflowApi.listWorkflows({ status: 'active' });
-      // Filter out templates, only show custom workflows or allow templates
-      const activeWorkflows = Array.isArray(data) ? data.filter(w => w.status === 'active') : [];
-      setWorkflows(activeWorkflows);
+      // If we have an initialWorkflowId, also fetch all workflows to ensure we get the new one
+      const data = initialWorkflowId 
+        ? await workflowApi.listWorkflows({}) // Fetch all if we need a specific workflow
+        : await workflowApi.listWorkflows({ status: 'active' });
       
-      if (activeWorkflows.length === 0) {
+      // Filter to active workflows, but always include the initialWorkflowId if provided
+      const filteredWorkflows = Array.isArray(data) 
+        ? data.filter(w => w.status === 'active' || w.id === initialWorkflowId) 
+        : [];
+      
+      setWorkflows(filteredWorkflows);
+      setWorkflowsLoaded(true);
+      
+      console.log('📋 Fetched workflows:', filteredWorkflows.length, 'initialWorkflowId:', initialWorkflowId);
+      
+      if (filteredWorkflows.length === 0) {
         toast.warning('No active workflows found. Create and activate a workflow first.');
       }
     } catch (error: any) {
       console.error('Error fetching workflows:', error);
       toast.error('Failed to load workflows');
       setWorkflows([]);
+      setWorkflowsLoaded(true);
     } finally {
       setIsFetchingWorkflows(false);
     }
@@ -430,6 +464,13 @@ export const StartWorkflowDialog: React.FC<StartWorkflowDialogProps> = ({
               <>
                 <GitBranch className="h-4 w-4 mr-2" />
                 Start Workflow
+              </>
+            ) : selectedWorkflow?.steps?.some((step: any) => 
+                step.config?.assigned_email || step.assignees?.[0]?.value
+              ) ? (
+              <>
+                <GitBranch className="h-4 w-4 mr-2" />
+                Proceed
               </>
             ) : (
               <>

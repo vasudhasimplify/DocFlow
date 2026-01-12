@@ -61,6 +61,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [showStartWorkflow, setShowStartWorkflow] = React.useState(false);
   const [showCreateWorkflow, setShowCreateWorkflow] = React.useState(false);
   const [showWorkflowSuggestion, setShowWorkflowSuggestion] = React.useState(false);
+  const [selectedWorkflowId, setSelectedWorkflowId] = React.useState<string | undefined>(undefined);
   const [aiDocumentType, setAiDocumentType] = React.useState<string | null>(null);
   const [aiConfidence, setAiConfidence] = React.useState<number>(0);
   const [isDetectingType, setIsDetectingType] = React.useState(false);
@@ -714,8 +715,10 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           open={showStartWorkflow}
           onOpenChange={setShowStartWorkflow}
           document={document}
+          initialWorkflowId={selectedWorkflowId}
           onSuccess={(instanceId) => {
             console.log('Workflow started:', instanceId);
+            setSelectedWorkflowId(undefined); // Reset after starting
             // Could navigate to workflow instances view here
           }}
         />
@@ -725,6 +728,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       <CreateWorkflowDialog
         open={showCreateWorkflow}
         onOpenChange={setShowCreateWorkflow}
+        onWorkflowCreated={(workflowId) => {
+          console.log('✅ Workflow created with ID:', workflowId);
+          // Automatically start the workflow after creating it
+          setSelectedWorkflowId(workflowId);
+          setShowCreateWorkflow(false);
+          setShowStartWorkflow(true);
+          console.log('✅ Opening start workflow dialog');
+        }}
       />
 
       {/* AI Workflow Suggestion Dialog */}
