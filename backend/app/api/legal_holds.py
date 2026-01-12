@@ -966,3 +966,155 @@ async def send_notifications(hold_id: str, request: SendNotificationsRequest, cu
         print(f"Error sending notifications: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.post("/process-reminders")
+async def process_legal_hold_reminders(current_user = Depends(get_current_user)):
+    """
+    Manually trigger processing of all legal hold reminders and escalations.
+    This checks all active holds and sends reminders/escalations as needed based on settings.
+    """
+    try:
+        from app.services.legal_hold_reminder_processor import LegalHoldReminderProcessor
+        
+        processor = LegalHoldReminderProcessor(supabase)
+        results = processor.process_all_holds()
+        
+        return {
+            "success": True,
+            "message": "Legal hold reminders processed successfully",
+            "results": results
+        }
+    except Exception as e:
+        print(f"Error processing reminders: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{hold_id}/send-initial-notices")
+async def send_initial_notices(
+    hold_id: str,
+    current_user = Depends(get_current_user)
+):
+    """
+    Send initial acknowledgment notices to all pending custodians of a legal hold.
+    This is typically called right after creating a legal hold with custodians.
+    """
+    try:
+        # Get hold details
+        hold_res = supabase.table('legal_holds').select('*').eq('id', hold_id).single().execute()
+        if not hold_res.data:
+            raise HTTPException(status_code=404, detail="Legal hold not found")
+        
+        hold = hold_res.data
+        
+        # Get pending custodians
+        cust_res = supabase.table('legal_hold_custodians').select('*').eq('hold_id', hold_id).eq('status', 'pending').execute()
+        custodians = cust_res.data or []
+        
+        if not custodians:
+            return {"success": True, "message": "No pending custodians to notify", "sent_count": 0}
+        
+        email_service = EmailService()
+        sent_count = 0
+        
+        for custodian in custodians:
+            try:
+                subject = f"⚖️ Legal Hold Notice - {hold.get('name')} - ACTION REQUIRED"
+                
+                html_content = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                        .header {{ background-color: #7c3aed; color: white; padding: 20px; border-radius: 8px 8px 0 0; }}
+                        .content {{ background-color: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; }}
+                        .alert {{ background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 15px 0; }}
+                        .info-box {{ background-color: white; padding: 15px; margin: 15px 0; border-left: 4px solid #7c3aed; }}
+                        .obligations {{ background-color: #fee2e2; border: 1px solid #fecaca; padding: 15px; margin: 15px 0; border-radius: 6px; }}
+                        .footer {{ text-align: center; margin-top: 20px; color: #6b7280; font-size: 12px; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h2 style="margin: 0;">⚖️ Legal Hold Notice</h2>
+                            <p style="margin: 5px 0 0 0; opacity: 0.9;">Immediate Action Required</p>
+                        </div>
+                        <div class="content">
+                            <p>Dear <strong>{custodian.get('name', 'Custodian')}</strong>,</p>
+                            
+                            <div class="alert">
+                                <strong>⚠️ IMPORTANT:</strong> You are receiving this notice because you have been identified as a custodian 
+                                of potentially relevant information for a legal matter.
+                            </div>
+                            
+                            <div class="info-box">
+                                <p style="margin: 5px 0;"><strong>Matter Name:</strong> {hold.get('matter_name', hold.get('name'))}</p>
+                                <p style="margin: 5px 0;"><strong>Matter ID:</strong> {hold.get('matter_id', 'N/A')}</p>
+                                <p style="margin: 5px 0;"><strong>Hold Name:</strong> {hold.get('name')}</p>
+                                <p style="margin: 5px 0;"><strong>Effective Date:</strong> {hold.get('effective_date', 'Immediately')}</p>
+                            </div>
+                            
+                            <p><strong>Reason for Hold:</strong></p>
+                            <p>{hold.get('hold_reason', 'Legal preservation requirement')}</p>
+                            
+                            <div class="obligations">
+                                <p style="margin: 0 0 10px 0;"><strong>🔒 Your Obligations:</strong></p>
+                                <ul style="margin: 0; padding-left: 20px;">
+                                    <li>Preserve ALL potentially relevant documents, emails, and communications</li>
+                                    <li>Do NOT delete, modify, or destroy any potentially relevant materials</li>
+                                    <li>Suspend all automatic deletion policies for relevant data</li>
+                                    <li>Immediately report any accidental deletion or modification</li>
+                                    <li>Retain both electronic and paper records</li>
+                                </ul>
+                            </div>
+                            
+                            <p><strong>⏰ Acknowledgment Deadline:</strong> {hold.get('acknowledgment_deadline_days', 5)} days from receipt</p>
+                            
+                            <p><strong>Questions?</strong> Contact: {', '.join(hold.get('legal_team_emails', [])) or 'Your Legal Department'}</p>
+                        </div>
+                        <div class="footer">
+                            <p>© {datetime.now().year} SimplifyAI DocFlow. All rights reserved.</p>
+                            <p>This is an automated legal hold notification.</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """
+                
+                success = email_service.send_email(
+                    to_email=custodian.get('email'),
+                    subject=subject,
+                    html_content=html_content
+                )
+                
+                if success:
+                    sent_count += 1
+                    # Update custodian to mark first notice sent
+                    supabase.table('legal_hold_custodians').update({
+                        'reminder_count': 1,
+                        'last_reminder_sent': datetime.now().isoformat()
+                    }).eq('id', custodian['id']).execute()
+                    
+            except Exception as e:
+                print(f"Failed to send initial notice to {custodian.get('email')}: {str(e)}")
+        
+        # Log audit
+        await log_audit(hold_id, "initial_notices_sent", current_user, 
+                       details={"sent_count": sent_count, "total_custodians": len(custodians)})
+        
+        return {
+            "success": True,
+            "message": f"Sent initial notices to {sent_count} custodians",
+            "sent_count": sent_count,
+            "total_custodians": len(custodians)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error sending initial notices: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

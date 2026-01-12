@@ -26,6 +26,7 @@ import type { Document, ViewMode, SortOrder } from './types';
 
 export function SimplifyDrive() {
   const [searchParams] = useSearchParams();
+  const location = useLocation();
 
   // Documents & filtering
   const [selectedFolder, setSelectedFolder] = useState('all');

@@ -303,7 +303,20 @@ export const CreateLegalHoldDialog: React.FC<CreateLegalHoldDialogProps> = ({
       if (isEditing && onUpdateHold && initialData) {
         await onUpdateHold(initialData.id, params);
       } else {
-        await onCreateHold(params);
+        const newHold = await onCreateHold(params);
+        
+        // If custodians were added and reminder settings are enabled, send initial notices
+        if (newHold && custodians.length > 0 && requiresAcknowledgment) {
+          try {
+            // Import legalHoldApi and send initial notices
+            const { legalHoldApi } = await import('@/services/legalHoldApi');
+            await legalHoldApi.sendInitialNotices(newHold.id);
+            console.log('📧 Initial notices sent to custodians');
+          } catch (emailError) {
+            console.error('Failed to send initial notices:', emailError);
+            // Don't fail the whole operation if email fails
+          }
+        }
       }
       
       onOpenChange(false);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Clock, Save } from 'lucide-react';
+import { Shield, Clock, Save, Plus } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -49,6 +49,7 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
 }) => {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showCreatePolicy, setShowCreatePolicy] = useState(false);
 
   // Form state
   const [name, setName] = useState('');
@@ -101,7 +102,18 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
 
     setIsSubmitting(true);
     try {
-      const { error } = await supabase
+      console.log('Updating template:', template.id);
+      console.log('Update data:', {
+        name,
+        description,
+        retention_period_days: getRetentionInDays(),
+        disposition_action: dispositionAction,
+        trigger_type: triggerType,
+        compliance_framework: complianceFramework || null,
+        requires_approval: requiresApproval,
+      });
+
+      const { data, error } = await supabase
         .from('retention_policy_templates')
         .update({
           name,
@@ -112,13 +124,19 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
           compliance_framework: complianceFramework || null,
           requires_approval: requiresApproval,
         })
-        .eq('id', template.id);
+        .eq('id', template.id)
+        .select();
 
-      if (error) throw error;
+      console.log('Update result:', { data, error });
+
+      if (error) {
+        console.error('Update error:', error);
+        throw error;
+      }
 
       toast({ title: 'Success', description: 'Template updated successfully' });
       onSuccess();
-      onOpenChange(false);
+      setShowCreatePolicy(true);
     } catch (error) {
       console.error('Failed to update template:', error);
       toast({ 
@@ -338,16 +356,35 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
         </div>
 
         <DialogFooter className="mt-6">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleSubmit}
-            disabled={isSubmitting || !name}
-          >
-            <Save className="h-4 w-4 mr-2" />
-            Save Changes
-          </Button>
+          {showCreatePolicy ? (
+            <>
+              <Button variant="outline" onClick={() => { setShowCreatePolicy(false); onOpenChange(false); }}>
+                Close
+              </Button>
+              <Button onClick={() => {
+                setShowCreatePolicy(false);
+                onOpenChange(false);
+                // Navigate to create policy with template pre-selected
+                window.location.hash = '#retention?action=create-policy&templateId=' + template?.id;
+              }}>
+                <Plus className="h-4 w-4 mr-2" />
+                Create Policy from Template
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleSubmit}
+                disabled={isSubmitting || !name}
+              >
+                <Save className="h-4 w-4 mr-2" />
+                Save Changes
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

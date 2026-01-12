@@ -3,6 +3,8 @@ import {
   Clock, Search, Filter, Download, FileText,
   Trash2, Archive, Lock, Unlock, RefreshCw, CheckCircle, AlertTriangle, Eye
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -203,84 +205,66 @@ export const RetentionAuditLog: React.FC<RetentionAuditLogProps> = ({ logs }) =>
   const exportToPdf = () => {
     console.log('Exporting logs to PDF:', filteredLogs.length);
     
-    // Create a printable HTML document
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
+    try {
+      const doc = new jsPDF();
+      const date = new Date().toLocaleDateString();
+      
+      // Title
+      doc.setFontSize(18);
+      doc.setTextColor(26, 115, 232);
+      doc.text('Retention Audit Log Report', 14, 20);
+      
+      // Metadata
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 28);
+      doc.text(`Total Records: ${filteredLogs.length}`, 14, 34);
+      doc.text(`Filters: Action: ${actionFilter}, Date Range: ${dateRange}`, 14, 40);
+      
+      // Table
+      const tableData = filteredLogs.map(log => [
+        new Date(log.created_at).toLocaleString(),
+        log.action.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+        documentNames[log.document_id] || log.document_id.substring(0, 8) + '...',
+        log.previous_status || '-',
+        log.new_status || '-',
+        (log.reason || '-').substring(0, 30),
+        log.certificate_number || '-'
+      ]);
+      
+      autoTable(doc, {
+        head: [['Date', 'Action', 'Document', 'Prev Status', 'New Status', 'Reason', 'Certificate']],
+        body: tableData,
+        startY: 48,
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [26, 115, 232], textColor: 255 },
+        alternateRowStyles: { fillColor: [245, 245, 245] },
+        columnStyles: {
+          0: { cellWidth: 32 },
+          1: { cellWidth: 28 },
+          2: { cellWidth: 30 },
+          3: { cellWidth: 22 },
+          4: { cellWidth: 22 },
+          5: { cellWidth: 30 },
+          6: { cellWidth: 24 }
+        }
+      });
+      
+      // Save
+      doc.save(`retention-audit-log-${date}.pdf`);
+      
       toast({
-        title: "Error",
-        description: "Unable to open print window. Please allow popups.",
+        title: "Export Complete",
+        description: `Exported ${filteredLogs.length} audit log records to PDF`,
+      });
+    } catch (error) {
+      console.error('Error exporting PDF:', error);
+      toast({
+        title: "Export Failed",
+        description: "Failed to generate PDF report",
         variant: "destructive",
       });
-      return;
     }
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Retention Audit Log - ${new Date().toLocaleDateString()}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            h1 { color: #333; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
-            th { background-color: #f4f4f4; font-weight: bold; }
-            tr:nth-child(even) { background-color: #f9f9f9; }
-            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-            .summary { background-color: #f0f0f0; padding: 10px; border-radius: 4px; margin-bottom: 20px; }
-            @media print {
-              body { padding: 0; }
-              button { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>Retention Audit Log Report</h1>
-            <button onclick="window.print()">Print / Save as PDF</button>
-          </div>
-          <div class="summary">
-            <strong>Report Generated:</strong> ${new Date().toLocaleString()}<br/>
-            <strong>Total Records:</strong> ${filteredLogs.length}<br/>
-            <strong>Filters Applied:</strong> Action: ${actionFilter}, Date Range: ${dateRange}
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Action</th>
-                <th>Document</th>
-                <th>Previous Status</th>
-                <th>New Status</th>
-                <th>Reason</th>
-                <th>Certificate</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filteredLogs.map(log => `
-                <tr>
-                  <td>${new Date(log.created_at).toLocaleString()}</td>
-                  <td>${log.action.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</td>
-                  <td>${documentNames[log.document_id] || log.document_id}</td>
-                  <td>${log.previous_status || '-'}</td>
-                  <td>${log.new_status || '-'}</td>
-                  <td>${log.reason || '-'}</td>
-                  <td>${log.certificate_number || '-'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-    
-    toast({
-      title: "Export Ready",
-      description: `PDF report generated with ${filteredLogs.length} records. Use Print dialog to save as PDF.`,
-    });
   };
 
   return (

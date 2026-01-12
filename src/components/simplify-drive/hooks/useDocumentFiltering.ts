@@ -27,13 +27,22 @@ export function useDocumentFiltering({
     let cleanSearchQuery = searchQuery;
     
     if (legalHoldMatch) {
-      const [, , documentIdsStr] = legalHoldMatch;
+      const [, holdId, documentIdsStr] = legalHoldMatch;
       legalHoldDocumentIds = documentIdsStr.split(',');
       cleanSearchQuery = searchQuery.replace(/legal_hold:\S+:\S+/, '').trim();
+      console.log('🔍 Legal hold filter detected:', { holdId, documentCount: legalHoldDocumentIds.length });
     }
     
     let filtered = documents.filter(doc => {
-      const searchLower = searchQuery.toLowerCase();
+      // Legal hold filter - filter by document IDs FIRST
+      if (legalHoldDocumentIds.length > 0) {
+        if (!legalHoldDocumentIds.includes(doc.id)) {
+          return false;
+        }
+      }
+
+      // Use clean search query (without legal_hold prefix) for text search
+      const searchLower = cleanSearchQuery.toLowerCase();
       
       // Helper function to recursively search in any object structure
       const searchInObject = (obj: any, depth: number = 0): boolean => {
@@ -90,7 +99,7 @@ export function useDocumentFiltering({
         return searchInObject(data);
       };
       
-      const matchesSearch = searchQuery === '' || 
+      const matchesSearch = cleanSearchQuery === '' || 
         // Search in file name
         doc.file_name.toLowerCase().includes(searchLower) ||
         // Search in extracted text content
@@ -107,16 +116,9 @@ export function useDocumentFiltering({
         doc.tags?.some(tag => tag.name.toLowerCase().includes(searchLower)) ||
         // Search in document type
         doc.file_type?.toLowerCase().includes(searchLower);
-      
-      // Legal hold filter - filter by document IDs
-      if (legalHoldDocumentIds.length > 0) {
-        if (!legalHoldDocumentIds.includes(doc.id)) {
-          return false;
-        }
-      }
 
       // Debug: Log search results for non-empty queries
-      if (searchQuery && searchQuery.length > 2) {
+      if (cleanSearchQuery && cleanSearchQuery.length > 2) {
         const hasAnalysisResult = !!doc.analysis_result && Object.keys(doc.analysis_result).length > 0;
         if (hasAnalysisResult) {
           console.log(`🔎 Search "${searchQuery}" in doc "${doc.file_name}":`, {
@@ -126,7 +128,7 @@ export function useDocumentFiltering({
             hasHierarchicalData: !!doc.analysis_result?.hierarchical_data,
             hasHierarchicalDataCamel: !!doc.analysis_result?.hierarchicalData
           });
-        }
+        }cleanS
       }
 
       // When a specific folder is selected (not 'all', 'recycle-bin', or 'media-browser'),

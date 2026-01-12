@@ -128,6 +128,7 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
     try {
       if (isEditing && initialData?.id) {
         // Update existing policy
+        console.log('Updating policy:', initialData.id);
         await updatePolicy(initialData.id, {
           name,
           description,
@@ -139,13 +140,17 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
           notification_days_before: notificationDays,
           requires_approval: requiresApproval,
         });
+        console.log('Policy updated successfully');
       } else if (activeTab === 'template' && selectedTemplate) {
-        await createFromTemplate(selectedTemplate, {
+        console.log('Creating policy from template:', selectedTemplate);
+        const result = await createFromTemplate(selectedTemplate, {
           name: name || undefined,
           description: description || undefined,
         });
+        console.log('Policy created from template:', result);
       } else {
-        await createPolicy({
+        console.log('Creating new policy');
+        const result = await createPolicy({
           name,
           description,
           retention_period_days: getRetentionInDays(),
@@ -161,11 +166,13 @@ export const CreatePolicyDialog: React.FC<CreatePolicyDialogProps> = ({
           approval_roles: [],
           metadata: {},
         });
+        console.log('Policy created:', result);
       }
       onOpenChange(false);
       resetForm();
     } catch (error) {
       console.error('Failed to save policy:', error);
+      // Error toast already shown by the hook functions
     } finally {
       setIsSubmitting(false);
     }

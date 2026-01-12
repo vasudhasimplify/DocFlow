@@ -15,11 +15,11 @@ CREATE POLICY "Users can create templates"
     TO authenticated
     WITH CHECK (true);
 
-CREATE POLICY "Users can update non-system templates"
+CREATE POLICY "Users can update templates"
     ON retention_policy_templates FOR UPDATE
     TO authenticated
-    USING (is_system_template = false OR is_system_template IS NULL)
-    WITH CHECK (is_system_template = false OR is_system_template IS NULL);
+    USING (true)
+    WITH CHECK (true);
 
 CREATE POLICY "Users can delete non-system templates"
     ON retention_policy_templates FOR DELETE

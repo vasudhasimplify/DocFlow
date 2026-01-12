@@ -283,6 +283,57 @@ export function useLegalHolds() {
     }
   }, [toast]);
 
+  const processReminders = useCallback(async (): Promise<boolean> => {
+    try {
+      const result = await legalHoldApi.processReminders();
+      
+      await fetchHolds();
+
+      const totalActions = result.reminders_sent + result.escalations_triggered + result.acknowledgment_notices_sent;
+      
+      if (totalActions > 0) {
+        toast({
+          title: 'Reminders processed',
+          description: `Sent ${result.reminders_sent} reminders, ${result.escalations_triggered} escalations, ${result.acknowledgment_notices_sent} initial notices`
+        });
+      } else {
+        toast({
+          title: 'No actions needed',
+          description: `Checked ${result.holds_checked} legal holds - no reminders or escalations due`
+        });
+      }
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to process reminders',
+        variant: 'destructive'
+      });
+      return false;
+    }
+  }, [toast, fetchHolds]);
+
+  const sendInitialNotices = useCallback(async (holdId: string): Promise<boolean> => {
+    try {
+      const result = await legalHoldApi.sendInitialNotices(holdId);
+
+      await fetchHolds();
+
+      toast({
+        title: 'Notices sent',
+        description: `Sent initial notices to ${result.sent_count} of ${result.total_custodians} custodians`
+      });
+      return true;
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Failed to send initial notices',
+        variant: 'destructive'
+      });
+      return false;
+    }
+  }, [toast, fetchHolds]);
+
   useEffect(() => {
     fetchHolds();
   }, [fetchHolds]);
@@ -302,6 +353,8 @@ export function useLegalHolds() {
     escalateCustodian,
     acknowledgeCustodian,
     sendNotifications,
-    getAuditTrail
+    getAuditTrail,
+    processReminders,
+    sendInitialNotices
   };
 }

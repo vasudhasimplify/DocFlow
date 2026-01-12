@@ -607,5 +607,65 @@ export const legalHoldApi = {
         
         if (error) throw error;
         return (data || []) as LegalHoldAuditEntry[];
+    },
+
+    /**
+     * Process all legal hold reminders and escalations automatically.
+     * This checks all active holds and sends reminders/escalations based on settings.
+     */
+    async processReminders(): Promise<{
+        success: boolean;
+        holds_checked: number;
+        reminders_sent: number;
+        escalations_triggered: number;
+        acknowledgment_notices_sent: number;
+    }> {
+        try {
+            const headers = await getHeaders();
+            const response = await fetch(`${BASE_URL}/api/legal-holds/process-reminders`, {
+                method: 'POST',
+                headers
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to process reminders: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            console.log('📧 Reminder processing result:', result);
+            return result.results || result;
+        } catch (error) {
+            console.error('Error processing reminders:', error);
+            throw error;
+        }
+    },
+
+    /**
+     * Send initial acknowledgment notices to all pending custodians of a legal hold.
+     * This is typically called right after creating a legal hold with custodians.
+     */
+    async sendInitialNotices(holdId: string): Promise<{
+        success: boolean;
+        sent_count: number;
+        total_custodians: number;
+    }> {
+        try {
+            const headers = await getHeaders();
+            const response = await fetch(`${BASE_URL}/api/legal-holds/${holdId}/send-initial-notices`, {
+                method: 'POST',
+                headers
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to send initial notices: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            console.log('📧 Initial notices result:', result);
+            return result;
+        } catch (error) {
+            console.error('Error sending initial notices:', error);
+            throw error;
+        }
     }
 };

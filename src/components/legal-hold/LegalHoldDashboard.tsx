@@ -57,7 +57,7 @@ import { AILegalHoldInsights } from './AILegalHoldInsights';
 import { useNavigate } from 'react-router-dom';
 
 export const LegalHoldDashboard: React.FC = () => {
-  const { holds, loading, createHold, updateHold, releaseHold, approveHold, rejectHold, fetchHolds, sendNotifications } = useLegalHolds();
+  const { holds, loading, createHold, updateHold, releaseHold, approveHold, rejectHold, fetchHolds, sendNotifications, processReminders } = useLegalHolds();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('active');
@@ -141,6 +141,15 @@ export const LegalHoldDashboard: React.FC = () => {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => processReminders()}
+                className="border-orange-500/30 hover:bg-orange-500/5"
+                title="Process all pending reminders and escalations"
+              >
+                <Bell className="w-4 h-4 mr-2 text-orange-600" />
+                Process Reminders
+              </Button>
               <Button 
                 variant="outline" 
                 onClick={() => setShowAIInsights(true)}

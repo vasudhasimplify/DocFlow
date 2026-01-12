@@ -283,7 +283,7 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
                 ))}
               </div>
 
-              <ScrollArea className="max-h-[50vh] pr-4">
+              <ScrollArea className="max-h-[50vh] overflow-y-auto pr-4">
                 {/* Step 1: Basic Settings */}
                 {step === 1 && (
                   <div className="space-y-4">
