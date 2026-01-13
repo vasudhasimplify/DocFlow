@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_STORAGE_BUCKET: str = "backendbucket"  # Supabase Storage bucket name
     
-    # Redis (required - no defaults for production)
-    REDIS_URL: str
+    # Redis (optional - provide default for environments without Redis)
+    REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_PASSWORD: str = ""
     
     # Celery (uses REDIS_URL by default)
