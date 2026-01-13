@@ -13,12 +13,10 @@ hpack==4.1.0
 httpcore==1.0.9
 aiohttp
 
-# FIXED → Supabase needs httpx + http2 and version <0.29
-# Using pinned version to avoid resolution conflicts
-httpx==0.27.2
+# FIXED → Balanced version for both Supabase (<0.29) and google-genai (>=0.28.1)
+httpx==0.28.1
 h2>=4.0.0
 hyperframe>=6.0.0
-
 
 idna==3.11
 multidict==6.7.0
@@ -63,7 +61,7 @@ typing-inspection==0.4.2
 uvicorn==0.24.0
 uvloop==0.22.1 ; platform_system != "Windows"
 watchfiles==1.1.1
-websockets==15.0.1
+websockets==14.1
 yarl==1.22.0
 langsmith>=0.1.0
 google-genai>=1.0.0
