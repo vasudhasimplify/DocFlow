@@ -2,8 +2,8 @@ services:
   onlyoffice:
     image: onlyoffice/documentserver:latest
     container_name: onlyoffice-docs
-    ports:
-      - "8080:80"
+    expose:
+      - "80"
     environment:
       - JWT_ENABLED=false
       - ALLOW_META_IP_ADDRESS=true
@@ -13,7 +13,13 @@ services:
     volumes:
       - onlyoffice_data:/var/www/onlyoffice/Data
       - onlyoffice_logs:/var/log/onlyoffice
+    networks:
+      - docflow-network
     restart: unless-stopped
+
+networks:
+  docflow-network:
+    driver: bridge
 
 volumes:
   onlyoffice_data:
