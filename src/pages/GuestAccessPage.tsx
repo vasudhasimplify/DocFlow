@@ -251,8 +251,8 @@ export default function GuestAccessPage() {
           if (shareLinkData) {
             shareData = {
               id: shareLinkData.id,
-              resource_id: shareLinkData.document_id,
-              resource_name: shareLinkData.document_name || 'Shared Document',
+              resource_id: shareLinkData.resource_id,
+              resource_name: shareLinkData.resource_name || shareLinkData.name || 'Shared Document',
               guest_email: null,
               permission: shareLinkData.permission || 'view',
               allow_download: shareLinkData.allow_download ?? true,
@@ -274,26 +274,59 @@ export default function GuestAccessPage() {
 
         if (shareData) {
           // Check for approved checkout FIRST
-          const guestEmailForCheck = shareData.guest_email || visitorEmail || anonymousGuestId;
           let hasBypassAccess = false;
 
           try {
-            const { data: lockData } = await supabase
-              .from('document_locks')
-              .select('*')
-              .eq('document_id', shareData.resource_id)
-              .eq('guest_email', guestEmailForCheck)
-              .eq('is_active', true)
-              .gte('expires_at', new Date().toISOString())
-              .maybeSingle();
+            // For share_links (where guest_email is null), check if there's an approved checkout request
+            // Query via backend API to bypass RLS (anonymous users can't read checkout_requests/document_locks directly)
+            if (!shareData.guest_email && token) {
+              console.log('🔍 Checking for approved checkout via backend API with token:', token);
+              try {
+                const checkoutResponse = await fetch(`http://localhost:8000/api/share-link/check-approved-checkout/${token}`);
+                if (checkoutResponse.ok) {
+                  const checkoutData = await checkoutResponse.json();
+                  console.log('📋 Checkout API response:', checkoutData);
+                  
+                  if (checkoutData.has_approved_checkout && checkoutData.lock_active) {
+                    console.log('✅ Found active lock! Granting edit access');
+                    hasBypassAccess = true;
+                    setHasApprovedCheckout(true);
+                    setCheckoutExpiresAt(checkoutData.lock_expires_at);
+                    if (checkoutData.requester_email) {
+                      setVisitorEmail(checkoutData.requester_email);
+                    }
+                  } else if (checkoutData.has_approved_checkout && !checkoutData.lock_active) {
+                    console.warn('⚠️ Checkout approved but lock expired or not active');
+                  }
+                }
+              } catch (err) {
+                console.warn('⚠️ Failed to check approved checkout via API:', err);
+              }
+            } else if (shareData.guest_email) {
+              // For external_shares (with guest_email), check locks directly
+              const guestEmailForCheck = shareData.guest_email || visitorEmail || anonymousGuestId;
+              console.log('🔍 Checking document_locks for external share, guest_email:', guestEmailForCheck);
+              const { data: lockResults } = await supabase
+                .from('document_locks')
+                .select('*')
+                .eq('document_id', shareData.resource_id)
+                .eq('guest_email', guestEmailForCheck)
+                .eq('is_active', true)
+                .gte('expires_at', new Date().toISOString())
+                .limit(1);
 
-            if (lockData) {
-              hasBypassAccess = true;
-              setHasApprovedCheckout(true);
-              setCheckoutExpiresAt(lockData.expires_at);
-              if (shareData.guest_email && !visitorEmail) setVisitorEmail(shareData.guest_email);
+              const lockData = lockResults && lockResults.length > 0 ? lockResults[0] : null;
+              if (lockData) {
+                console.log('✅ Found active lock for external share!');
+                hasBypassAccess = true;
+                setHasApprovedCheckout(true);
+                setCheckoutExpiresAt(lockData.expires_at);
+                if (shareData.guest_email && !visitorEmail) setVisitorEmail(shareData.guest_email);
+              }
             }
-          } catch (err) { }
+          } catch (err) {
+            console.error('Error checking approved checkout:', err);
+          }
 
           // Validate permissions if no bypass
           if (!hasBypassAccess) {

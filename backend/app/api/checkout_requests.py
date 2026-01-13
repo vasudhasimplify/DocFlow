@@ -127,12 +127,15 @@ async def send_approval_email(requester_email: str, requester_name: str,
         </html>
         """
         
-        await email_service.send_email(
+        result = email_service.send_email(
             to_email=requester_email,
             subject=f"Edit Access Granted: {document_name}",
             html_content=html_content
         )
-        logger.info(f"✉️ Sent approval email to {requester_email}")
+        if result:
+            logger.info(f"✉️ Sent approval email to {requester_email}")
+        else:
+            logger.warning(f"⚠️ Failed to send approval email to {requester_email}")
     except Exception as e:
         logger.error(f"Failed to send approval email: {e}")
 
@@ -462,4 +465,51 @@ async def get_my_requests(email: str):
         return results
     except Exception as e:
         logger.error(f"Error fetching user requests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/release-guest-lock/{document_id}")
+async def release_guest_lock(document_id: str, request: Request):
+    """
+    Release a guest document lock (for document owners)
+    This allows owners to revoke edit access granted to guests via checkout approval
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Get user ID from header
+        user_id = request.headers.get("x-user-id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not provided")
+        
+        logger.info(f"🔓 Releasing guest lock for document {document_id} by owner {user_id}")
+        
+        # Verify the document belongs to the current user
+        doc_response = supabase.table('documents')\
+            .select('user_id')\
+            .eq('id', document_id)\
+            .single()\
+            .execute()
+        
+        if not doc_response.data or doc_response.data['user_id'] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to release this lock")
+        
+        # Deactivate all guest locks for this document
+        supabase.table('document_locks')\
+            .update({'is_active': False})\
+            .eq('document_id', document_id)\
+            .neq('guest_email', '')\
+            .execute()
+        
+        logger.info(f"✅ Guest lock released for document {document_id}")
+        
+        return {
+            "success": True,
+            "message": "Guest lock released successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error releasing guest lock: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

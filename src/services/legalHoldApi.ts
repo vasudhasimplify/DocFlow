@@ -133,6 +133,63 @@ export const legalHoldApi = {
         
         if (error) throw error;
         
+        // Update custodians if provided
+        if (custodian_emails !== undefined) {
+            console.log('🔄 Updating custodians for hold:', holdId, custodian_emails);
+            
+            // Get existing custodians
+            const { data: existingCustodians } = await supabase
+                .from('legal_hold_custodians')
+                .select('id, email')
+                .eq('hold_id', holdId);
+            
+            const existingEmails = new Set((existingCustodians || []).map(c => c.email.toLowerCase()));
+            const newEmails = new Set((custodian_emails || []).map(e => e.toLowerCase()));
+            
+            // Add new custodians
+            const emailsToAdd = (custodian_emails || []).filter(email => !existingEmails.has(email.toLowerCase()));
+            if (emailsToAdd.length > 0) {
+                const custodianRecords = emailsToAdd.map(email => {
+                    const name = email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    return {
+                        hold_id: holdId,
+                        name: name,
+                        email,
+                        status: 'pending',
+                        added_by: user.id
+                    };
+                });
+                
+                const { error: insertError } = await supabase
+                    .from('legal_hold_custodians')
+                    .insert(custodianRecords);
+                
+                if (insertError) {
+                    console.error('Error adding custodians:', insertError);
+                } else {
+                    console.log('✅ Added new custodians:', emailsToAdd);
+                }
+            }
+            
+            // Remove custodians that are no longer in the list
+            const custodiansToRemove = (existingCustodians || []).filter(
+                c => !newEmails.has(c.email.toLowerCase())
+            );
+            if (custodiansToRemove.length > 0) {
+                const idsToRemove = custodiansToRemove.map(c => c.id);
+                const { error: deleteError } = await supabase
+                    .from('legal_hold_custodians')
+                    .delete()
+                    .in('id', idsToRemove);
+                
+                if (deleteError) {
+                    console.error('Error removing custodians:', deleteError);
+                } else {
+                    console.log('✅ Removed custodians:', custodiansToRemove.map(c => c.email));
+                }
+            }
+        }
+        
         // Recalculate document count if scope or scope_details changed
         if (params.scope || params.scope_details) {
             try {

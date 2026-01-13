@@ -26,12 +26,15 @@ import {
   MoreVertical,
   Edit,
   Trash2,
-  Copy
+  Copy,
+  Play
 } from 'lucide-react';
 import { useWorkflows } from '@/hooks/useWorkflows';
 import { EscalationAction, PRIORITY_CONFIG, ESCALATION_ACTION_CONFIG } from '@/types/workflow';
 import { CreateEscalationRuleDialog } from './CreateEscalationRuleDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { workflowApi } from '@/services/workflowApi';
+import { toast } from 'sonner';
 
 const actionIcons: Record<EscalationAction, React.ReactNode> = {
   notify: <Bell className="h-4 w-4" />,
@@ -47,6 +50,7 @@ export const EscalationRulesPanel: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | 'workflow'>('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const filteredRules = escalationRules.filter(rule => {
     const matchesSearch = rule.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -65,6 +69,21 @@ export const EscalationRulesPanel: React.FC = () => {
     await updateEscalationRule(rule.id, { is_active: !rule.is_active });
   };
 
+  const handleProcessEscalations = async () => {
+    setIsProcessing(true);
+    try {
+      const result = await workflowApi.processEscalations();
+      toast.success(
+        `Escalation check complete: ${result.escalations_triggered} rules triggered, ${result.actions_executed} actions executed`,
+        { duration: 5000 }
+      );
+    } catch (error: any) {
+      toast.error(`Failed to process escalations: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -78,10 +97,20 @@ export const EscalationRulesPanel: React.FC = () => {
             className="pl-9"
           />
         </div>
-        <Button onClick={() => setIsCreateDialogOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Create Rule
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleProcessEscalations}
+            disabled={isProcessing}
+          >
+            <Play className="h-4 w-4 mr-2" />
+            {isProcessing ? 'Processing...' : 'Process Escalations Now'}
+          </Button>
+          <Button onClick={() => setIsCreateDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Create Rule
+          </Button>
+        </div>
       </div>
 
       {/* Scope Filter Tabs */}

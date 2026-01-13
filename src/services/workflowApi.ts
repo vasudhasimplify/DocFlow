@@ -26,10 +26,22 @@ async function getAuthHeaders(): Promise<HeadersInit> {
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new WorkflowApiError(
-      error.detail || `HTTP error ${response.status}`,
-      response.status
-    );
+    let errorMessage = `HTTP error ${response.status}`;
+    
+    if (error.detail) {
+      // Handle array of error objects from FastAPI
+      if (Array.isArray(error.detail)) {
+        errorMessage = error.detail.map((e: any) => 
+          typeof e === 'object' ? e.msg || JSON.stringify(e) : String(e)
+        ).join(', ');
+      } else if (typeof error.detail === 'object') {
+        errorMessage = JSON.stringify(error.detail);
+      } else {
+        errorMessage = error.detail;
+      }
+    }
+    
+    throw new WorkflowApiError(errorMessage, response.status);
   }
   return response.json();
 }
@@ -60,7 +72,9 @@ export const workflowApi = {
     const response = await fetch(`${API_BASE}/api/workflows/${id}`, {
       headers: await getAuthHeaders(),
     });
-    return handleResponse<Workflow>(response);
+    const result = await handleResponse<{ data: Workflow }>(response);
+    // Backend returns {data: workflow}, extract the workflow object
+    return result.data;
   },
 
   async createWorkflow(workflow: Partial<Workflow>): Promise<Workflow> {
@@ -249,6 +263,19 @@ export const workflowApi = {
       headers: await getAuthHeaders(),
     });
     return handleResponse<{ message: string }>(response);
+  },
+
+  async processEscalations(): Promise<{
+    checked_steps: number;
+    escalations_triggered: number;
+    actions_executed: number;
+    timestamp: string;
+  }> {
+    const response = await fetch(`${API_BASE}/api/workflows/escalations/process`, {
+      method: 'POST',
+      headers: await getAuthHeaders(),
+    });
+    return handleResponse(response);
   },
 
   // ============================================================================

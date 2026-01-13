@@ -341,15 +341,6 @@ export const CreateEscalationRuleDialog: React.FC<CreateEscalationRuleDialogProp
                         </div>
                       </div>
                     </SelectItem>
-                    <SelectItem value="step" disabled>
-                      <div className="flex items-center gap-2">
-                        <div className="h-2 w-2 rounded-full bg-orange-500" />
-                        <div>
-                          <div className="font-medium">Specific Step</div>
-                          <div className="text-xs text-muted-foreground">Configure in Workflow Builder</div>
-                        </div>
-                      </div>
-                    </SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground mt-1">

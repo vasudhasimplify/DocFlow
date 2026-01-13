@@ -14,9 +14,14 @@ export const useWorkflows = () => {
   const [instances, setInstances] = useState<WorkflowInstance[]>([]);
   const [escalationRules, setEscalationRules] = useState<EscalationRule[]>([]);
   const [stats, setStats] = useState<WorkflowStats>({
+    total_workflows: 0,
     active_workflows: 0,
     running_instances: 0,
+    completed_today: 0,
+    pending_approvals: 0,
     overdue_tasks: 0,
+    avg_completion_time: 0,
+    escalation_rate: 0,
     sla_compliance_rate: 0,
   });
   const [isLoading, setIsLoading] = useState(false);
@@ -115,7 +120,8 @@ export const useWorkflows = () => {
     fetchInstances();
     fetchEscalationRules();
     fetchStats();
-  }, [fetchWorkflows, fetchInstances, fetchEscalationRules, fetchStats]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - only run once on mount
 
   // ============================================================================
   // WORKFLOW CRUD OPERATIONS
@@ -191,18 +197,54 @@ export const useWorkflows = () => {
   const duplicateWorkflow = useCallback(async (id: string) => {
     setIsLoading(true);
     try {
-      const workflow = workflows.find(w => w.id === id);
+      // Fetch the workflow directly from API instead of relying on local state
+      const workflow = await workflowApi.getWorkflow(id);
       if (!workflow) {
         throw new Error('Workflow not found');
       }
 
-      // Create a copy with new name and reset status
-      const duplicatedWorkflow = await workflowApi.createWorkflow({
-        ...workflow,
+      console.log('Original workflow data:', workflow);
+
+      // Exclude readonly/auto-generated fields that would cause validation errors
+      const { id: _, created_at, updated_at, stats, created_by, ...workflowData } = workflow;
+
+      // Ensure required fields are present
+      if (!workflowData.category) {
+        workflowData.category = 'approval'; // Default category
+      }
+      if (!workflowData.trigger_type) {
+        workflowData.trigger_type = 'manual'; // Default trigger
+      }
+      
+      // Steps validation - ensure steps exist and is an array
+      if (!workflowData.steps) {
+        console.warn('No steps field found in workflow, using empty array');
+        workflowData.steps = [];
+      }
+      
+      if (!Array.isArray(workflowData.steps)) {
+        console.warn('Steps is not an array, converting:', workflowData.steps);
+        workflowData.steps = [];
+      }
+      
+      if (workflowData.steps.length === 0) {
+        console.error('Workflow has no steps:', workflow);
+        throw new Error('Cannot duplicate workflow: Original workflow has no steps defined');
+      }
+
+      console.log('Workflow data to create:', {
+        ...workflowData,
         name: `${workflow.name} (Copy)`,
         status: 'draft',
         is_template: false,
-        stats: { total_runs: 0, completed_runs: 0, avg_completion_time: 0, success_rate: 0 }
+      });
+
+      // Create a copy with new name and reset status
+      const duplicatedWorkflow = await workflowApi.createWorkflow({
+        ...workflowData,
+        name: `${workflow.name} (Copy)`,
+        status: 'draft',
+        is_template: false,
       });
 
       setWorkflows(prev => [...prev, duplicatedWorkflow]);
@@ -219,7 +261,7 @@ export const useWorkflows = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [workflows]);
+  }, []);
 
   // ============================================================================
   // WORKFLOW INSTANCE OPERATIONS

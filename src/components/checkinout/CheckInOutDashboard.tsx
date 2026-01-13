@@ -58,6 +58,7 @@ interface CheckInOutHistory {
   performer_email?: string;
   performed_at: string;
   notes?: string;
+  document_owner_email?: string;
 }
 
 export const CheckInOutDashboard: React.FC = () => {
@@ -432,7 +433,8 @@ export const CheckInOutDashboard: React.FC = () => {
         performed_by: lock.locked_by,
         performer_email: lock.guest_email || userEmailsMap[lock.locked_by] || 'Unknown',
         performed_at: lock.locked_at,
-        notes: lock.lock_reason
+        notes: lock.lock_reason,
+        document_owner_email: ownerEmailsMap[documentOwnersMap[lock.document_id]] || 'Unknown'
       }));
 
     setHistory(historyData);
@@ -797,9 +799,9 @@ export const CheckInOutDashboard: React.FC = () => {
                     {history.map((item) => (
                       <div 
                         key={item.id}
-                        className="flex items-center gap-4 p-3 rounded-lg border bg-card"
+                        className="flex items-start gap-4 p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
                       >
-                        <div className={`p-2 rounded-full ${
+                        <div className={`p-2 rounded-full shrink-0 ${
                           item.action === 'check_in' 
                             ? 'bg-green-500/10' 
                             : item.action === 'force_unlock'
@@ -814,18 +816,30 @@ export const CheckInOutDashboard: React.FC = () => {
                             <Download className="h-4 w-4 text-blue-500" />
                           )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">
-                            {item.action === 'check_in' ? 'Checked In' : 
-                             item.action === 'force_unlock' ? 'Force Unlocked' : 'Checked Out'}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {item.notes || 'No notes'}
-                          </p>
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium">
+                              {item.action === 'check_in' ? 'Checked In' : 
+                               item.action === 'force_unlock' ? 'Force Unlocked' : 'Checked Out'}
+                            </p>
+                            <Badge variant="outline" className="text-xs">
+                              {formatDistanceToNow(new Date(item.performed_at), { addSuffix: true })}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <FileText className="h-3 w-3" />
+                            <span className="font-medium truncate">{item.document_name}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <User className="h-3 w-3" />
+                            <span>Owner: {item.document_owner_email}</span>
+                          </div>
+                          {item.notes && (
+                            <p className="text-xs text-muted-foreground italic">
+                              {item.notes}
+                            </p>
+                          )}
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDistanceToNow(new Date(item.performed_at), { addSuffix: true })}
-                        </p>
                       </div>
                     ))}
                   </div>

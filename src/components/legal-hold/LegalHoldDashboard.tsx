@@ -527,6 +527,7 @@ export const LegalHoldDashboard: React.FC = () => {
       {/* Edit Dialog */}
       {editingHold && (
         <CreateLegalHoldDialog
+          key={`edit-${editingHold.id}`}
           open={!!editingHold}
           onOpenChange={(open) => !open && setEditingHold(null)}
           onCreateHold={createHold}

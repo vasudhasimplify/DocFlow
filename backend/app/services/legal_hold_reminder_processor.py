@@ -129,7 +129,7 @@ class LegalHoldReminderProcessor:
             custodian_email = custodian.get("email")
             custodian_name = custodian.get("name", "Custodian")
             added_at = custodian.get("added_at") or custodian.get("created_at")
-            last_reminder_sent = custodian.get("last_reminder_sent")
+            last_reminder_sent = custodian.get("last_reminded_at")  # Fixed: was last_reminder_sent
             reminder_count = custodian.get("reminder_count", 0)
             
             if not custodian_email:
@@ -210,7 +210,7 @@ class LegalHoldReminderProcessor:
             self.supabase.table("legal_hold_custodians")\
                 .update({
                     "reminder_count": count,
-                    "last_reminder_sent": datetime.now(self.timezone).isoformat()
+                    "last_reminded_at": datetime.now(self.timezone).isoformat()
                 })\
                 .eq("id", custodian_id)\
                 .execute()

@@ -24,9 +24,9 @@ INSERT INTO retention_policy_templates (
 ) VALUES (
     '00000000-0000-0000-0000-000000000001',
     'GDPR - Personal Data',
-    'Retain personal data for no longer than necessary. Default retention: 3 years after last contact or contract termination.',
+    'Retain personal data for no longer than necessary. Default retention: 6 years after last contact or contract termination.',
     'GDPR',
-    1095, -- 3 years
+    2190, -- 6 years
     'delete',
     'last_modified',
     true,

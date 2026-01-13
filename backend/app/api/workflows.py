@@ -1599,8 +1599,14 @@ async def get_workflow_analytics(
                 "rejected": rejected
             })
         
-        # Step performance
-        steps_response = supabase.table("workflow_step_instances").select("*").execute()
+        # Step performance - filter by workflow if specified
+        steps_query = supabase.table("workflow_step_instances").select("*")
+        if workflow_id:
+            # Get instance IDs for the specific workflow
+            workflow_instances = [i["id"] for i in instances]
+            if workflow_instances:
+                steps_query = steps_query.in_("instance_id", workflow_instances)
+        steps_response = steps_query.execute()
         steps = steps_response.data
         
         step_performance = {}
@@ -1758,15 +1764,14 @@ async def get_workflow_analytics(
             # Fall back to empty list if there's an error
             condition_stats = []
         
-        # Top Performers (users by task completion)
+        # Top Performers (users by task completion) - use filtered steps
         user_performance = []
-        users_response = supabase.table("workflow_step_instances").select("assigned_to, status, started_at, completed_at, is_overdue").execute()
         user_map = {}
         
         # First, get user emails from Supabase Auth
         user_emails_map = {}
         unique_user_ids = set()
-        for step in users_response.data:
+        for step in steps:
             if step.get("assigned_to"):
                 unique_user_ids.add(step["assigned_to"])
         
@@ -1785,7 +1790,7 @@ async def get_workflow_analytics(
                 logger.warning(f"Could not fetch user {user_id}: {str(e)}")
                 user_emails_map[user_id] = user_id[:8]  # Fallback to short ID
         
-        for step in users_response.data:
+        for step in steps:
             assigned_to = step.get("assigned_to")
             if not assigned_to:
                 continue
@@ -1839,12 +1844,11 @@ async def get_workflow_analytics(
                 {"user": "Lisa P.", "tasksCompleted": 45, "avgTime": 1.5, "onTime": 96}
             ]
         
-        # Path Distribution (workflow branches taken)
+        # Path Distribution (workflow branches taken) - use filtered instances
         path_distribution = []
-        branches_response = supabase.table("workflow_instances").select("metadata").execute()
         branch_map = {}
         
-        for instance in branches_response.data:
+        for instance in instances:
             metadata = instance.get("metadata") or {}
             path_taken = metadata.get("path_taken", "Standard Path")
             
@@ -2111,57 +2115,79 @@ async def delete_workflow(
 
 # Mapping of document types to workflow categories
 DOCUMENT_TYPE_TO_WORKFLOW_MAPPING = {
-    # Financial documents
-    "invoice": ["finance", "approval"],
-    "flight-invoice": ["finance", "approval"],
-    "hotel-invoice": ["finance", "approval"],
-    "travel-invoice": ["finance", "approval"],
-    "receipt": ["finance", "approval"],
-    "financial": ["finance", "approval"],
-    "tax": ["finance", "legal"],
-    "tax-invoice": ["finance", "approval"],
-    "bill": ["finance", "approval"],
-    "laptop-bill": ["finance", "approval"],
-    "purchase-order": ["finance", "approval"],
-    "expense": ["finance", "approval"],
-    "bank-statement": ["finance"],
-    "salary-slip": ["finance", "hr"],
-    "form-16": ["finance", "legal"],
+    # Financial documents - map to finance category
+    "invoice": ["finance", "financial", "approval"],
+    "flight-invoice": ["finance", "financial", "approval"],
+    "hotel-invoice": ["finance", "financial", "approval"],
+    "travel-invoice": ["finance", "financial", "approval"],
+    "receipt": ["finance", "financial", "approval"],
+    "financial": ["finance", "financial", "approval"],
+    "finance": ["finance", "financial", "approval"],
+    "tax": ["finance", "financial", "legal"],
+    "tax-invoice": ["finance", "financial", "approval"],
+    "bill": ["finance", "financial", "approval"],
+    "laptop-bill": ["finance", "financial", "approval"],
+    "purchase-order": ["finance", "financial", "approval"],
+    "expense": ["finance", "financial", "approval"],
+    "bank-statement": ["finance", "financial"],
+    "salary-slip": ["finance", "financial", "hr"],
+    "form-16": ["finance", "financial", "legal"],
+    "payment": ["finance", "financial", "approval"],
+    "reimbursement": ["finance", "financial", "approval"],
     
-    # Legal documents
+    # Legal documents - map to legal category
     "contract": ["legal", "approval"],
     "agreement": ["legal", "approval"],
     "legal": ["legal"],
     "nda": ["legal", "approval"],
+    "mou": ["legal", "approval"],
+    "lease": ["legal", "approval"],
+    "deed": ["legal"],
+    "affidavit": ["legal"],
+    "power-of-attorney": ["legal"],
     
-    # HR documents
-    "resume": ["hr"],
-    "cv": ["hr"],
-    "employment": ["hr"],
-    "application": ["hr"],
-    "onboarding": ["hr"],
+    # HR documents - map to hr category
+    "resume": ["hr", "human-resources"],
+    "cv": ["hr", "human-resources"],
+    "employment": ["hr", "human-resources"],
+    "application": ["hr", "human-resources"],
+    "onboarding": ["hr", "human-resources"],
+    "offer-letter": ["hr", "human-resources"],
+    "appointment": ["hr", "human-resources"],
+    "termination": ["hr", "human-resources"],
+    "resignation": ["hr", "human-resources"],
+    "performance-review": ["hr", "human-resources"],
     
     # Identity documents
-    "identity": ["hr", "legal"],
-    "passport": ["hr", "legal"],
-    "id_card": ["hr", "legal"],
-    "aadhaar-card": ["hr", "legal"],
-    "pan-card": ["hr", "legal"],
-    "license": ["hr", "legal"],
-    "driving-license": ["hr", "legal"],
+    "identity": ["hr", "human-resources", "legal"],
+    "passport": ["hr", "human-resources", "legal"],
+    "id_card": ["hr", "human-resources", "legal"],
+    "id-card": ["hr", "human-resources", "legal"],
+    "aadhaar-card": ["hr", "human-resources", "legal"],
+    "pan-card": ["hr", "human-resources", "legal"],
+    "license": ["hr", "human-resources", "legal"],
+    "driving-license": ["hr", "human-resources", "legal"],
+    "voter-id": ["hr", "human-resources", "legal"],
     
     # Certificates
-    "certificate": ["hr", "legal"],
-    "diploma": ["hr"],
-    "education": ["hr"],
+    "certificate": ["hr", "human-resources", "legal"],
+    "diploma": ["hr", "human-resources"],
+    "education": ["hr", "human-resources"],
+    "degree": ["hr", "human-resources"],
+    "transcript": ["hr", "human-resources"],
     
     # Medical documents
-    "medical": ["hr", "approval"],
-    "insurance": ["hr", "finance"],
+    "medical": ["hr", "human-resources", "approval"],
+    "insurance": ["hr", "human-resources", "finance", "financial"],
+    "prescription": ["hr", "human-resources"],
+    "medical-report": ["hr", "human-resources"],
     
     # General
     "report": ["approval"],
     "proposal": ["approval"],
+    "memo": ["approval"],
+    "letter": ["approval"],
+    "document": ["approval"],
     "other": ["approval"],
     "unknown": ["approval"],
 }

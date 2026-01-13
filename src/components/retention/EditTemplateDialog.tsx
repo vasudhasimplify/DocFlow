@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Clock, Save, Plus } from 'lucide-react';
+import { Shield, Clock, Plus } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -49,7 +49,6 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
 }) => {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showCreatePolicy, setShowCreatePolicy] = useState(false);
 
   // Form state
   const [name, setName] = useState('');
@@ -102,8 +101,12 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
 
     setIsSubmitting(true);
     try {
-      console.log('Updating template:', template.id);
-      console.log('Update data:', {
+      // Create a new policy from this template instead of editing the template
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      const policyData = {
+        user_id: user.id,
         name,
         description,
         retention_period_days: getRetentionInDays(),
@@ -111,37 +114,36 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
         trigger_type: triggerType,
         compliance_framework: complianceFramework || null,
         requires_approval: requiresApproval,
-      });
+        notification_days_before: notificationDays,
+        is_active: false, // New policies start as inactive until explicitly activated
+        metadata: {
+          template_id: template.id,
+          created_from_template: true,
+          template_name: template.name
+        }
+      };
 
       const { data, error } = await supabase
-        .from('retention_policy_templates')
-        .update({
-          name,
-          description,
-          retention_period_days: getRetentionInDays(),
-          disposition_action: dispositionAction,
-          trigger_type: triggerType,
-          compliance_framework: complianceFramework || null,
-          requires_approval: requiresApproval,
-        })
-        .eq('id', template.id)
+        .from('retention_policies')
+        .insert([policyData])
         .select();
 
-      console.log('Update result:', { data, error });
-
       if (error) {
-        console.error('Update error:', error);
+        console.error('Create policy error:', error);
         throw error;
       }
 
-      toast({ title: 'Success', description: 'Template updated successfully' });
+      toast({ 
+        title: 'Success', 
+        description: 'New policy created from template successfully' 
+      });
       onSuccess();
-      setShowCreatePolicy(true);
+      onOpenChange(false);
     } catch (error) {
-      console.error('Failed to update template:', error);
+      console.error('Failed to create policy from template:', error);
       toast({ 
         title: 'Error', 
-        description: 'Failed to update template', 
+        description: 'Failed to create policy from template', 
         variant: 'destructive' 
       });
     } finally {
@@ -157,10 +159,10 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
-            Edit Template: {template.name}
+            Create Policy from Template: {template.name}
           </DialogTitle>
           <DialogDescription>
-            Modify the retention policy template settings
+            Customize and create a new retention policy based on this template
           </DialogDescription>
         </DialogHeader>
 
@@ -356,35 +358,16 @@ export const EditTemplateDialog: React.FC<EditTemplateDialogProps> = ({
         </div>
 
         <DialogFooter className="mt-6">
-          {showCreatePolicy ? (
-            <>
-              <Button variant="outline" onClick={() => { setShowCreatePolicy(false); onOpenChange(false); }}>
-                Close
-              </Button>
-              <Button onClick={() => {
-                setShowCreatePolicy(false);
-                onOpenChange(false);
-                // Navigate to create policy with template pre-selected
-                window.location.hash = '#retention?action=create-policy&templateId=' + template?.id;
-              }}>
-                <Plus className="h-4 w-4 mr-2" />
-                Create Policy from Template
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button 
-                onClick={handleSubmit}
-                disabled={isSubmitting || !name}
-              >
-                <Save className="h-4 w-4 mr-2" />
-                Save Changes
-              </Button>
-            </>
-          )}
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSubmit}
+            disabled={isSubmitting || !name}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            {isSubmitting ? 'Creating...' : 'Create Policy'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

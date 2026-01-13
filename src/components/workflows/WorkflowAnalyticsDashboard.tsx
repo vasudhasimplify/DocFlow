@@ -4,12 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -30,11 +24,8 @@ import {
   ArrowDownRight,
   Calendar,
   RefreshCw,
-  Download,
-  Filter,
-  Loader2,
   FileText,
-  Table as TableIcon
+  Loader2,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -57,7 +48,6 @@ import { workflowApi } from '@/services/workflowApi';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
 
 interface WorkflowMetrics {
   workflow_id: string;
@@ -74,11 +64,17 @@ interface WorkflowMetrics {
 
 const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
 
+interface WorkflowOption {
+  id: string;
+  name: string;
+}
+
 export const WorkflowAnalyticsDashboard: React.FC = () => {
-  const [dateRange, setDateRange] = useState('30d');
+  const [dateRange, setDateRange] = useState('7d');
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>('all');
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
 
   // Fetch analytics data
   const fetchAnalytics = async () => {
@@ -98,6 +94,19 @@ export const WorkflowAnalyticsDashboard: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+  // Fetch list of workflows for the dropdown
+  useEffect(() => {
+    const fetchWorkflows = async () => {
+      try {
+        const workflowList = await workflowApi.listWorkflows();
+        setWorkflows(workflowList.map(w => ({ id: w.id, name: w.name })));
+      } catch (error) {
+        console.error('Error fetching workflows:', error);
+      }
+    };
+    fetchWorkflows();
+  }, []);
 
   useEffect(() => {
     fetchAnalytics();
@@ -195,233 +204,6 @@ export const WorkflowAnalyticsDashboard: React.FC = () => {
     }
   };
 
-  // Export to Excel with enhanced formatting
-  const exportToExcel = () => {
-    try {
-      // Create workbook
-      const wb = XLSX.utils.book_new();
-      
-      // Helper function to apply styling to sheets
-      const applyHeaderStyle = (ws: any, headerRow: number, lastCol: string) => {
-        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-        
-        // Set column widths
-        const colWidths = [];
-        for (let C = range.s.c; C <= range.e.c; ++C) {
-          let maxWidth = 10;
-          for (let R = range.s.r; R <= range.e.r; ++R) {
-            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-            const cell = ws[cellAddress];
-            if (cell && cell.v) {
-              const cellLength = cell.v.toString().length;
-              maxWidth = Math.max(maxWidth, cellLength + 2);
-            }
-          }
-          colWidths.push({ wch: Math.min(maxWidth, 50) });
-        }
-        ws['!cols'] = colWidths;
-        
-        // Apply header styling
-        for (let C = range.s.c; C <= range.e.c; ++C) {
-          const cellAddress = XLSX.utils.encode_cell({ r: headerRow, c: C });
-          if (ws[cellAddress]) {
-            ws[cellAddress].s = {
-              font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
-              fill: { fgColor: { rgb: "3B82F6" } },
-              alignment: { horizontal: "center", vertical: "center" },
-              border: {
-                top: { style: "thin", color: { rgb: "000000" } },
-                bottom: { style: "thin", color: { rgb: "000000" } },
-                left: { style: "thin", color: { rgb: "000000" } },
-                right: { style: "thin", color: { rgb: "000000" } }
-              }
-            };
-          }
-        }
-      };
-      
-      // Overview sheet with enhanced formatting
-      const overviewData = [
-        ['WORKFLOW ANALYTICS REPORT'],
-        [],
-        ['Report Details', ''],
-        ['Date Range:', dateRange],
-        ['Workflow:', selectedWorkflow === 'all' ? 'All Workflows' : selectedWorkflow],
-        ['Generated:', new Date().toLocaleString()],
-        [],
-        ['Key Metrics', ''],
-        ['Metric', 'Value'],
-        ['Total Instances', overview.totalInstances],
-        ['Completed', overview.completed],
-        ['Active', overview.active],
-        ['Rejected', overview.rejected],
-        ['Completion Rate', `${overview.completionRate}%`],
-        ['Avg Completion Time', `${overview.avgCompletionTime} hours`],
-        ['SLA Compliance', `${overview.slaCompliance}%`],
-        ['Escalation Rate', `${overview.escalationRate}%`]
-      ];
-      const overviewSheet = XLSX.utils.aoa_to_sheet(overviewData);
-      
-      // Merge cells for title
-      overviewSheet['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }, // Title
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 1 } }, // Report Details
-        { s: { r: 7, c: 0 }, e: { r: 7, c: 1 } }  // Key Metrics
-      ];
-      
-      // Style title and headers
-      if (overviewSheet['A1']) {
-        overviewSheet['A1'].s = {
-          font: { bold: true, sz: 16, color: { rgb: "1F2937" } },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "DBEAFE" } }
-        };
-      }
-      
-      applyHeaderStyle(overviewSheet, 8, 'B');
-      overviewSheet['!cols'] = [{ wch: 25 }, { wch: 20 }];
-      XLSX.utils.book_append_sheet(wb, overviewSheet, '📊 Overview');
-      
-      // Step Performance sheet
-      if (stepPerformance && stepPerformance.length > 0) {
-        const stepData = [
-          ['STEP PERFORMANCE ANALYSIS'],
-          [],
-          ['Step Name', 'Avg Time (h)', 'Count', 'SLA Compliance'],
-          ...stepPerformance.map(s => [s.step, s.avgTime, s.count, `${s.sla}%`]),
-          [],
-          ['Summary', '', '', ''],
-          ['Total Steps', stepPerformance.length, '', ''],
-          ['Avg Steps per Instance', (stepPerformance.reduce((sum, s) => sum + s.count, 0) / stepPerformance.length).toFixed(1), '', '']
-        ];
-        const stepSheet = XLSX.utils.aoa_to_sheet(stepData);
-        stepSheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }];
-        
-        if (stepSheet['A1']) {
-          stepSheet['A1'].s = {
-            font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
-            fill: { fgColor: { rgb: "3B82F6" } },
-            alignment: { horizontal: "center", vertical: "center" }
-          };
-        }
-        
-        applyHeaderStyle(stepSheet, 2, 'D');
-        stepSheet['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 12 }, { wch: 18 }];
-        XLSX.utils.book_append_sheet(wb, stepSheet, '⚡ Step Performance');
-      }
-      
-      // Bottlenecks sheet with critical styling
-      if (bottlenecks && bottlenecks.length > 0) {
-        const bottleneckData = [
-          ['BOTTLENECK ALERTS'],
-          [],
-          ['Workflow', 'Step', 'Severity', 'Avg Delay (h)', 'Affected Instances'],
-          ...bottlenecks.map(b => [
-            b.workflow,
-            b.step,
-            b.severity.toUpperCase(),
-            b.avgDelay,
-            b.instances
-          ])
-        ];
-        const bottleneckSheet = XLSX.utils.aoa_to_sheet(bottleneckData);
-        bottleneckSheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
-        
-        if (bottleneckSheet['A1']) {
-          bottleneckSheet['A1'].s = {
-            font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
-            fill: { fgColor: { rgb: "EF4444" } },
-            alignment: { horizontal: "center", vertical: "center" }
-          };
-        }
-        
-        applyHeaderStyle(bottleneckSheet, 2, 'E');
-        bottleneckSheet['!cols'] = [{ wch: 25 }, { wch: 25 }, { wch: 12 }, { wch: 15 }, { wch: 18 }];
-        XLSX.utils.book_append_sheet(wb, bottleneckSheet, '⚠️ Bottlenecks');
-      }
-      
-      // Condition Evaluations sheet
-      if (conditionStats && conditionStats.length > 0) {
-        const conditionData = [
-          ['CONDITION EVALUATIONS'],
-          [],
-          ['Condition', 'Total Evaluations', 'True Path', 'False Path', 'True %'],
-          ...conditionStats.map(c => [
-            c.condition,
-            c.triggered,
-            c.truePath,
-            c.falsePath,
-            `${Math.round((c.truePath / c.triggered) * 100)}%`
-          ]),
-          [],
-          ['Summary', '', '', '', ''],
-          ['Total Conditions', conditionStats.length, '', '', ''],
-          ['Total Evaluations', conditionStats.reduce((sum, c) => sum + c.triggered, 0), '', '', '']
-        ];
-        const conditionSheet = XLSX.utils.aoa_to_sheet(conditionData);
-        conditionSheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
-        
-        if (conditionSheet['A1']) {
-          conditionSheet['A1'].s = {
-            font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
-            fill: { fgColor: { rgb: "22C55E" } },
-            alignment: { horizontal: "center", vertical: "center" }
-          };
-        }
-        
-        applyHeaderStyle(conditionSheet, 2, 'E');
-        conditionSheet['!cols'] = [{ wch: 35 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
-        XLSX.utils.book_append_sheet(wb, conditionSheet, '🔀 Conditions');
-      }
-      
-      // Trend Data sheet with sparklines
-      if (trendData && trendData.length > 0) {
-        const trendDataArr = [
-          ['WORKFLOW TRENDS'],
-          [],
-          ['Day', 'Started', 'Completed', 'Rejected', 'Completion %'],
-          ...trendData.map(t => [
-            t.date,
-            t.started,
-            t.completed,
-            t.rejected,
-            t.started > 0 ? `${Math.round((t.completed / t.started) * 100)}%` : '0%'
-          ]),
-          [],
-          ['Totals', '', '', '', ''],
-          [
-            'Period Total',
-            trendData.reduce((sum, t) => sum + t.started, 0),
-            trendData.reduce((sum, t) => sum + t.completed, 0),
-            trendData.reduce((sum, t) => sum + t.rejected, 0),
-            ''
-          ]
-        ];
-        const trendSheet = XLSX.utils.aoa_to_sheet(trendDataArr);
-        trendSheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
-        
-        if (trendSheet['A1']) {
-          trendSheet['A1'].s = {
-            font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
-            fill: { fgColor: { rgb: "8B5CF6" } },
-            alignment: { horizontal: "center", vertical: "center" }
-          };
-        }
-        
-        applyHeaderStyle(trendSheet, 2, 'E');
-        trendSheet['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 15 }];
-        XLSX.utils.book_append_sheet(wb, trendSheet, '📈 Trends');
-      }
-      
-      // Save Excel file
-      XLSX.writeFile(wb, `workflow-analytics-${dateRange}-${Date.now()}.xlsx`);
-      toast.success('✨ Excel report exported with professional formatting!');
-    } catch (error) {
-      console.error('Error exporting Excel:', error);
-      toast.error('Failed to export Excel report');
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -440,7 +222,19 @@ export const WorkflowAnalyticsDashboard: React.FC = () => {
     );
   }
 
-  const { overview, trendData, stepPerformance, bottlenecks, conditionStats, userPerformance, pathDistribution } = analyticsData;
+  const { overview: rawOverview, trendData, stepPerformance, bottlenecks, conditionStats, userPerformance, pathDistribution } = analyticsData;
+
+  // Add safety defaults for overview values
+  const overview = {
+    active: rawOverview?.active ?? 0,
+    completed: rawOverview?.completed ?? 0,
+    rejected: rawOverview?.rejected ?? 0,
+    totalInstances: rawOverview?.totalInstances ?? 0,
+    avgCompletionTime: rawOverview?.avgCompletionTime ?? 0,
+    slaCompliance: rawOverview?.slaCompliance ?? 0,
+    escalationRate: rawOverview?.escalationRate ?? 0,
+    completionRate: rawOverview?.completionRate ?? 0
+  };
 
   return (
     <div className="space-y-6">
@@ -467,9 +261,11 @@ export const WorkflowAnalyticsDashboard: React.FC = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Workflows</SelectItem>
-              <SelectItem value="doc-approval">Document Approval</SelectItem>
-              <SelectItem value="invoice">Invoice Processing</SelectItem>
-              <SelectItem value="contract">Contract Review</SelectItem>
+              {workflows.map((workflow) => (
+                <SelectItem key={workflow.id} value={workflow.id}>
+                  {workflow.name}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -479,24 +275,10 @@ export const WorkflowAnalyticsDashboard: React.FC = () => {
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={exportToPDF}>
-                <FileText className="h-4 w-4 mr-2" />
-                Export as PDF
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={exportToExcel}>
-                <TableIcon className="h-4 w-4 mr-2" />
-                Export as Excel
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button variant="outline" size="sm" onClick={exportToPDF}>
+            <FileText className="h-4 w-4 mr-2" />
+            Export as PDF
+          </Button>
         </div>
       </div>
 

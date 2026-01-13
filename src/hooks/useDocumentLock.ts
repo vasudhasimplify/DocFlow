@@ -153,7 +153,35 @@ export function useDocumentLock({ documentId, autoRefresh = true }: UseDocumentL
   const unlockDocument = useCallback(async () => {
     if (!lock) return;
 
-    // Only the lock owner can unlock
+    // Check if this is a guest lock (has guest_email)
+    const isGuestLock = lock.guest_email && lock.guest_email.trim() !== '';
+
+    if (isGuestLock) {
+      // Guest locks can be released by the document owner
+      try {
+        const response = await fetch(`http://localhost:8000/api/v1/checkout-requests/release-guest-lock/${documentId}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': user?.id || ''
+          }
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || 'Failed to release guest lock');
+        }
+
+        setLock(null);
+        toast.success('Guest edit access revoked');
+        return;
+      } catch (error: any) {
+        toast.error(error.message || 'Failed to release guest lock');
+        throw error;
+      }
+    }
+
+    // Regular lock - only the lock owner can unlock
     if (lock.locked_by !== user?.id) {
       throw new Error('Only the lock owner can unlock the document');
     }
