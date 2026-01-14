@@ -3,8 +3,9 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { env } from '@/config/env';
 
-const API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/v1/checkinout`;
+const API_BASE_URL = `${env.apiBaseUrl}/api/v1/checkinout`;
 
 export interface CheckoutOptions {
   documentId: string;

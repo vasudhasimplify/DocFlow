@@ -11,6 +11,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { BulkProcessingProvider } from "@/contexts/BulkProcessingContext";
 import { ROUTES } from "@/constants/routes";
+import { checkEnvConfig } from "@/config/env";
 
 // Page imports
 import Index from "./pages/Index";
@@ -50,6 +51,9 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Check environment configuration on app initialization
+checkEnvConfig();
 
 /**
  * Route configuration for protected pages

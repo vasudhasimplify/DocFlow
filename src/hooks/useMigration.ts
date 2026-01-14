@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { logAuditEvent } from '@/utils/auditLogger';
+import { env } from '@/config/env';
 import type {
   MigrationJob,
   MigrationItem,
@@ -14,7 +15,7 @@ import type {
   IdentityMapping
 } from '@/types/migration';
 
-const API_BASE = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/migration`;
+const API_BASE = `${env.apiBaseUrl}/api/migration`;
 
 export function useMigration() {
   const { toast } = useToast();

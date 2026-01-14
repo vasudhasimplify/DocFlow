@@ -5,8 +5,9 @@
 
 import { Workflow, WorkflowInstance, EscalationRule, WorkflowStats } from '@/types/workflow';
 import { supabase } from '@/integrations/supabase/client';
+import { env } from '@/config/env';
 
-const API_BASE = import.meta.env.VITE_FASTAPI_URL || 'http://localhost:8000';
+const API_BASE = env.fastApiUrl;
 
 export class WorkflowApiError extends Error {
   constructor(message: string, public status?: number) {
