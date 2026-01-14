@@ -44,6 +44,7 @@ import { useExternalSharing, ExternalShare, CreateExternalShareParams, checkUser
 import { useDocumentRestrictions } from '@/hooks/useDocumentRestrictions';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { copyToClipboard } from '@/utils/clipboard';
 
 interface ExternalSharingPanelProps {
   documents?: { id: string; file_name: string }[];
@@ -220,11 +221,20 @@ export function ExternalSharingPanel({ documents }: ExternalSharingPanelProps) {
 
   const copyShareLink = async (share: ExternalShare) => {
     const url = getShareUrl(share);
-    await navigator.clipboard.writeText(url);
-    toast({
-      title: "Link copied",
-      description: "Share link copied to clipboard.",
-    });
+    const success = await copyToClipboard(url);
+    
+    if (success) {
+      toast({
+        title: "Link copied",
+        description: "Share link copied to clipboard.",
+      });
+    } else {
+      toast({
+        title: "Copy failed",
+        description: "Please copy the link manually: " + url,
+        variant: "destructive",
+      });
+    }
   };
 
   const getStatusColor = (status: ExternalShare['status']) => {

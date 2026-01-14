@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { logDocumentShared, logAuditEvent } from '@/utils/auditLogger';
+import { env } from '@/config/env';
 
 export interface ExternalShare {
   id: string;
@@ -158,7 +159,7 @@ export function useExternalSharing() {
 
       // Call backend API instead of direct Supabase
       // Backend will handle email sending and database operations
-      const response = await fetch('/api/shares/create', {
+      const response = await fetch(`${env.apiBaseUrl}/api/shares/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
