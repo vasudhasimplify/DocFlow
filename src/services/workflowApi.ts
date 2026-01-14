@@ -62,7 +62,7 @@ export const workflowApi = {
     if (filters?.category) params.append('category', filters.category);
     if (filters?.is_template !== undefined) params.append('is_template', String(filters.is_template));
 
-    const url = `${API_BASE}/api/workflows${params.toString() ? `?${params}` : ''}`;
+    const url = `${API_BASE}/api/workflows/${params.toString() ? `?${params}` : ''}`;
     const response = await fetch(url, {
       headers: await getAuthHeaders(),
     });

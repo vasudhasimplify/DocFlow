@@ -23,30 +23,41 @@ export function getEnvConfig(): EnvConfig {
   const isDevelopment = import.meta.env.DEV;
   const isProduction = import.meta.env.PROD;
 
+  // Runtime detection: If in production and on HTTPS, auto-detect backend URL
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  
+  // TEMPORARY: Use HTTP for backend until SSL is properly configured
+  const defaultBackend = isProduction && isHttps 
+    ? 'http://docflow-backend.simplifyaipro.com'  // Temporarily use HTTP
+    : 'http://localhost:8000';
+
   // Backend URLs
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 
                      import.meta.env.VITE_FASTAPI_URL || 
                      import.meta.env.VITE_BACKEND_URL || 
-                     'http://localhost:8000';
+                     defaultBackend;
   
   const backendUrl = import.meta.env.VITE_BACKEND_URL || 
                      import.meta.env.VITE_API_BASE_URL || 
-                     'http://localhost:8000';
+                     defaultBackend;
   
   const apiUrl = import.meta.env.VITE_API_URL || 
                  import.meta.env.VITE_API_BASE_URL || 
-                 'http://localhost:8000';
+                 defaultBackend;
   
   const fastApiUrl = import.meta.env.VITE_FASTAPI_URL || 
                      import.meta.env.VITE_API_BASE_URL || 
-                     'http://localhost:8000';
+                     defaultBackend;
   
   const bulkApiUrl = import.meta.env.VITE_BULK_API_URL || 
                      import.meta.env.VITE_API_BASE_URL || 
-                     'http://localhost:8000';
+                     defaultBackend;
   
-  const bulkWsUrl = import.meta.env.VITE_BULK_WS_URL || 
-                    'ws://localhost:8000';
+  const defaultWs = isProduction && isHttps 
+    ? 'wss://docflow-backend.simplifyaipro.com'
+    : 'ws://localhost:8000';
+    
+  const bulkWsUrl = import.meta.env.VITE_BULK_WS_URL || defaultWs;
 
   // Supabase
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
