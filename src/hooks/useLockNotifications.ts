@@ -122,7 +122,8 @@ export function useLockNotifications() {
       if (!user) throw new Error('Not authenticated');
 
       // Call backend API endpoint
-      const response = await fetch('http://localhost:8000/api/v1/checkinout/request-access', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/v1/checkinout/request-access`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

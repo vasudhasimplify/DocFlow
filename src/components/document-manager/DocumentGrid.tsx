@@ -281,7 +281,8 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
     if (!documentToDelete) return;
 
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/documents/${documentToDelete.id}`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentToDelete.id}`, {
         method: 'DELETE',
       });
 
@@ -314,7 +315,8 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
 
   const handleRestore = async (document: Document) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/documents/${document.id}/restore`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/v1/documents/${document.id}/restore`, {
         method: 'POST',
       });
 
@@ -342,7 +344,8 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
     if (!documentToDelete) return;
 
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/documents/${documentToDelete.id}/permanent`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentToDelete.id}/permanent`, {
         method: 'DELETE',
       });
 

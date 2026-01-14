@@ -192,7 +192,8 @@ export const CreateWorkflowDialog: React.FC<CreateWorkflowDialogProps> = ({
     // Fetch available fields for condition configuration
     const fetchAvailableFields = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/document-fields');
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+        const response = await fetch(`${API_BASE_URL}/api/document-fields`);
         const data = await response.json();
         if (data.fields) {
           setAvailableFields(data.fields);

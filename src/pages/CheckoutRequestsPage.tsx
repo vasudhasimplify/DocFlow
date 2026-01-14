@@ -50,7 +50,8 @@ export function CheckoutRequestsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const response = await fetch('http://localhost:8000/api/v1/checkout-requests/pending', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/v1/checkout-requests/pending`, {
         headers: {
           'x-user-id': user.id
         }
@@ -78,7 +79,8 @@ export function CheckoutRequestsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const response = await fetch('http://localhost:8000/api/v1/checkout-requests/approve', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/v1/checkout-requests/approve`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json'
@@ -115,7 +117,8 @@ export function CheckoutRequestsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const response = await fetch(`http://localhost:8000/api/v1/checkout-requests/reject`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/v1/checkout-requests/reject`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

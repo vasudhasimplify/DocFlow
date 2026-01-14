@@ -4,7 +4,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export interface DocumentSummary {
   summary: string;
@@ -35,7 +35,7 @@ export async function generateDocumentSummary(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  const response = await fetch(`${API_BASE_URL}/document-summary`, {
+  const response = await fetch(`${API_BASE_URL}/api/v1/document-summary`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

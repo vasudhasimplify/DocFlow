@@ -282,7 +282,8 @@ export default function GuestAccessPage() {
             if (!shareData.guest_email && token) {
               console.log('🔍 Checking for approved checkout via backend API with token:', token);
               try {
-                const checkoutResponse = await fetch(`http://localhost:8000/api/share-link/check-approved-checkout/${token}`);
+                const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+                const checkoutResponse = await fetch(`${API_BASE_URL}/api/share-link/check-approved-checkout/${token}`);
                 if (checkoutResponse.ok) {
                   const checkoutData = await checkoutResponse.json();
                   console.log('📋 Checkout API response:', checkoutData);

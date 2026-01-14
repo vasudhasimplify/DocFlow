@@ -159,7 +159,8 @@ export function useDocumentLock({ documentId, autoRefresh = true }: UseDocumentL
     if (isGuestLock) {
       // Guest locks can be released by the document owner
       try {
-        const response = await fetch(`http://localhost:8000/api/v1/checkout-requests/release-guest-lock/${documentId}`, {
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+        const response = await fetch(`${API_BASE_URL}/api/v1/checkout-requests/release-guest-lock/${documentId}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
