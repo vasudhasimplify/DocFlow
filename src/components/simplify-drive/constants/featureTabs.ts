@@ -60,6 +60,7 @@ export const FEATURE_TABS: FeatureTab[] = [
 
   // Sharing & Collaboration
   { id: 'externalsharing', label: 'Guest Sharing', icon: Share2, description: 'Share with external users', badge: 'New', category: 'sharing' },
+  { id: 'signatures', label: 'E-Signatures', icon: PenTool, description: 'Electronic signature requests', category: 'sharing' },
   { id: 'sharing', label: 'Share Links', icon: Share2, description: 'Manage shared links & permissions', category: 'sharing' },
   { id: 'checkinout', label: 'Check In/Out', icon: Lock, description: 'Document locking & checkout', category: 'sharing' },
   { id: 'transfers', label: 'Transfers', icon: UserMinus, description: 'Ownership transfers', badge: 'New', category: 'sharing' },
