@@ -87,7 +87,7 @@ interface OnlyOfficeEditorProps {
   guestEmail?: string; // For guest checkout validation
 }
 
-const ONLYOFFICE_SERVER = 'http://localhost:8080';
+const ONLYOFFICE_SERVER = import.meta.env.VITE_EDITOR_URL || 'http://localhost:8080';
 // Callback URL that OnlyOffice (running in Docker) can reach
 // host.docker.internal resolves to the host machine from inside Docker
 const CALLBACK_URL = 'http://host.docker.internal:8000/api/editor/onlyoffice-callback';
