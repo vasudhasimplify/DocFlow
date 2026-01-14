@@ -425,6 +425,19 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     }
   }, [document?.id, isOpen, getDocumentRestrictions]);
 
+  // Debug logging for lock banner props
+  React.useEffect(() => {
+    if (isOpen && document?.id) {
+      console.log('🔒 DocumentLockBanner Debug:', {
+        lock,
+        isLockedByCurrentUser,
+        canEdit,
+        notificationsCount: (notifications || []).length,
+        documentId: document.id
+      });
+    }
+  }, [isOpen, document?.id, lock, isLockedByCurrentUser, canEdit, notifications]);
+
   const handleOpenInNewTab = () => {
     if (resolvedUrl) {
       globalThis.open(resolvedUrl, '_blank');
@@ -534,15 +547,6 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
         {/* Lock Status Banner */}
         <div className="px-6">
-          {React.useEffect(() => {
-            console.log('🔒 DocumentLockBanner Debug:', {
-              lock,
-              isLockedByCurrentUser,
-              canEdit,
-              notificationsCount: (notifications || []).length,
-              documentId: document.id
-            });
-          }, [lock, isLockedByCurrentUser, canEdit, notifications])}
           <DocumentLockBanner
             lock={lock}
             isLockedByCurrentUser={isLockedByCurrentUser}

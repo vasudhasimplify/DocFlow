@@ -102,14 +102,15 @@ class OAuthService {
 
         window.addEventListener('message', handleMessage);
 
-        // Check if popup was closed
-        const checkClosed = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(checkClosed);
-            window.removeEventListener('message', handleMessage);
-            reject(new Error('Authentication cancelled'));
+        // Auto-cleanup after 5 minutes (no popup.closed checks to avoid COOP errors)
+        setTimeout(() => {
+          window.removeEventListener('message', handleMessage);
+          try {
+            popup.close();
+          } catch (e) {
+            // Ignore any errors when closing popup
           }
-        }, 500);
+        }, 300000);
       } catch (error) {
         reject(error);
       }

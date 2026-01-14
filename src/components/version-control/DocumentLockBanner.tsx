@@ -70,32 +70,59 @@ export function DocumentLockBanner({
     lockData: lock
   });
 
-  if (!isLocked && activeNotifications.length === 0 && canEdit) {
-    // Show lock button when document is available
+  if (!isLocked && canEdit) {
+    // Show lock button when document is available (with or without notifications)
     return (
-      <div className="flex items-center justify-between p-3 bg-muted/50 border-b border-border">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Unlock className="h-4 w-4" />
-          <span>Document is available for editing</span>
+      <div className="border-b border-border">
+        <div className="flex items-center justify-between p-3 bg-muted/50">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Unlock className="h-4 w-4" />
+            <span>Document is available for editing</span>
+          </div>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onLock}
+                  disabled={isLoading}
+                >
+                  <Lock className="h-4 w-4 mr-2" />
+                  Lock for Editing
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Lock this document to prevent others from editing</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onLock}
-                disabled={isLoading}
-              >
-                <Lock className="h-4 w-4 mr-2" />
-                Lock for Editing
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Lock this document to prevent others from editing</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        
+        {/* Show notifications if any */}
+        {activeNotifications.length > 0 && (
+          <div className="p-3 bg-blue-50/50 dark:bg-blue-950/20 space-y-2">
+            <p className="text-xs font-medium text-blue-900 dark:text-blue-100">
+              {activeNotifications.length} pending notification{activeNotifications.length > 1 ? 's' : ''}
+            </p>
+            {activeNotifications.slice(0, 3).map(notification => (
+              <Alert key={notification.id} variant="default" className="py-2">
+                <Bell className="h-4 w-4" />
+                <AlertDescription className="text-xs flex items-center justify-between">
+                  <span>{notification.message}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6"
+                    onClick={() => onDismissNotification(notification.id)}
+                  >
+                    Dismiss
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -242,19 +269,8 @@ export function DocumentLockBanner({
     }
   };
 
-  // Fallback UI if no conditions match (debugging)
-  const fallbackUI = (
-    <div className="flex items-center justify-between p-3 bg-yellow-500/10 border-b border-border">
-      <div className="flex items-center gap-2 text-sm text-yellow-600">
-        <AlertTriangle className="h-4 w-4" />
-        <span>Lock status unavailable (Debug Mode)</span>
-      </div>
-    </div>
-  );
-
   return (
     <>
-      {fallbackUI}
       {/* Request Access Dialog */}
       <Dialog open={showRequestDialog} onOpenChange={setShowRequestDialog}>
         <DialogContent>
