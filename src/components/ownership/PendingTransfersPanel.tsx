@@ -48,16 +48,18 @@ export function PendingTransfersPanel() {
     try {
       setLoadingDocumentId(documentId);
       
-      // Try to fetch the document - use maybeSingle to avoid error when no rows
+      console.log('🔍 Attempting to load document from transfer history:', documentId);
+      
+      // Try to fetch the document with explicit fields - use maybeSingle to avoid error when no rows
       const { data: document, error } = await supabase
         .from('documents')
-        .select('*')
+        .select('id, file_name, file_type, storage_url, storage_path, user_id, created_at, updated_at')
         .eq('id', documentId)
         .maybeSingle();
 
       // Check if there was an actual error (not just no rows)
       if (error) {
-        console.error('Error fetching document:', error);
+        console.error('❌ Error fetching document:', error);
         toast({
           title: "Error loading document",
           description: error.message || "Unable to load the document.",
@@ -71,17 +73,24 @@ export function PendingTransfersPanel() {
         console.log('⚠️ Document not found or not accessible');
         toast({
           title: "Document unavailable",
-          description: "This document may have been deleted or you no longer have access to it.",
+          description: "This document may have been deleted or you no longer have access to it. You may need to apply the transfer document access policy to your database.",
           variant: "destructive",
         });
         return;
       }
 
-      console.log('📄 Document fetched for viewing:', document);
+      console.log('✅ Document fetched for viewing:', {
+        id: document.id,
+        file_name: document.file_name,
+        file_type: document.file_type,
+        has_storage_path: !!document.storage_path,
+        storage_path: document.storage_path
+      });
+      
       setSelectedDocument(document);
       setShowDocumentViewer(true);
     } catch (error) {
-      console.error('Error loading document:', error);
+      console.error('❌ Error loading document:', error);
       toast({
         title: "Error loading document",
         description: "An unexpected error occurred. Please try again.",

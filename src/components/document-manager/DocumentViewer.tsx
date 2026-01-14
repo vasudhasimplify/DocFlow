@@ -534,6 +534,15 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
         {/* Lock Status Banner */}
         <div className="px-6">
+          {React.useEffect(() => {
+            console.log('🔒 DocumentLockBanner Debug:', {
+              lock,
+              isLockedByCurrentUser,
+              canEdit,
+              notificationsCount: (notifications || []).length,
+              documentId: document.id
+            });
+          }, [lock, isLockedByCurrentUser, canEdit, notifications])}
           <DocumentLockBanner
             lock={lock}
             isLockedByCurrentUser={isLockedByCurrentUser}

@@ -26,7 +26,7 @@ export async function calculateAIScoresBatch(limit?: number): Promise<BatchScore
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  const url = new URL(`${API_BASE_URL}/quick-access/calculate-scores`);
+  const url = new URL(`${API_BASE_URL}/api/v1/quick-access/calculate-scores`);
   if (limit) url.searchParams.set('limit', limit.toString());
 
   const response = await fetch(url.toString(), {
@@ -51,7 +51,7 @@ export async function calculateAIScoresSync(limit: number = 50): Promise<BatchSc
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  const url = new URL(`${API_BASE_URL}/quick-access/calculate-scores/sync`);
+  const url = new URL(`${API_BASE_URL}/api/v1/quick-access/calculate-scores/sync`);
   url.searchParams.set('limit', limit.toString());
 
   const response = await fetch(url.toString(), {

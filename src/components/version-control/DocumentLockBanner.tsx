@@ -61,6 +61,15 @@ export function DocumentLockBanner({
   // Show notifications
   const activeNotifications = notifications.filter(n => !n.is_read);
 
+  // Debug logging
+  console.log('🔓 DocumentLockBanner Render:', {
+    isLocked,
+    canEdit,
+    activeNotificationsCount: activeNotifications.length,
+    documentId,
+    lockData: lock
+  });
+
   if (!isLocked && activeNotifications.length === 0 && canEdit) {
     // Show lock button when document is available
     return (
@@ -233,8 +242,19 @@ export function DocumentLockBanner({
     }
   };
 
+  // Fallback UI if no conditions match (debugging)
+  const fallbackUI = (
+    <div className="flex items-center justify-between p-3 bg-yellow-500/10 border-b border-border">
+      <div className="flex items-center gap-2 text-sm text-yellow-600">
+        <AlertTriangle className="h-4 w-4" />
+        <span>Lock status unavailable (Debug Mode)</span>
+      </div>
+    </div>
+  );
+
   return (
     <>
+      {fallbackUI}
       {/* Request Access Dialog */}
       <Dialog open={showRequestDialog} onOpenChange={setShowRequestDialog}>
         <DialogContent>

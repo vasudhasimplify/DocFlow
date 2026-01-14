@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { env } from '@/config/env';
 import { Loader2, FileText, Download, AlertCircle, Clock, Eye, ExternalLink, X, Lock, ArrowRight, Mail, Printer, MessageSquare, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -532,7 +533,7 @@ export default function GuestAccessPage() {
 
         // Also track via API if available
         if (share.id && !share.id.startsWith('link-')) {
-          fetch(`/api/shares/${share.id}/view`, { method: 'POST' }).catch(() => { });
+          fetch(`${env.apiBaseUrl}/api/shares/${share.id}/view`, { method: 'POST' }).catch(() => { });
         }
 
         // Send access notification if enabled
@@ -620,7 +621,7 @@ export default function GuestAccessPage() {
 
       // Also track via API if available
       if (share.id && !share.id.startsWith('link-')) {
-        fetch(`/api/shares/${share.id}/view`, { method: 'POST' }).catch(() => { });
+        fetch(`${env.apiBaseUrl}/api/shares/${share.id}/view`, { method: 'POST' }).catch(() => { });
       }
 
       // Send access notification if enabled
@@ -733,7 +734,7 @@ export default function GuestAccessPage() {
     try {
       console.log('🔍 Fetching document via backend API with token:', token);
 
-      const response = await fetch(`/api/guest/document/${token}`);
+      const response = await fetch(`${env.apiBaseUrl}/api/guest/document/${token}`);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -771,7 +772,7 @@ export default function GuestAccessPage() {
     // This ensures share links work across all browsers (not just the creator's browser)
     try {
       console.log('🔍 Fetching document via share-link backend API with token:', token);
-      const response = await fetch(`/api/share-link/document/${token}`);
+      const response = await fetch(`${env.apiBaseUrl}/api/share-link/document/${token}`);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -816,7 +817,7 @@ export default function GuestAccessPage() {
         setDocumentUrl(data.signed_url);
         // Track view logic (simplified for merge)
         try {
-          await fetch(`/api/share-link/document/${token}/view`, { method: 'POST' });
+          await fetch(`${env.apiBaseUrl}/api/share-link/document/${token}/view`, { method: 'POST' });
         } catch (e) { }
       } else {
         setError('Failed to generate document URL');
@@ -890,7 +891,7 @@ export default function GuestAccessPage() {
       if (docData.storage_path) {
         try {
           // Use backend API to generate signed URL for better RLS handling
-          const signedUrlResponse = await fetch(`/api/guest/signed-url`, {
+          const signedUrlResponse = await fetch(`${env.apiBaseUrl}/api/guest/signed-url`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
