@@ -289,7 +289,7 @@ async def list_workflows(
         logger.error(f"Error listing workflows: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def create_workflow(
     workflow: WorkflowCreate,
     request: Request,

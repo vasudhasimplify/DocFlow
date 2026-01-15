@@ -5,9 +5,13 @@
 
 import { Workflow, WorkflowInstance, EscalationRule, WorkflowStats } from '@/types/workflow';
 import { supabase } from '@/integrations/supabase/client';
-import { env } from '@/config/env';
 
-const API_BASE = env.fastApiUrl;
+// Use VITE_FAST_API_URL (matches Coolify env), fallback to other backend URLs
+const API_BASE = import.meta.env.VITE_FAST_API_URL || 
+                 import.meta.env.VITE_API_BASE_URL || 
+                 import.meta.env.VITE_API_URL ||
+                 import.meta.env.VITE_BACKEND_URL || 
+                 'http://localhost:8000';
 
 export class WorkflowApiError extends Error {
   constructor(message: string, public status?: number) {
