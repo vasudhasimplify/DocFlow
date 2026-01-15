@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
 from typing import Dict, Any, Optional
 import logging
@@ -142,8 +143,21 @@ else:
 app = FastAPI(
     title="Document Analysis API",
     description="Smart Document Processing with AI-powered template matching",
-    version="1.0.0"
+    version="1.0.0",
+    redirect_slashes=False  # Disable automatic trailing slash redirects
 )
+
+# Middleware to handle proxy headers and ensure HTTPS redirects preserve protocol
+class ProxyHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Check if request came through a proxy with HTTPS
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").lower()
+        if forwarded_proto == "https":
+            # Modify the scope to indicate HTTPS
+            request.scope["scheme"] = "https"
+        return await call_next(request)
+
+app.add_middleware(ProxyHeadersMiddleware)
 
 # CORS middleware
 app.add_middleware(
