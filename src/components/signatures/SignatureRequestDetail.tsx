@@ -89,13 +89,11 @@ export const SignatureRequestDetail: React.FC<SignatureRequestDetailProps> = ({
   };
 
   // Generate the correct document URL for viewing
+  // Always use backend preview endpoint to handle signed URLs and avoid CORS issues
   const getDocumentViewUrl = (docUrl: string | null | undefined) => {
     if (!docUrl) return null;
-    if (docUrl.startsWith('storage://')) {
-      // Use the backend preview endpoint for storage URLs
-      return `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/signatures/preview-document/${localRequest.id}`;
-    }
-    return docUrl;
+    // Always route through backend to handle signed URL generation and CORS
+    return `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/signatures/preview-document/${localRequest.id}`;
   };
 
   useEffect(() => {

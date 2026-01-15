@@ -505,7 +505,8 @@ function SharedWithMeList() {
           return;
         }
 
-        const response = await fetch('/api/shares/shared-with-me', {
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const response = await fetch(`${API_BASE_URL}/api/shares/shared-with-me`, {
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',

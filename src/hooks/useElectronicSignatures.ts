@@ -13,6 +13,9 @@ import type {
   SignatureType,
 } from '@/types/signature';
 
+// Get backend URL from environment
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 export const useElectronicSignatures = () => {
   const { toast } = useToast();
   const [requests, setRequests] = useState<SignatureRequest[]>([]);
@@ -307,7 +310,7 @@ export const useElectronicSignatures = () => {
       // Send emails to all signers
       try {
         console.log('📧 Sending emails for request:', requestId);
-        const response = await fetch('/api/signatures/send-emails', {
+        const response = await fetch(`${API_BASE_URL}/api/signatures/send-emails`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ request_id: requestId }),
@@ -449,7 +452,7 @@ export const useElectronicSignatures = () => {
 
       // Check if it's this signer's turn (for sequential signing)
       try {
-        const turnCheckResponse = await fetch('/api/signatures/check-signer-turn', {
+        const turnCheckResponse = await fetch(`${API_BASE_URL}/api/signatures/check-signer-turn`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -540,7 +543,7 @@ export const useElectronicSignatures = () => {
         // Not all signed - notify next signer for sequential signing
         try {
           console.log('📧 Notifying next signer in sequence...');
-          const notifyResponse = await fetch('/api/signatures/notify-next-signer', {
+          const notifyResponse = await fetch(`${API_BASE_URL}/api/signatures/notify-next-signer`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ request_id: requestId }),

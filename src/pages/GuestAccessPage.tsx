@@ -288,7 +288,7 @@ export default function GuestAccessPage() {
                 if (checkoutResponse.ok) {
                   const checkoutData = await checkoutResponse.json();
                   console.log('📋 Checkout API response:', checkoutData);
-                  
+
                   if (checkoutData.has_approved_checkout && checkoutData.lock_active) {
                     console.log('✅ Found active lock! Granting edit access');
                     hasBypassAccess = true;
@@ -661,7 +661,8 @@ export default function GuestAccessPage() {
       const deviceType = detectDeviceType();
       console.log(`📊 Logging access to backend: ${deviceType} - ${action}`);
 
-      await fetch('/api/shares/log-access-public', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      await fetch(`${API_BASE_URL}/api/shares/log-access-public`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -716,7 +717,8 @@ export default function GuestAccessPage() {
         owner_id: ownerId // Pass owner_id for local share links (reusing from above)
       };
 
-      await fetch('/api/shares/notify-access', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      await fetch(`${API_BASE_URL}/api/shares/notify-access`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(notifyPayload)
@@ -1682,8 +1684,8 @@ export default function GuestAccessPage() {
               <Eye className="h-4 w-4 mr-2" />
               View Document
             </Button>
-            {/* Edit button for edit permission with editable file types */}
-            {canEdit && document && isOnlyOfficeEditable(document.file_name, document.file_type) && (
+            {/* Edit button - only show if NO Open in Editor button (avoid duplicates) */}
+            {canEdit && document && isOnlyOfficeEditable(document.file_name, document.file_type) && !(originalPermission === 'edit' || hasApprovedCheckout) && (
               <Button
                 onClick={() => {
                   setShowViewer(false);

@@ -29,7 +29,8 @@ export function useShareStats() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
 
-      const response = await fetch('/api/shares/stats', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/shares/stats`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${session.access_token}`

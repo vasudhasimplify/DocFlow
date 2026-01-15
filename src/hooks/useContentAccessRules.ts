@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+// Get backend URL from environment
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 export interface ContentAccessRule {
   id: string;
   user_id: string;
@@ -75,7 +78,7 @@ export function useContentAccessRules() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) return;
 
-      const response = await fetch('/api/rules/', {
+      const response = await fetch(`${API_BASE_URL}/api/rules/`, {
         headers: {
           'Authorization': `Bearer ${session.access_token}`
         }
@@ -100,7 +103,7 @@ export function useContentAccessRules() {
       // Extract document_ids but don't send to backend
       const { document_ids, ...ruleParams } = params;
 
-      const response = await fetch('/api/rules/', {
+      const response = await fetch(`${API_BASE_URL}/api/rules/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -232,7 +235,7 @@ export function useContentAccessRules() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not authenticated');
 
-      const response = await fetch(`/api/rules/${ruleId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/rules/${ruleId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -263,7 +266,7 @@ export function useContentAccessRules() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not authenticated');
 
-      const response = await fetch(`/api/rules/${ruleId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/rules/${ruleId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${session.access_token}`
@@ -292,7 +295,7 @@ export function useContentAccessRules() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Not authenticated');
 
-      const response = await fetch(`/api/rules/${ruleId}/toggle`, {
+      const response = await fetch(`${API_BASE_URL}/api/rules/${ruleId}/toggle`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -486,7 +489,7 @@ export function useContentAccessRules() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
-        const response = await fetch('/api/rules/', {
+        const response = await fetch(`${API_BASE_URL}/api/rules/`, {
           headers: {
             'Authorization': `Bearer ${session.access_token}`
           }
@@ -618,7 +621,7 @@ export function useContentAccessRules() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) return;
 
-      const response = await fetch('/api/rules/stats', {
+      const response = await fetch(`${API_BASE_URL}/api/rules/stats`, {
         headers: {
           'Authorization': `Bearer ${session.access_token}`
         }

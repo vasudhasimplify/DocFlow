@@ -346,7 +346,8 @@ export function useExternalSharing() {
         return;
       }
 
-      const response = await fetch(`/api/shares/${shareId}/resend-invitation`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/shares/${shareId}/resend-invitation`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

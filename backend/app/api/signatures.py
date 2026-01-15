@@ -378,6 +378,7 @@ async def preview_document(request_id: str):
             parts = path.split('/', 1)
             if len(parts) == 2:
                 bucket, file_path = parts
+                print(f"📁 Creating signed URL for storage:// - bucket={bucket}, path={file_path}")
                 signed_response = get_supabase().storage.from_(bucket).create_signed_url(
                     file_path, 
                     3600  # 1 hour expiry
@@ -385,7 +386,29 @@ async def preview_document(request_id: str):
                 if signed_response.get('signedURL'):
                     document_url = signed_response['signedURL']
                 else:
+                    print(f"❌ Failed to create signed URL: {signed_response}")
                     raise HTTPException(status_code=500, detail="Failed to create signed URL")
+        
+        # Handle Supabase public URLs - create signed URL for proper access
+        elif '/storage/v1/object/public/' in document_url:
+            try:
+                # Extract bucket and path from public URL
+                public_idx = document_url.index('/storage/v1/object/public/') + len('/storage/v1/object/public/')
+                path_part = document_url[public_idx:].split('?')[0]  # Remove query params
+                parts = path_part.split('/', 1)
+                if len(parts) == 2:
+                    bucket, file_path = parts
+                    print(f"📁 Creating signed URL for public URL - bucket={bucket}, path={file_path}")
+                    signed_response = get_supabase().storage.from_(bucket).create_signed_url(
+                        file_path,
+                        3600  # 1 hour expiry
+                    )
+                    if signed_response.get('signedURL'):
+                        document_url = signed_response['signedURL']
+                    else:
+                        print(f"❌ Failed to create signed URL: {signed_response}")
+            except Exception as e:
+                print(f"⚠️ Failed to parse public URL, using original: {e}")
         
         # Download the document
         async with httpx.AsyncClient() as client:

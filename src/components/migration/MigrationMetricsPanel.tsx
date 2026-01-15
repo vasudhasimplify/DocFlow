@@ -56,7 +56,8 @@ export function MigrationMetricsPanel({ job, metrics, auditLogs }: MigrationMetr
         throw new Error('Not authenticated');
       }
 
-      const response = await fetch(`/api/migration/generate-summary?user_id=${userData.user.id}`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/migration/generate-summary?user_id=${userData.user.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ job_id: job.id })

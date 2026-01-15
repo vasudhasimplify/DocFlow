@@ -8,6 +8,9 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, FileText, AlertCircle, PenTool } from 'lucide-react';
 
+// Get backend URL from environment
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 export const SigningPage: React.FC = () => {
     const { token } = useParams<{ token: string }>();
     const navigate = useNavigate();
@@ -47,7 +50,7 @@ export const SigningPage: React.FC = () => {
 
             // Use backend API to verify token (bypasses RLS for cross-browser access)
             console.log('🔐 Verifying signature token via backend API:', token);
-            const response = await fetch(`/api/signatures/verify-token/${token}`);
+            const response = await fetch(`${API_BASE_URL}/api/signatures/verify-token/${token}`);
 
             if (!response.ok) {
                 const errorData = await response.json();

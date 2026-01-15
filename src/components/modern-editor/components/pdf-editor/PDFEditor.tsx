@@ -102,7 +102,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
     historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
     historyRef.current.push(newState);
     historyIndexRef.current = historyRef.current.length - 1;
-    
+
     setCanUndo(historyIndexRef.current > 0);
     setCanRedo(false);
   }, []);
@@ -110,7 +110,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
   // Helper: Add text at position
   const addTextAtPosition = useCallback((canvas: fabric.Canvas, x: number, y: number) => {
     console.log('[PDFEditor] Adding text at position:', x, y);
-    
+
     // Create text with empty initial content
     const text = new fabric.IText('', {
       left: x,
@@ -134,7 +134,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
     canvas.add(text);
     canvas.setActiveObject(text);
     canvas.renderAll();
-    
+
     // Use requestAnimationFrame to ensure canvas is ready before entering edit mode
     requestAnimationFrame(() => {
       text.enterEditing();
@@ -143,7 +143,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
       text.setSelectionEnd(0);
       canvas.renderAll();
     });
-    
+
     saveToHistory(canvas);
   }, [saveToHistory]);
 
@@ -290,13 +290,13 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
     // Mouse up - finish drawing
     canvas.on('mouse:up', () => {
       const tool = currentToolRef.current;
-      
+
       if (isDrawingRef.current && tempShapeRef.current) {
-        tempShapeRef.current.set({ 
+        tempShapeRef.current.set({
           selectable: true,
           evented: true,
         });
-        
+
         // For arrow, add arrowhead
         if (tool === 'arrow') {
           const line = tempShapeRef.current as fabric.Line;
@@ -304,12 +304,12 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
           const y1 = line.y1 || 0;
           const x2 = line.x2 || 0;
           const y2 = line.y2 || 0;
-          
+
           // Only add arrow if line has some length
           if (Math.abs(x2 - x1) > 5 || Math.abs(y2 - y1) > 5) {
             const angle = Math.atan2(y2 - y1, x2 - x1);
             const headLength = 15;
-            
+
             const arrowHead = new fabric.Triangle({
               left: x2,
               top: y2,
@@ -321,11 +321,11 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
               originY: 'center',
               selectable: true,
             });
-            
+
             canvas.add(arrowHead);
           }
         }
-        
+
         canvas.renderAll();
         saveToHistory(canvas);
       }
@@ -416,7 +416,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
   // Render a single page
   const renderPage = useCallback(async (pageNum: number, pdfDoc: pdfjs.PDFDocumentProxy) => {
     console.log(`[PDFEditor] Rendering page ${pageNum}`);
-    
+
     const page = await pdfDoc.getPage(pageNum);
     const viewport = page.getViewport({ scale: zoom * PDF_BASE_SCALE });
 
@@ -525,7 +525,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
 
     // Set up events
     setupCanvasEvents(fabricCanvas, pageNum);
-    
+
     console.log(`[PDFEditor] Page ${pageNum} rendered and events set up`);
   }, [zoom, setupCanvasEvents]);
 
@@ -547,7 +547,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
       if (!response.ok) {
         throw new Error(`Failed to fetch PDF: ${response.status}`);
       }
-      
+
       const arrayBuffer = await response.arrayBuffer();
       const pdfBytes = new Uint8Array(arrayBuffer);
       pdfBytesRef.current = pdfBytes;
@@ -604,14 +604,14 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
 
     historyIndexRef.current--;
     const state = historyRef.current[historyIndexRef.current];
-    
+
     const pageCanvas = pageCanvasesRef.current.find(pc => pc.pageNum === state.pageNum);
     if (pageCanvas) {
       pageCanvas.fabricCanvas.loadFromJSON(JSON.parse(state.json), () => {
         pageCanvas.fabricCanvas.renderAll();
       });
     }
-    
+
     setCanUndo(historyIndexRef.current > 0);
     setCanRedo(historyIndexRef.current < historyRef.current.length - 1);
   }, []);
@@ -622,14 +622,14 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
 
     historyIndexRef.current++;
     const state = historyRef.current[historyIndexRef.current];
-    
+
     const pageCanvas = pageCanvasesRef.current.find(pc => pc.pageNum === state.pageNum);
     if (pageCanvas) {
       pageCanvas.fabricCanvas.loadFromJSON(JSON.parse(state.json), () => {
         pageCanvas.fabricCanvas.renderAll();
       });
     }
-    
+
     setCanUndo(historyIndexRef.current > 0);
     setCanRedo(historyIndexRef.current < historyRef.current.length - 1);
   }, []);
@@ -655,7 +655,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
-      
+
       // Add image to the first page
       const firstPageCanvas = pageCanvasesRef.current[0];
       if (firstPageCanvas) {
@@ -663,19 +663,19 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
           // Scale image to fit within page
           const maxWidth = firstPageCanvas.fabricCanvas.width! * 0.5;
           const maxHeight = firstPageCanvas.fabricCanvas.height! * 0.5;
-          
+
           const scale = Math.min(
             maxWidth / (img.width || 1),
             maxHeight / (img.height || 1)
           );
-          
+
           img.scale(scale);
           img.set({
             left: 50,
             top: 50,
             selectable: true,
           });
-          
+
           firstPageCanvas.fabricCanvas.add(img);
           firstPageCanvas.fabricCanvas.setActiveObject(img);
           firstPageCanvas.fabricCanvas.renderAll();
@@ -684,7 +684,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
       }
     };
     reader.readAsDataURL(file);
-    
+
     // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -716,7 +716,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
           return;
         }
       }
-      
+
       const pages = pdfDoc.getPages();
       const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -732,13 +732,13 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
 
         for (const obj of objects) {
           const scaleRatio = 1 / scale;
-          
+
           if (obj.type === 'i-text' || obj.type === 'text' || obj.type === 'textbox') {
             const textObj = obj as fabric.IText;
             const text = textObj.text || '';
             const x = (textObj.left || 0) * scaleRatio;
             const y = originalHeight - ((textObj.top || 0) * scaleRatio) - ((textObj.fontSize || 16) * scaleRatio);
-            
+
             const color = textObj.fill as string || '#000000';
             let r = 0, g = 0, b = 0;
             if (color.startsWith('#') && color.length >= 7) {
@@ -760,7 +760,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
             const y = originalHeight - ((rect.top || 0) * scaleRatio) - ((rect.height || 0) * scaleRatio);
             const width = (rect.width || 0) * scaleRatio;
             const height = (rect.height || 0) * scaleRatio;
-            
+
             const strokeColor = rect.stroke as string || '#000000';
             let sr = 0, sg = 0, sb = 0;
             if (strokeColor.startsWith('#') && strokeColor.length >= 7) {
@@ -781,7 +781,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
             const ellipse = obj as fabric.Ellipse;
             const cx = ((ellipse.left || 0) + (ellipse.rx || 0)) * scaleRatio;
             const cy = originalHeight - (((ellipse.top || 0) + (ellipse.ry || 0)) * scaleRatio);
-            
+
             const strokeColor = ellipse.stroke as string || '#000000';
             let sr = 0, sg = 0, sb = 0;
             if (strokeColor.startsWith('#') && strokeColor.length >= 7) {
@@ -804,7 +804,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
             const y1 = originalHeight - ((line.y1 || 0) * scaleRatio);
             const x2 = (line.x2 || 0) * scaleRatio;
             const y2 = originalHeight - ((line.y2 || 0) * scaleRatio);
-            
+
             const strokeColor = line.stroke as string || '#000000';
             let sr = 0, sg = 0, sb = 0;
             if (strokeColor.startsWith('#') && strokeColor.length >= 7) {
@@ -824,7 +824,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
             const triangle = obj as fabric.Triangle;
             const cx = (triangle.left || 0) * scaleRatio;
             const cy = originalHeight - ((triangle.top || 0) * scaleRatio);
-            
+
             const fillColor = triangle.fill as string || '#000000';
             let fr = 0, fg = 0, fb = 0;
             if (fillColor.startsWith('#') && fillColor.length >= 7) {
@@ -858,21 +858,21 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
             let lastX = 0, lastY = 0;
             for (let i = 0; i < pathData.length; i++) {
               const cmd = pathData[i];
-              
+
               if (cmd[0] === 'M') {
                 lastX = ((cmd[1] as number) + (path.left || 0)) * scaleRatio;
                 lastY = originalHeight - (((cmd[2] as number) + (path.top || 0)) * scaleRatio);
               } else if (cmd[0] === 'L' || cmd[0] === 'Q') {
                 const x2 = ((cmd[1] as number) + (path.left || 0)) * scaleRatio;
                 const y2 = originalHeight - (((cmd[2] as number) + (path.top || 0)) * scaleRatio);
-                
+
                 page.drawLine({
                   start: { x: lastX, y: lastY },
                   end: { x: x2, y: y2 },
                   color: rgb(sr, sg, sb),
                   thickness: (path.strokeWidth || 1) * scaleRatio,
                 });
-                
+
                 lastX = x2;
                 lastY = y2;
               }
@@ -884,7 +884,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
       // Save PDF
       const savedPdfBytes = await pdfDoc.save();
       console.log('[PDFEditor] PDF saved, bytes:', savedPdfBytes.length);
-      
+
       // Update the stored bytes
       pdfBytesRef.current = savedPdfBytes;
       pdfLibDocRef.current = pdfDoc;
@@ -904,7 +904,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
   const handleDownload = useCallback(async () => {
     try {
       setSaving(true);
-      
+
       if (!pdfBytesRef.current) {
         console.error('[PDFEditor] No PDF to download');
         setSaving(false);
@@ -913,13 +913,13 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
 
       // First save with annotations
       await handleSave();
-      
+
       // Then download
       if (pdfBytesRef.current) {
         const blob = new Blob([pdfBytesRef.current], { type: 'application/pdf' });
         saveAs(blob, 'edited-document.pdf');
       }
-      
+
       setSaving(false);
     } catch (err) {
       console.error('[PDFEditor] Error downloading PDF:', err);
@@ -939,7 +939,8 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
       console.log('[PDFEditor] Converting PDF to DOCX...');
 
       // Call backend API to convert PDF to DOCX
-      const response = await fetch('/api/editor/pdf-to-docx', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/editor/pdf-to-docx`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -957,10 +958,10 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
 
       // Get the DOCX blob
       const docxBlob = await response.blob();
-      
+
       // Create URL for the DOCX
       const docxUrl = URL.createObjectURL(docxBlob);
-      
+
       // Open in Word editor by sending message to parent
       if (window.parent !== window) {
         window.parent.postMessage({
@@ -990,8 +991,9 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
 
     try {
       setConvertingToDocx(true);
-      
-      const response = await fetch('/api/editor/pdf-to-docx', {
+
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/editor/pdf-to-docx`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1009,7 +1011,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
 
       const docxBlob = await response.blob();
       saveAs(docxBlob, documentName?.replace('.pdf', '.docx') || 'document.docx');
-      
+
       setConvertingToDocx(false);
     } catch (err) {
       console.error('[PDFEditor] Error downloading as DOCX:', err);
@@ -1057,7 +1059,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
         try {
           console.log('[PDFEditor] Loading PDF by documentId:', documentId);
           const { supabase } = await import('@/integrations/supabase/client');
-          
+
           const { data: doc, error: docError } = await supabase
             .from('documents')
             .select('storage_path, original_url')
@@ -1110,7 +1112,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
     if (pdfUrl) {
       loadPDF();
     }
-    
+
     // Cleanup on unmount
     return () => {
       pageCanvasesRef.current.forEach(pc => pc.fabricCanvas.dispose());
@@ -1141,7 +1143,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
             break;
         }
       }
-      
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         // Only delete if not editing text
         const activeElement = document.activeElement;
@@ -1151,13 +1153,13 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
             const activeObj = fabricCanvas.getActiveObject();
             return activeObj && (activeObj as fabric.IText).isEditing;
           });
-          
+
           if (!isEditingText) {
             handleDelete();
           }
         }
       }
-      
+
       // Tool shortcuts
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
         switch (e.key.toLowerCase()) {
@@ -1235,7 +1237,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
         showColorPicker={showColorPicker}
         setShowColorPicker={setShowColorPicker}
       />
-      
+
       {/* Hidden file input for image upload */}
       <input
         ref={fileInputRef}
@@ -1269,7 +1271,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
                 <div className="text-sm text-gray-500">Keep the original format with annotations</div>
               </div>
             </Button>
-            
+
             <Button
               variant="outline"
               className="justify-start h-auto p-4"
@@ -1285,7 +1287,7 @@ export const PDFEditor: React.FC<PDFEditorProps> = ({
                 <div className="text-sm text-gray-500">Convert to Word format for easy editing</div>
               </div>
             </Button>
-            
+
             <Button
               variant="outline"
               className="justify-start h-auto p-4"
