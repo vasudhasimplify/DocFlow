@@ -6,23 +6,24 @@
 import { Workflow, WorkflowInstance, EscalationRule, WorkflowStats } from '@/types/workflow';
 import { supabase } from '@/integrations/supabase/client';
 
-// Get API base URL with automatic HTTPS enforcement for production
+// Hardcode HTTPS backend URL for production - this WILL work
+const PRODUCTION_API = 'https://docflow-backend.simplifyaipro.com';
+const DEV_API = 'http://localhost:8000';
+
+// Get API base URL - called at request time to ensure window is available
 function getApiBase(): string {
-  const envUrl = import.meta.env.VITE_FAST_API_URL || 
-                 import.meta.env.VITE_API_BASE_URL || 
-                 import.meta.env.VITE_API_URL ||
-                 import.meta.env.VITE_BACKEND_URL || 
-                 'http://localhost:8000';
-  
-  // If we're on HTTPS, ensure API URL also uses HTTPS to prevent mixed content errors
+  // In browser with HTTPS - always use HTTPS backend
   if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
-    return envUrl.replace(/^http:/, 'https:');
+    return PRODUCTION_API;
   }
   
-  return envUrl;
+  // Try env variables, fallback to localhost for dev
+  return import.meta.env.VITE_FAST_API_URL || 
+         import.meta.env.VITE_API_BASE_URL || 
+         import.meta.env.VITE_API_URL ||
+         import.meta.env.VITE_BACKEND_URL || 
+         DEV_API;
 }
-
-const API_BASE = getApiBase();
 
 export class WorkflowApiError extends Error {
   constructor(message: string, public status?: number) {
@@ -77,7 +78,7 @@ export const workflowApi = {
     if (filters?.category) params.append('category', filters.category);
     if (filters?.is_template !== undefined) params.append('is_template', String(filters.is_template));
 
-    const url = `${API_BASE}/api/workflows/${params.toString() ? `?${params}` : ''}`;
+    const url = `${getApiBase()}/api/workflows/${params.toString() ? `?${params}` : ''}`;
     const response = await fetch(url, {
       headers: await getAuthHeaders(),
     });
@@ -85,7 +86,7 @@ export const workflowApi = {
   },
 
   async getWorkflow(id: string): Promise<Workflow> {
-    const response = await fetch(`${API_BASE}/api/workflows/${id}`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/${id}`, {
       headers: await getAuthHeaders(),
     });
     const result = await handleResponse<{ data: Workflow }>(response);
@@ -94,7 +95,7 @@ export const workflowApi = {
   },
 
   async createWorkflow(workflow: Partial<Workflow>): Promise<Workflow> {
-    const response = await fetch(`${API_BASE}/api/workflows`, {
+    const response = await fetch(`${getApiBase()}/api/workflows`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(workflow),
@@ -103,7 +104,7 @@ export const workflowApi = {
   },
 
   async updateWorkflow(id: string, updates: Partial<Workflow>): Promise<Workflow> {
-    const response = await fetch(`${API_BASE}/api/workflows/${id}`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/${id}`, {
       method: 'PATCH',
       headers: await getAuthHeaders(),
       body: JSON.stringify(updates),
@@ -112,7 +113,7 @@ export const workflowApi = {
   },
 
   async deleteWorkflow(id: string): Promise<{ message: string }> {
-    const response = await fetch(`${API_BASE}/api/workflows/${id}`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/${id}`, {
       method: 'DELETE',
       headers: await getAuthHeaders(),
     });
@@ -129,7 +130,7 @@ export const workflowApi = {
     extracted_data: Record<string, any> | null;
     document_type?: string;
   }> {
-    const response = await fetch(`${API_BASE}/api/workflows/extract-fields/${documentId}`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/extract-fields/${documentId}`, {
       method: 'POST',
       headers: await getAuthHeaders(),
     });
@@ -144,7 +145,7 @@ export const workflowApi = {
     if (filters?.status) params.append('status', filters.status);
     if (filters?.workflow_id) params.append('workflow_id', filters.workflow_id);
 
-    const url = `${API_BASE}/api/workflows/instances${params.toString() ? `?${params}` : ''}`;
+    const url = `${getApiBase()}/api/workflows/instances${params.toString() ? `?${params}` : ''}`;
     const response = await fetch(url, {
       headers: await getAuthHeaders(),
     });
@@ -152,7 +153,7 @@ export const workflowApi = {
   },
 
   async getInstance(id: string): Promise<WorkflowInstance> {
-    const response = await fetch(`${API_BASE}/api/workflows/instances/${id}`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/instances/${id}`, {
       headers: await getAuthHeaders(),
     });
     return handleResponse<WorkflowInstance>(response);
@@ -162,7 +163,7 @@ export const workflowApi = {
     workflowId: string,
     data: { document_id?: string; priority?: string; metadata?: any }
   ): Promise<WorkflowInstance> {
-    const response = await fetch(`${API_BASE}/api/workflows/${workflowId}/instances`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/${workflowId}/instances`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(data),
@@ -195,7 +196,7 @@ export const workflowApi = {
     data: { comments?: string; attachments?: any[] }
   ): Promise<WorkflowInstance> {
     const response = await fetch(
-      `${API_BASE}/api/workflows/instances/${instanceId}/steps/${stepId}/approve`,
+      `${getApiBase()}/api/workflows/instances/${instanceId}/steps/${stepId}/approve`,
       {
         method: 'POST',
         headers: await getAuthHeaders(),
@@ -211,7 +212,7 @@ export const workflowApi = {
     data: { comments?: string; attachments?: any[] }
   ): Promise<WorkflowInstance> {
     const response = await fetch(
-      `${API_BASE}/api/workflows/instances/${instanceId}/steps/${stepId}/reject`,
+      `${getApiBase()}/api/workflows/instances/${instanceId}/steps/${stepId}/reject`,
       {
         method: 'POST',
         headers: await getAuthHeaders(),
@@ -223,7 +224,7 @@ export const workflowApi = {
 
   async deleteInstance(instanceId: string): Promise<{ message: string }> {
     const response = await fetch(
-      `${API_BASE}/api/workflows/instances/${instanceId}`,
+      `${getApiBase()}/api/workflows/instances/${instanceId}`,
       {
         method: 'DELETE',
         headers: await getAuthHeaders(),
@@ -237,7 +238,7 @@ export const workflowApi = {
   // ============================================================================
 
   async getStats(): Promise<WorkflowStats> {
-    const response = await fetch(`${API_BASE}/api/workflows/stats`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/stats`, {
       headers: await getAuthHeaders(),
     });
     return handleResponse<WorkflowStats>(response);
@@ -249,14 +250,14 @@ export const workflowApi = {
 
   async listEscalationRules(workflowId?: string): Promise<EscalationRule[]> {
     const params = workflowId ? `?workflow_id=${workflowId}` : '';
-    const response = await fetch(`${API_BASE}/api/workflows/escalation-rules${params}`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/escalation-rules${params}`, {
       headers: await getAuthHeaders(),
     });
     return handleResponse<EscalationRule[]>(response);
   },
 
   async createEscalationRule(rule: Partial<EscalationRule>): Promise<EscalationRule> {
-    const response = await fetch(`${API_BASE}/api/workflows/escalation-rules`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/escalation-rules`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(rule),
@@ -265,7 +266,7 @@ export const workflowApi = {
   },
 
   async updateEscalationRule(ruleId: string, updates: Partial<EscalationRule>): Promise<EscalationRule> {
-    const response = await fetch(`${API_BASE}/api/workflows/escalation-rules/${ruleId}`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/escalation-rules/${ruleId}`, {
       method: 'PATCH',
       headers: await getAuthHeaders(),
       body: JSON.stringify(updates),
@@ -274,7 +275,7 @@ export const workflowApi = {
   },
 
   async deleteEscalationRule(ruleId: string): Promise<{ message: string }> {
-    const response = await fetch(`${API_BASE}/api/workflows/escalation-rules/${ruleId}`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/escalation-rules/${ruleId}`, {
       method: 'DELETE',
       headers: await getAuthHeaders(),
     });
@@ -287,7 +288,7 @@ export const workflowApi = {
     actions_executed: number;
     timestamp: string;
   }> {
-    const response = await fetch(`${API_BASE}/api/workflows/escalations/process`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/escalations/process`, {
       method: 'POST',
       headers: await getAuthHeaders(),
     });
@@ -350,7 +351,7 @@ export const workflowApi = {
     if (workflowId) {
       params.append('workflow_id', workflowId);
     }
-    const response = await fetch(`${API_BASE}/api/workflows/analytics?${params}`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/analytics?${params}`, {
       headers: await getAuthHeaders(),
     });
     return handleResponse(response);
@@ -373,7 +374,7 @@ export const workflowApi = {
     has_matching_workflow: boolean;
     message: string;
   }> {
-    const response = await fetch(`${API_BASE}/api/workflows/suggest`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/suggest`, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(data),
@@ -389,7 +390,7 @@ export const workflowApi = {
       priority?: string;
     }
   ): Promise<{ message: string; workflow: Workflow }> {
-    const response = await fetch(`${API_BASE}/api/workflows/${workflowId}/trigger-config`, {
+    const response = await fetch(`${getApiBase()}/api/workflows/${workflowId}/trigger-config`, {
       method: 'PATCH',
       headers: await getAuthHeaders(),
       body: JSON.stringify(triggerConfig),
@@ -405,7 +406,7 @@ export const workflowApi = {
     document_type: string | null;
   } | null> {
     try {
-      const response = await fetch(`${API_BASE}/api/workflows/suggestions/${documentId}`, {
+      const response = await fetch(`${getApiBase()}/api/workflows/suggestions/${documentId}`, {
         method: 'GET',
         headers: await getAuthHeaders(),
       });
