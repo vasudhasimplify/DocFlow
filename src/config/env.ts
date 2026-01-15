@@ -26,9 +26,9 @@ export function getEnvConfig(): EnvConfig {
   // Runtime detection: If in production and on HTTPS, auto-detect backend URL
   const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
   
-  // TEMPORARY: Use HTTP for backend until SSL is properly configured
+  // Use HTTPS for backend in production
   const defaultBackend = isProduction && isHttps 
-    ? 'http://docflow-backend.simplifyaipro.com'  // Temporarily use HTTP
+    ? 'https://docflow-backend.simplifyaipro.com'
     : 'http://localhost:8000';
 
   // Backend URLs
