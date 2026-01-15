@@ -26,32 +26,52 @@ export function getEnvConfig(): EnvConfig {
   // Runtime detection: If in production and on HTTPS, auto-detect backend URL
   const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
   
+  // Helper to enforce HTTPS when page is loaded over HTTPS (prevents mixed content)
+  const enforceHttps = (url: string): string => {
+    if (isHttps && url.startsWith('http:')) {
+      return url.replace(/^http:/, 'https:');
+    }
+    return url;
+  };
+  
   // Use HTTPS for backend in production
   const defaultBackend = isProduction && isHttps 
     ? 'https://docflow-backend.simplifyaipro.com'
     : 'http://localhost:8000';
 
-  // Backend URLs
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 
-                     import.meta.env.VITE_FASTAPI_URL || 
-                     import.meta.env.VITE_BACKEND_URL || 
-                     defaultBackend;
+  // Backend URLs - enforce HTTPS if page is HTTPS
+  const apiBaseUrl = enforceHttps(
+    import.meta.env.VITE_API_BASE_URL || 
+    import.meta.env.VITE_FAST_API_URL ||
+    import.meta.env.VITE_FASTAPI_URL || 
+    import.meta.env.VITE_BACKEND_URL || 
+    defaultBackend
+  );
   
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || 
-                     import.meta.env.VITE_API_BASE_URL || 
-                     defaultBackend;
+  const backendUrl = enforceHttps(
+    import.meta.env.VITE_BACKEND_URL || 
+    import.meta.env.VITE_API_BASE_URL || 
+    defaultBackend
+  );
   
-  const apiUrl = import.meta.env.VITE_API_URL || 
-                 import.meta.env.VITE_API_BASE_URL || 
-                 defaultBackend;
+  const apiUrl = enforceHttps(
+    import.meta.env.VITE_API_URL || 
+    import.meta.env.VITE_API_BASE_URL || 
+    defaultBackend
+  );
   
-  const fastApiUrl = import.meta.env.VITE_FASTAPI_URL || 
-                     import.meta.env.VITE_API_BASE_URL || 
-                     defaultBackend;
+  const fastApiUrl = enforceHttps(
+    import.meta.env.VITE_FAST_API_URL ||
+    import.meta.env.VITE_FASTAPI_URL || 
+    import.meta.env.VITE_API_BASE_URL || 
+    defaultBackend
+  );
   
-  const bulkApiUrl = import.meta.env.VITE_BULK_API_URL || 
-                     import.meta.env.VITE_API_BASE_URL || 
-                     defaultBackend;
+  const bulkApiUrl = enforceHttps(
+    import.meta.env.VITE_BULK_API_URL || 
+    import.meta.env.VITE_API_BASE_URL || 
+    defaultBackend
+  );
   
   const defaultWs = isProduction && isHttps 
     ? 'wss://docflow-backend.simplifyaipro.com'

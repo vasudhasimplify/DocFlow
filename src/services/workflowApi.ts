@@ -6,12 +6,23 @@
 import { Workflow, WorkflowInstance, EscalationRule, WorkflowStats } from '@/types/workflow';
 import { supabase } from '@/integrations/supabase/client';
 
-// Use VITE_FAST_API_URL (matches Coolify env), fallback to other backend URLs
-const API_BASE = import.meta.env.VITE_FAST_API_URL || 
+// Get API base URL with automatic HTTPS enforcement for production
+function getApiBase(): string {
+  const envUrl = import.meta.env.VITE_FAST_API_URL || 
                  import.meta.env.VITE_API_BASE_URL || 
                  import.meta.env.VITE_API_URL ||
                  import.meta.env.VITE_BACKEND_URL || 
                  'http://localhost:8000';
+  
+  // If we're on HTTPS, ensure API URL also uses HTTPS to prevent mixed content errors
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    return envUrl.replace(/^http:/, 'https:');
+  }
+  
+  return envUrl;
+}
+
+const API_BASE = getApiBase();
 
 export class WorkflowApiError extends Error {
   constructor(message: string, public status?: number) {
