@@ -98,7 +98,9 @@ export const workflowApi = {
   },
 
   async createWorkflow(workflow: Partial<Workflow>): Promise<Workflow> {
-    const response = await fetch(`${getApiBase()}/api/workflows`, {
+    const apiUrl = `${getApiBase()}/api/workflows`;
+    console.log('[WorkflowAPI] createWorkflow - Fetching URL:', apiUrl);
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: await getAuthHeaders(),
       body: JSON.stringify(workflow),
