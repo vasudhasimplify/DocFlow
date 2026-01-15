@@ -14,15 +14,18 @@ const DEV_API = 'http://localhost:8000';
 function getApiBase(): string {
   // In browser with HTTPS - always use HTTPS backend
   if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    console.log('[WorkflowAPI] Using PRODUCTION_API:', PRODUCTION_API);
     return PRODUCTION_API;
   }
   
   // Try env variables, fallback to localhost for dev
-  return import.meta.env.VITE_FAST_API_URL || 
+  const devUrl = import.meta.env.VITE_FAST_API_URL || 
          import.meta.env.VITE_API_BASE_URL || 
          import.meta.env.VITE_API_URL ||
          import.meta.env.VITE_BACKEND_URL || 
          DEV_API;
+  console.log('[WorkflowAPI] Using dev URL:', devUrl);
+  return devUrl;
 }
 
 export class WorkflowApiError extends Error {
