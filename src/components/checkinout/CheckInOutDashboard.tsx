@@ -23,13 +23,15 @@ import {
   Shield,
   Timer,
   Download,
-  Upload
+  Upload,
+  Inbox
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { PendingRequestsDialog } from './PendingRequestsDialog';
 
 interface CheckedOutDocument {
   id: string;
@@ -78,6 +80,7 @@ export const CheckInOutDashboard: React.FC = () => {
   });
   const [viewingDocument, setViewingDocument] = useState<{id: string, name: string} | null>(null);
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
+  const [showPendingRequests, setShowPendingRequests] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -661,10 +664,21 @@ export const CheckInOutDashboard: React.FC = () => {
                 Track your checkouts and documents you own that are checked out by others
               </CardDescription>
             </div>
-            <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setShowPendingRequests(true)}
+                className="flex items-center gap-2"
+              >
+                <Inbox className="h-4 w-4" />
+                Pending Requests
+              </Button>
+              <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -890,6 +904,12 @@ export const CheckInOutDashboard: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Pending Requests Dialog */}
+      <PendingRequestsDialog 
+        open={showPendingRequests} 
+        onOpenChange={setShowPendingRequests}
+      />
     </div>
   );
 };
