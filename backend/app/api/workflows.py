@@ -34,7 +34,7 @@ from app.services.target_system_integration import TargetSystemIntegration
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+router = APIRouter(prefix="/api/workflows", tags=["workflows"], redirect_slashes=False)
 
 # ============================================================================
 # PYDANTIC MODELS
@@ -260,7 +260,9 @@ async def extract_document_fields(
 # WORKFLOW DEFINITIONS ENDPOINTS
 # ============================================================================
 
-@router.get("/")
+# Handle both with and without trailing slash to prevent redirects
+@router.get("")
+@router.get("/", include_in_schema=False)
 async def list_workflows(
     status: Optional[str] = None,
     category: Optional[str] = None,
@@ -289,7 +291,9 @@ async def list_workflows(
         logger.error(f"Error listing workflows: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Handle both with and without trailing slash to prevent redirects
 @router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def create_workflow(
     workflow: WorkflowCreate,
     request: Request,
