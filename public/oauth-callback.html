@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>OAuth Callback</title>
+</head>
+<body>
+  <p>Authenticating...</p>
+  <script>
+    // Parse the hash fragment for implicit grant tokens
+    const hash = window.location.hash.substring(1);
+    const params = new URLSearchParams(hash);
+    
+    const accessToken = params.get('access_token');
+    const error = params.get('error');
+    const errorDescription = params.get('error_description');
+    
+    if (accessToken) {
+      // Success - send token to parent window
+      window.opener.postMessage({
+        type: 'oauth-success',
+        accessToken: accessToken,
+        expiresIn: params.get('expires_in')
+      }, window.location.origin);
+    } else if (error) {
+      // Error occurred
+      window.opener.postMessage({
+        type: 'oauth-error',
+        error: error,
+        errorDescription: errorDescription
+      }, window.location.origin);
+    }
+    
+    // Close this popup
+    window.close();
+  </script>
+</body>
+</html>
